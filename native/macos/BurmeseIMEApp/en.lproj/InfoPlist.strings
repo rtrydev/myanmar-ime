@@ -1,0 +1,5 @@
+/* Display names for input modes — read by TIS to populate System Settings and the menu bar */
+"com.myangler.inputmethod.burmese.Compose" = "Myanmar (Romanized)";
+"com.myangler.inputmethod.burmese.Roman"   = "Myanmar (Latin)";
+CFBundleDisplayName = "Burmese IME";
+CFBundleName        = "Burmese IME";

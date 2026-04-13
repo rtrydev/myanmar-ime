@@ -1,0 +1,11 @@
+**/.build
+**/.swiftpm
+.claude
+.codex-home
+**/.DS_Store
+
+# Xcode
+**/xcuserdata
+*.xcscmblueprint
+**/*.xcodeproj/project.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+**/DerivedData

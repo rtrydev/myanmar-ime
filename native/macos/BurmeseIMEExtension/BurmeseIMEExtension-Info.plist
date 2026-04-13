@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>Burmese IME</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Burmese</string>
+	<key>CFBundlePackageType</key>
+	<string>XPC!</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+	<key>NSPrincipalClass</key>
+	<string>BurmeseInputController</string>
+
+	<!-- InputMethodKit registration -->
+	<key>InputMethodConnectionName</key>
+	<string>com.myangler.inputmethod.burmese_Connection</string>
+	<key>InputMethodServerControllerClass</key>
+	<string>BurmeseInputController</string>
+	<key>InputMethodServerDelegateClass</key>
+	<string>BurmeseInputController</string>
+
+	<!-- Input source metadata consumed by TIS -->
+	<key>TISInputSourceID</key>
+	<string>com.myangler.inputmethod.burmese.extension</string>
+	<key>TISIntendedLanguage</key>
+	<string>my</string>
+	<key>tsInputMethodIconFileKey</key>
+	<string>BurmeseIMEIcon.tiff</string>
+	<key>tsInputMethodCharacterRepertoireKey</key>
+	<array>
+		<string>Mymr</string>
+		<string>Latn</string>
+	</array>
+
+	<!-- Input modes: Compose (က) and Roman (ABC) -->
+	<key>ComponentInputModeDict</key>
+	<dict>
+		<key>tsInputModeListKey</key>
+		<dict>
+			<key>com.myangler.inputmethod.burmese.extension.Compose</key>
+			<dict>
+				<key>TISInputSourceID</key>
+				<string>com.myangler.inputmethod.burmese.extension.Compose</string>
+				<key>TISIntendedLanguage</key>
+				<string>my</string>
+				<key>TISIconLabels</key>
+				<dict>
+					<key>Primary</key>
+					<string>က</string>
+				</dict>
+				<key>tsInputModeCharacterRepertoireKey</key>
+				<array>
+					<string>Mymr</string>
+				</array>
+				<key>tsInputModeScriptKey</key>
+				<string>smBurmese</string>
+				<key>tsInputModeIsVisibleKey</key>
+				<true/>
+				<key>tsInputModeDefaultStateKey</key>
+				<true/>
+				<key>tsInputModePrimaryInScriptKey</key>
+				<true/>
+			</dict>
+			<key>com.myangler.inputmethod.burmese.extension.Roman</key>
+			<dict>
+				<key>TISInputSourceID</key>
+				<string>com.myangler.inputmethod.burmese.extension.Roman</string>
+				<key>TISIntendedLanguage</key>
+				<string>en</string>
+				<key>TISIconLabels</key>
+				<dict>
+					<key>Primary</key>
+					<string>ABC</string>
+				</dict>
+				<key>tsInputModeCharacterRepertoireKey</key>
+				<array>
+					<string>Latn</string>
+				</array>
+				<key>tsInputModeScriptKey</key>
+				<string>smRoman</string>
+				<key>tsInputModeIsVisibleKey</key>
+				<true/>
+				<key>tsInputModeDefaultStateKey</key>
+				<false/>
+				<key>tsInputModePrimaryInScriptKey</key>
+				<true/>
+			</dict>
+		</dict>
+		<key>tsVisibleInputModeOrderedArrayKey</key>
+		<array>
+			<string>com.myangler.inputmethod.burmese.extension.Compose</string>
+			<string>com.myangler.inputmethod.burmese.extension.Roman</string>
+		</array>
+	</dict>
+
+	<!-- Modern Input Method extension point -->
+	<key>NSExtension</key>
+	<dict>
+		<key>NSExtensionPointIdentifier</key>
+		<string>com.apple.textinputmethod-services</string>
+	</dict>
+</dict>
+</plist>
