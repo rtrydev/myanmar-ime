@@ -1,0 +1,1 @@
+# Myanmar IME for macOS
