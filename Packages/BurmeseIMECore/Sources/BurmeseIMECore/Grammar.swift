@@ -170,12 +170,9 @@ public enum Grammar {
             }
         }
 
-        // Validate tall/short aa form against consonant
-        if requiresTallAa.contains(onset) {
-            if shortAaVowels.contains(vowelRoman) { return 0 }
-        } else {
-            if tallAaVowels.contains(vowelRoman) { return 0 }
-        }
+        // Tall-aa vs short-aa is no longer a legality gate — the parser
+        // auto-selects the shape appropriate for the onset at render time,
+        // and users pick between variants via the candidate window.
 
         // Base score: legal
         var score = 100

@@ -339,8 +339,10 @@ public enum Romanization {
     // MARK: - Composing Character Set
 
     /// Characters accepted in the composing buffer.
+    /// Digits are intentionally excluded — they are emitted as literal text
+    /// rather than consumed as vowel-variant disambiguators.
     public static let composingCharacters: Set<Character> = Set(
-        "abcdefghijklmnopqrstuvwxyz0123456789+*':.".map { $0 }
+        "abcdefghijklmnopqrstuvwxyz+*':.".map { $0 }
     )
 
     /// Normalize input to lowercase ASCII composing characters.

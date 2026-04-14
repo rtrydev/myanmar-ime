@@ -37,10 +37,50 @@ public final class BurmeseEngine: Sendable {
     /// Update the composition state based on the current buffer and context.
     /// Called on every keystroke that modifies the buffer.
     public func update(buffer: String, context: [String]) -> CompositionState {
-        let normalized = Romanization.normalize(buffer)
-        guard !normalized.isEmpty else {
-            return CompositionState()
+        guard !buffer.isEmpty else {
+            return CompositionState(committedContext: context)
         }
+        let displayBuffer = buffer.lowercased()
+        // Candidates are generated only from the leading run of composing
+        // characters. Anything after the first non-composing character
+        // (punctuation, whitespace, etc.) is held aside and emitted verbatim
+        // on commit — this lets the user freely mix Burmese-convertible text
+        // with literal content without the IME swallowing either.
+        let (composable, literalTail) = Self.splitComposablePrefix(displayBuffer)
+        let initialNormalized = Romanization.normalize(composable)
+        guard !initialNormalized.isEmpty else {
+            return CompositionState(
+                rawBuffer: displayBuffer,
+                selectedCandidateIndex: 0,
+                candidates: [],
+                committedContext: context
+            )
+        }
+
+        // Shrink from the right until the parser produces a fully legal
+        // parse that doesn't begin with a standalone tall-aa vowel (ar2,
+        // aw2, out2, aung2). The dropped suffix joins `literalTail`, so
+        // "min:123" emits မင်း + "123" and "ar2" emits ာ + "2" — the
+        // tall-aa variant remains reachable only when a descender onset is
+        // actually present in the buffer.
+        var normalized = initialNormalized
+        var droppedTail = ""
+        while !normalized.isEmpty {
+            let probe = parser.parseCandidates(normalized, maxResults: 1)
+            if probe.contains(where: { Self.isAcceptableParse($0) }) { break }
+            droppedTail = String(normalized.removeLast()) + droppedTail
+        }
+
+        guard !normalized.isEmpty else {
+            return CompositionState(
+                rawBuffer: displayBuffer,
+                selectedCandidateIndex: 0,
+                candidates: [],
+                committedContext: context
+            )
+        }
+
+        let effectiveTail = droppedTail + literalTail
 
         let grammarParses = parser.parseCandidates(normalized, maxResults: Self.grammarCandidateBudget)
         var grammarCandidates = grammarParses.map { parse in
@@ -132,28 +172,104 @@ public final class BurmeseEngine: Sendable {
             merged.append(grammarCandidate.candidate)
         }
 
+        merged = Self.expandAaVariants(merged)
+
+        let mergedWithTail: [Candidate] = effectiveTail.isEmpty
+            ? merged
+            : merged.map { candidate in
+                Candidate(
+                    surface: candidate.surface + effectiveTail,
+                    reading: candidate.reading,
+                    source: candidate.source,
+                    score: candidate.score
+                )
+            }
+
         return CompositionState(
-            rawBuffer: normalized,
+            rawBuffer: displayBuffer,
             selectedCandidateIndex: 0,
-            candidates: merged,
+            candidates: mergedWithTail,
             committedContext: context
         )
     }
 
     /// Commit the currently selected candidate.
-    /// Returns the committed surface text.
+    /// Returns the committed surface text: the selected candidate for the
+    /// convertible prefix, followed by any unconverted tail from the raw
+    /// buffer emitted verbatim.
     public func commit(state: CompositionState) -> String {
         guard !state.candidates.isEmpty,
               state.selectedCandidateIndex < state.candidates.count else {
-            // No candidates: commit raw buffer as-is
             return state.rawBuffer
         }
+        // Candidate surfaces already include the literal tail (appended in
+        // update()), so committing the selection emits both parts together.
         return state.candidates[state.selectedCandidateIndex].surface
     }
 
     /// Cancel composition: return the raw buffer unchanged.
     public func cancel(state: CompositionState) -> String {
         state.rawBuffer
+    }
+
+    /// For each candidate whose surface contains ာ (U+102C) or ါ (U+102B),
+    /// emit the opposite-aa variant as a sibling candidate so the user can
+    /// pick between short- and tall-aa forms in the candidate window.
+    private static func expandAaVariants(_ candidates: [Candidate]) -> [Candidate] {
+        let shortAa: Character = "\u{102C}"
+        let tallAa: Character = "\u{102B}"
+        var result: [Candidate] = []
+        var seen: Set<String> = []
+        for candidate in candidates {
+            if seen.insert(candidate.surface).inserted {
+                result.append(candidate)
+            }
+            let swapped: String
+            if candidate.surface.contains(shortAa) {
+                swapped = String(candidate.surface.map { $0 == shortAa ? tallAa : $0 })
+            } else if candidate.surface.contains(tallAa) {
+                swapped = String(candidate.surface.map { $0 == tallAa ? shortAa : $0 })
+            } else {
+                continue
+            }
+            if seen.insert(swapped).inserted {
+                result.append(Candidate(
+                    surface: swapped,
+                    reading: candidate.reading,
+                    source: candidate.source,
+                    score: candidate.score - 1
+                ))
+            }
+        }
+        return result
+    }
+
+    /// Tall-aa vowel keys that only make sense after a descender consonant.
+    /// When a parse's reading *starts* with one of these, it means the parser
+    /// consumed the token as a standalone dependent vowel — which the engine
+    /// rejects so the trailing "2" falls out as a literal tail instead.
+    private static let standaloneTallAaReadings: [String] = [
+        "ar2", "aw2", "out2", "aung2",
+    ]
+
+    private static func isAcceptableParse(_ parse: SyllableParse) -> Bool {
+        guard parse.legalityScore > 0 else { return false }
+        for reading in standaloneTallAaReadings where parse.reading.hasPrefix(reading) {
+            return false
+        }
+        return true
+    }
+
+    /// Split a buffer into its leading run of composing characters and the
+    /// remainder (starting at the first non-composing character). The
+    /// composing prefix is what gets parsed into Burmese candidates; the
+    /// remainder is preserved as literal text during commit.
+    private static func splitComposablePrefix(_ buffer: String) -> (composable: String, literal: String) {
+        let composingSet = Romanization.composingCharacters
+        if let firstNonComposing = buffer.firstIndex(where: { !composingSet.contains($0) }) {
+            return (String(buffer[..<firstNonComposing]), String(buffer[firstNonComposing...]))
+        }
+        return (buffer, "")
     }
 
     private func grammarCandidateIsBetter(_ lhs: RankedGrammarCandidate, than rhs: RankedGrammarCandidate) -> Bool {

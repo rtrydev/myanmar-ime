@@ -105,15 +105,20 @@ runTest("vowelLookups") {
 
 runTest("normalize") {
     assertEqual(Romanization.normalize("ABC"), "abc", "normalize_lowercase")
-    assertEqual(Romanization.normalize("thar2"), "thar2", "normalize_keepsDigits")
+    assertEqual(Romanization.normalize("thar2"), "thar", "normalize_stripsDigits")
     assertEqual(Romanization.normalize("min+galar"), "min+galar", "normalize_keepsSpecials")
     assertEqual(Romanization.normalize("hello!@#"), "hello", "normalize_stripsInvalid")
 }
 
 runTest("composingChars") {
-    for ch: Character in Array("abcdefghijklmnopqrstuvwxyz0123456789+*':.") {
+    for ch: Character in Array("abcdefghijklmnopqrstuvwxyz+*':.") {
         assertTrue(Romanization.composingCharacters.contains(ch),
                    "composingChar_\(ch)", detail: "Missing: \(ch)")
+    }
+    // Digits are intentionally NOT composing — they always emit as literal text.
+    for ch: Character in Array("0123456789") {
+        assertFalse(Romanization.composingCharacters.contains(ch),
+                    "digitNotComposing_\(ch)", detail: "Digit should not compose: \(ch)")
     }
     for ch: Character in ["!", "@", "#", "$", "%", " "] {
         assertFalse(Romanization.composingCharacters.contains(ch),
@@ -201,49 +206,91 @@ runTest("maxPageSize") {
     assertTrue(state.candidates.count <= BurmeseEngine.candidatePageSize, "maxPageSize")
 }
 
+runTest("preservesTrailingDigits") {
+    // Digits are composing characters but are not parseable after a complete
+    // syllable — the engine should hold them as a literal tail rather than
+    // silently dropping them through the parser's no-match branch.
+    let state = engine.update(buffer: "min:123", context: [])
+    let committed = engine.commit(state: state)
+    assertTrue(committed.hasSuffix("123"), "preservesTrailingDigits_suffix",
+               detail: "Expected '123' suffix, got: \(escapeUnicode(committed))")
+    assertTrue(committed.hasPrefix("မင်း"), "preservesTrailingDigits_prefix",
+               detail: "Expected မင်း prefix, got: \(escapeUnicode(committed))")
+}
+
+runTest("candidatesIncludeTrailingDigits") {
+    let state = engine.update(buffer: "thar123", context: [])
+    assertTrue(!state.candidates.isEmpty, "candidatesIncludeTrailingDigits_nonEmpty")
+    var allHaveTail = true
+    for candidate in state.candidates where !candidate.surface.hasSuffix("123") {
+        allHaveTail = false
+    }
+    assertTrue(allHaveTail, "candidatesIncludeTrailingDigits_allHaveTail")
+}
+
+runTest("preservesNonComposingTail") {
+    let state = engine.update(buffer: "thar!", context: [])
+    let committed = engine.commit(state: state)
+    assertTrue(committed.hasSuffix("!"), "preservesNonComposingTail",
+               detail: "Expected '!' suffix, got: \(escapeUnicode(committed))")
+}
+
+runTest("preservesMixedDigitAndPunctuationTail") {
+    let state = engine.update(buffer: "min:123!", context: [])
+    let committed = engine.commit(state: state)
+    assertTrue(committed.hasSuffix("123!"), "preservesMixedTail",
+               detail: "Expected '123!' suffix, got: \(escapeUnicode(committed))")
+}
+
+runTest("thar2_commitsDigitLiteral") {
+    // Digits are never consumed as vowel-variant tokens. "thar2" commits as
+    // သာ followed by the literal "2".
+    let state = engine.update(buffer: "thar2", context: [])
+    let committed = engine.commit(state: state)
+    assertEqual(committed, "သာ2", "thar2_commitsDigitLiteral")
+}
+
+runTest("candidates_expandAaVariants") {
+    // The candidate window should offer both ာ (U+102C) and ါ (U+102B) so
+    // the user can pick the tall-aa form after a descender consonant.
+    let state = engine.update(buffer: "par", context: [])
+    let hasShort = state.candidates.contains { $0.surface.contains("\u{102C}") }
+    let hasTall = state.candidates.contains { $0.surface.contains("\u{102B}") }
+    assertTrue(hasShort, "candidates_hasShortAa", detail: "Expected ာ variant")
+    assertTrue(hasTall, "candidates_hasTallAa", detail: "Expected ါ variant")
+}
+
+runTest("standaloneTallAa_splitsAsLiteralTail") {
+    // "ar2" without an onset has no legal grammar parse (tall aa requires
+    // a descender consonant), so the engine should shrink to "ar" → ာ
+    // and emit "2" as a literal tail. The ါ variant remains available as a
+    // candidate only when an appropriate onset is present.
+    let state = engine.update(buffer: "ar2", context: [])
+    let committed = engine.commit(state: state)
+    assertTrue(committed.hasSuffix("2"), "ar2_literalTail",
+               detail: "Expected '2' suffix, got: \(escapeUnicode(committed))")
+    assertFalse(committed.contains("\u{102B}"), "ar2_noTallAa",
+                detail: "Expected no ါ (U+102B), got: \(escapeUnicode(committed))")
+    assertTrue(committed.contains("\u{102C}"), "ar2_hasShortAa",
+               detail: "Expected ာ (U+102C), got: \(escapeUnicode(committed))")
+}
+
+runTest("pureUnconvertibleBuffer_commitsRaw") {
+    let state = engine.update(buffer: "123", context: [])
+    assertTrue(state.isActive, "pureUnconvertibleBuffer_active")
+    assertTrue(state.candidates.isEmpty, "pureUnconvertibleBuffer_noCandidates")
+    assertEqual(engine.commit(state: state), "123", "pureUnconvertibleBuffer_commit")
+}
+
 // ===================================================================
-// KNOWN-GOOD LEGACY FIXTURE TESTS
+// KNOWN-GOOD FIXTURE TESTS (digit-free scheme)
 // ===================================================================
 
-print("=== Known-Good Legacy Fixtures ===")
+print("=== Known-Good Fixtures ===")
 
 runTest("thar") { assertEqual(parse("thar"), "သာ", "knownGood_thar") }
-runTest("thar2") { assertEqual(parse("thar2"), "သါ", "knownGood_thar2") }
 runTest("kyaw") { assertEqual(parse("kyaw"), "ကြော်", "knownGood_kyaw") }
-runTest("kyaw2") { assertEqual(parse("kyaw2"), "ကြေါ်", "knownGood_kyaw2") }
-runTest("min+galarpar2") { assertEqual(parse("min+galarpar2"), "မင်္ဂလာပါ", "knownGood_minGalarPar2") }
-runTest("ahin+gar2gyoh*") { assertEqual(parse("ahin+gar2gyoh*"), "အင်္ဂါဂြိုဟ်", "knownGood_ahinGar2GyoH") }
-runTest("hran2:khout2hswe:") { assertEqual(parse("hran2:khout2hswe:"), "ရှမ်းခေါက်ဆွဲ", "knownGood_shanNoodles") }
-runTest("rway:khy2e") { assertEqual(parse("rway:khy2e"), "ရွေးချယ်", "knownGood_choose") }
-
-// ===================================================================
-// ADDITIONAL LEGACY FIXTURES
-// ===================================================================
-
-print("=== Additional Legacy Fixtures ===")
-
-runTest("mingalarpar2") {
-    // Without explicit '+', the common phrase parses differently — the legacy engine
-    // produces "မီငလာပါ" which is incorrect. Our engine should produce a reasonable
-    // Myanmar-only output (no mixed script), but it won't match the '+' version.
-    let result = parse("mingalarpar2")
-    for scalar in result.unicodeScalars {
-        let isOk = Myanmar.isMyanmar(scalar) || scalar.value == 0x200C
-        assertTrue(isOk, "mingalarpar2_noLatinLeakage",
-                   detail: "Found non-Myanmar U+\(String(scalar.value, radix: 16)) in: \(escapeUnicode(result))")
-    }
-}
-
-runTest("nay2") {
-    // Legacy engine produces "နဧ" — numeric alternate over-applies.
-    // Our engine should produce Myanmar-only output.
-    let result = parse("nay2")
-    for scalar in result.unicodeScalars {
-        let isOk = Myanmar.isMyanmar(scalar) || scalar.value == 0x200C
-        assertTrue(isOk, "nay2_noLatinLeakage",
-                   detail: "Found non-Myanmar U+\(String(scalar.value, radix: 16)) in: \(escapeUnicode(result))")
-    }
-}
+runTest("min+galarpar") { assertEqual(parse("min+galarpar"), "မင်္ဂလာပာ", "knownGood_minGalarPar") }
 
 // ===================================================================
 // KNOWN-BAD LEGACY DIVERGENCE TESTS
@@ -276,14 +323,6 @@ runTest("par_noLatinInOutput") {
     }
 }
 
-runTest("kya2_noLatinLeakage") {
-    let result = parse("kya2")
-    for scalar in result.unicodeScalars {
-        let isOk = Myanmar.isMyanmar(scalar) || scalar.value == 0x200C
-        assertTrue(isOk, "knownBad_kya2_noLatinLeakage",
-                   detail: "Found non-Myanmar U+\(String(scalar.value, radix: 16))")
-    }
-}
 
 // ===================================================================
 // LEADING-VOWEL / U+200C TESTS
@@ -294,12 +333,8 @@ print("=== Leading-Vowel / U+200C Tests ===")
 runTest("leadingVowel_u") { assertEqual(parse("u"), "\u{200C}\u{1030}", "leadingVowel_u") }
 runTest("leadingVowel_ay") { assertEqual(parse("ay"), "\u{200C}\u{1031}", "leadingVowel_ay") }
 runTest("leadingVowel_aw") { assertEqual(parse("aw"), "\u{200C}\u{1031}\u{102C}\u{103A}", "leadingVowel_aw") }
-runTest("leadingVowel_aw2") { assertEqual(parse("aw2"), "\u{200C}\u{1031}\u{102B}\u{103A}", "leadingVowel_aw2") }
 runTest("leadingVowel_aw:") { assertEqual(parse("aw:"), "\u{200C}\u{1031}\u{102C}", "leadingVowel_aw_colon") }
-runTest("leadingVowel_aw2:") { assertEqual(parse("aw2:"), "\u{200C}\u{1031}\u{102B}", "leadingVowel_aw2_colon") }
 runTest("leadingVowel_own") { assertEqual(parse("own"), "\u{200C}\u{102F}\u{1014}\u{103A}", "leadingVowel_own") }
-runTest("leadingVowel_own2") { assertEqual(parse("own2"), "\u{200C}\u{102F}\u{1019}\u{103A}", "leadingVowel_own2") }
-runTest("leadingVowel_own3") { assertEqual(parse("own3"), "\u{200C}\u{102F}\u{1036}", "leadingVowel_own3") }
 
 // ===================================================================
 // REVERSE ROMANIZER TESTS

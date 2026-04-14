@@ -101,16 +101,23 @@ final class EngineTests: XCTestCase {
         XCTAssertTrue(state.candidates.contains(where: { $0.source == .grammar }))
     }
 
-    func testCandidates_aaFormFilteredByGrammar() {
-        // သ does not require tall aa → short aa (thar) is legal, tall aa (thar2) is not
-        let state = engine.update(buffer: "thar", context: [])
-        XCTAssertTrue(state.candidates.contains(where: { $0.reading == "thar" }))
-        XCTAssertFalse(state.candidates.contains(where: { $0.reading == "thar2" }))
+    func testCandidates_bothAaVariantsOffered() {
+        // Both ာ (U+102C) and ါ (U+102B) forms are always offered as sibling
+        // candidates so the user can pick between them.
+        let state = engine.update(buffer: "par", context: [])
+        XCTAssertTrue(state.candidates.contains { $0.surface.contains("\u{102C}") })
+        XCTAssertTrue(state.candidates.contains { $0.surface.contains("\u{102B}") })
 
-        // ပ requires tall aa → tall aa (par2) is legal, short aa (par) is not
-        let state2 = engine.update(buffer: "par", context: [])
-        XCTAssertTrue(state2.candidates.contains(where: { $0.reading == "par2" }))
-        XCTAssertFalse(state2.candidates.contains(where: { $0.reading == "par" }))
+        let state2 = engine.update(buffer: "thar", context: [])
+        XCTAssertTrue(state2.candidates.contains { $0.surface.contains("\u{102C}") })
+        XCTAssertTrue(state2.candidates.contains { $0.surface.contains("\u{102B}") })
+    }
+
+    func testCommit_digitIsLiteral() {
+        // Digits are never consumed as vowel-variant disambiguators; "thar2"
+        // commits as သာ followed by the literal "2".
+        let state = engine.update(buffer: "thar2", context: [])
+        XCTAssertEqual(engine.commit(state: state), "သာ2")
     }
 
     func testCandidates_consonantFormRanksAheadOfMedialFallback() {
@@ -133,6 +140,55 @@ final class EngineTests: XCTestCase {
         XCTAssertTrue(
             state.candidates.contains(where: { $0.source == .grammar && $0.reading.hasSuffix("par2") })
         )
+    }
+
+    // MARK: - Unconvertible Tail Preservation
+
+    func testCommit_preservesTrailingDigits() {
+        let state = engine.update(buffer: "min:123", context: [])
+        let committed = engine.commit(state: state)
+        XCTAssertTrue(committed.hasSuffix("123"), "Expected '123' to be preserved, got '\(committed)'")
+        XCTAssertTrue(committed.hasPrefix("မင်း"), "Expected မင်း prefix, got '\(committed)'")
+    }
+
+    func testUpdate_candidatesIncludeTrailingDigits() {
+        let state = engine.update(buffer: "thar123", context: [])
+        XCTAssertFalse(state.candidates.isEmpty)
+        for candidate in state.candidates {
+            XCTAssertTrue(
+                candidate.surface.hasSuffix("123"),
+                "Candidate '\(candidate.surface)' should end with literal tail '123'"
+            )
+        }
+    }
+
+    func testCommit_preservesNonComposingTail() {
+        // Punctuation outside the composing set is split off by the existing
+        // literalTail path; verify the combined behavior still works.
+        let state = engine.update(buffer: "thar!", context: [])
+        let committed = engine.commit(state: state)
+        XCTAssertTrue(committed.hasSuffix("!"), "Expected '!' preserved, got '\(committed)'")
+    }
+
+    func testCommit_preservesMixedDigitAndPunctuationTail() {
+        let state = engine.update(buffer: "min:123!", context: [])
+        let committed = engine.commit(state: state)
+        XCTAssertTrue(committed.hasSuffix("123!"), "Expected '123!' preserved, got '\(committed)'")
+    }
+
+    func testCommit_standaloneTallAa_splitsAsLiteralTail() {
+        let state = engine.update(buffer: "ar2", context: [])
+        let committed = engine.commit(state: state)
+        XCTAssertTrue(committed.hasSuffix("2"), "Expected '2' suffix, got '\(committed)'")
+        XCTAssertFalse(committed.contains("\u{102B}"), "Should not contain ါ, got '\(committed)'")
+        XCTAssertTrue(committed.contains("\u{102C}"), "Should contain ာ, got '\(committed)'")
+    }
+
+    func testUpdate_pureUnconvertibleBuffer_yieldsRawCommit() {
+        let state = engine.update(buffer: "123", context: [])
+        XCTAssertTrue(state.isActive)
+        XCTAssertTrue(state.candidates.isEmpty)
+        XCTAssertEqual(engine.commit(state: state), "123")
     }
 
     // MARK: - Composition State Properties

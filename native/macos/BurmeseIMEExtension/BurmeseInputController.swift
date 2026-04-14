@@ -109,38 +109,47 @@ class BurmeseInputController: IMKInputController {
         }()
         guard !chars.isEmpty else { return false }
 
-        if let digit = Int(chars), (1...5).contains(digit) {
-            if event.modifierFlags.contains(.option) || state.isActive {
-                if selectCandidateShortcut(digit - 1, client: sender) {
-                    return true
-                }
+        // Option+digit (1–5) is always a candidate shortcut, regardless of
+        // whether those digits would otherwise extend the buffer. This matches
+        // how system IMEs expose numbered candidate selection without
+        // interfering with literal digit input.
+        if event.modifierFlags.contains(.option),
+           let digit = Int(chars), (1...5).contains(digit) {
+            if selectCandidateShortcut(digit - 1, client: sender) {
+                return true
             }
         }
 
-        // Plain digits are no longer part of compose mode. Commit the current
-        // candidate first, then let the digit reach the client unchanged.
-        let decimalDigits = CharacterSet.decimalDigits
-        if chars.unicodeScalars.allSatisfy({ decimalDigits.contains($0) }) {
-            if state.isActive {
-                commitSelection(client: sender)
-            }
-            return false
-        }
-
-        // Composing characters: a-z, +, *, ', :, .
-        let composingSet = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz+*':.")
-        if chars.unicodeScalars.allSatisfy({ composingSet.contains($0) }) {
-            state.rawBuffer += chars.lowercased()
-            state = engine.update(buffer: state.rawBuffer, context: state.committedContext)
+        // "Typeable" characters — ASCII letters, digits, and common
+        // punctuation — extend the composition buffer rather than forcing a
+        // commit. This mirrors the behaviour of system IMEs like Pinyin and
+        // Kotoeri: the user can interleave non-convertible text, and the
+        // engine emits the raw buffer verbatim if no Burmese parse is found.
+        if isTypeableInput(chars) {
+            let seed = state.isActive ? state.rawBuffer : ""
+            let nextBuffer = seed + chars.lowercased()
+            state = engine.update(buffer: nextBuffer, context: state.committedContext)
             updateMarkedText(client: sender)
             return true
         }
 
-        // Pass-through characters commit the pending candidate first.
+        // Anything else (control characters, function keys forwarded as text,
+        // etc.) commits the pending candidate first and falls through.
         if state.isActive {
             commitSelection(client: sender)
         }
         return false
+    }
+
+    /// Printable characters that should extend the composition buffer. We
+    /// accept the printable ASCII range excluding whitespace (space is a
+    /// commit key) so mixed-content input stays in the buffer until the user
+    /// explicitly commits.
+    private func isTypeableInput(_ chars: String) -> Bool {
+        guard !chars.isEmpty else { return false }
+        return chars.unicodeScalars.allSatisfy { scalar in
+            scalar.value >= 0x21 && scalar.value <= 0x7E
+        }
     }
 
     override func commitComposition(_ sender: Any!) {
