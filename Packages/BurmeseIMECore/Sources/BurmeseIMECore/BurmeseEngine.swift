@@ -1,10 +1,12 @@
+import Foundation
+
 /// The main composition engine for the Burmese IME.
 ///
 /// Manages the composition buffer, generates candidates from grammar parsing
 /// and lexicon lookup, and handles commit/cancel operations.
 ///
 /// Ranking order: grammar legality > alias cost > parser score > lexicon frequency.
-public final class BurmeseEngine: Sendable {
+public final class BurmeseEngine: @unchecked Sendable {
 
     private struct RankedGrammarCandidate {
         var candidate: Candidate
@@ -26,12 +28,49 @@ public final class BurmeseEngine: Sendable {
     private let parser: SyllableParser
     private let candidateStore: any CandidateStore
 
+    /// Sliding-window threshold for the full N-best parse. When the
+    /// normalized buffer exceeds this, everything before the trailing
+    /// window is rendered once via a cheap single-best parse and cached;
+    /// only the tail is re-parsed on each keystroke. The window covers
+    /// `maxOnsetLen + maxVowelLen` plus a safety margin so no rule can
+    /// span the prefix/tail boundary.
+    private let compositionWindowSize: Int
+
+    /// Single-slot cache for the frozen prefix. Protected by `cacheLock`.
+    private struct FrozenPrefixCache {
+        var input: String
+        var output: String
+        var reading: String
+    }
+    private var prefixCache: FrozenPrefixCache?
+    private let cacheLock = NSLock()
+
     /// Page size for candidate display.
     public static let candidatePageSize = 5
 
     public init(candidateStore: any CandidateStore = EmptyCandidateStore()) {
-        self.parser = SyllableParser()
+        let parser = SyllableParser()
+        self.parser = parser
         self.candidateStore = candidateStore
+        self.compositionWindowSize = parser.maxOnsetLen + parser.maxVowelLen + 4
+    }
+
+    private func renderFrozenPrefix(_ prefix: String) -> (output: String, reading: String) {
+        cacheLock.lock()
+        if let cached = prefixCache, cached.input == prefix {
+            cacheLock.unlock()
+            return (cached.output, cached.reading)
+        }
+        cacheLock.unlock()
+
+        let parsed = parser.parseCandidates(prefix, maxResults: 1).first
+        let output = parsed?.output ?? prefix
+        let reading = parsed?.reading ?? prefix
+
+        cacheLock.lock()
+        prefixCache = FrozenPrefixCache(input: prefix, output: output, reading: reading)
+        cacheLock.unlock()
+        return (output, reading)
     }
 
     /// Update the composition state based on the current buffer and context.
@@ -63,10 +102,20 @@ public final class BurmeseEngine: Sendable {
         // "min:123" emits မင်း + "123" and "ar2" emits ာ + "2" — the
         // tall-aa variant remains reachable only when a descender onset is
         // actually present in the buffer.
+        //
+        // For long buffers only the trailing window needs probing: the
+        // frozen prefix cannot contribute a standalone tall-aa prefix to
+        // the overall parse, and shrinking only ever trims tail chars.
         var normalized = initialNormalized
         var droppedTail = ""
         while !normalized.isEmpty {
-            let probe = parser.parseCandidates(normalized, maxResults: 1)
+            let probeInput: String
+            if normalized.count > compositionWindowSize {
+                probeInput = String(normalized.suffix(compositionWindowSize))
+            } else {
+                probeInput = normalized
+            }
+            let probe = parser.parseCandidates(probeInput, maxResults: 1)
             if probe.contains(where: { Self.isAcceptableParse($0) }) { break }
             droppedTail = String(normalized.removeLast()) + droppedTail
         }
@@ -82,12 +131,32 @@ public final class BurmeseEngine: Sendable {
 
         let effectiveTail = droppedTail + literalTail
 
-        let grammarParses = parser.parseCandidates(normalized, maxResults: Self.grammarCandidateBudget)
+        // Split off the frozen prefix if the buffer is longer than the
+        // sliding window. The prefix is rendered once via a cached
+        // single-best parse; only the active tail gets the expensive
+        // N-best treatment each keystroke.
+        let windowed: (prefixOutput: String, prefixReading: String, tail: String)?
+        let parseInput: String
+        if normalized.count > compositionWindowSize {
+            let splitIndex = normalized.index(normalized.endIndex, offsetBy: -compositionWindowSize)
+            let frozenPrefix = String(normalized[..<splitIndex])
+            let activeTail = String(normalized[splitIndex...])
+            let rendered = renderFrozenPrefix(frozenPrefix)
+            windowed = (rendered.output, rendered.reading, activeTail)
+            parseInput = activeTail
+        } else {
+            windowed = nil
+            parseInput = normalized
+        }
+
+        let grammarParses = parser.parseCandidates(parseInput, maxResults: Self.grammarCandidateBudget)
         var grammarCandidates = grammarParses.map { parse in
-            RankedGrammarCandidate(
+            let surface = windowed.map { $0.prefixOutput + parse.output } ?? parse.output
+            let reading = windowed.map { $0.prefixReading + parse.reading } ?? parse.reading
+            return RankedGrammarCandidate(
                 candidate: Candidate(
-                    surface: parse.output,
-                    reading: parse.reading,
+                    surface: surface,
+                    reading: reading,
                     source: .grammar,
                     score: Double(parse.score)
                 ),
@@ -102,13 +171,15 @@ public final class BurmeseEngine: Sendable {
         }
         grammarCandidates = promoteAliasAlternate(grammarCandidates)
 
+        // Skip lexicon lookup entirely when a frozen prefix is in play:
+        // multi-word lexicon hits past the window boundary aren't useful,
+        // and the prefix lookup would be dominated by the cached output.
         let previousSurface = context.last
         let aliasPrefix = Romanization.aliasReading(normalized)
         let composePrefix = Romanization.composeLookupKey(normalized)
-        let lexiconCandidates = candidateStore.lookup(
-            prefix: aliasPrefix,
-            previousSurface: previousSurface
-        )
+        let lexiconCandidates: [Candidate] = windowed == nil
+            ? candidateStore.lookup(prefix: aliasPrefix, previousSurface: previousSurface)
+            : []
 
         var grammarSurfaceIndex: [String: Int] = [:]
         for (index, candidate) in grammarCandidates.enumerated() {

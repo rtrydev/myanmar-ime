@@ -54,7 +54,10 @@ public final class SyllableParser: Sendable {
     private let vowelKeysSorted: [String]
 
     /// Maximum onset key length for bounded search.
-    private let maxOnsetLen: Int
+    public let maxOnsetLen: Int
+
+    /// Maximum vowel key length for bounded search.
+    public let maxVowelLen: Int
 
     public init() {
         var onsetLookup: [String: [OnsetEntry]] = [:]
@@ -140,6 +143,7 @@ public final class SyllableParser: Sendable {
             }
         }
         self.vowelEntries = vowelLookup
+        self.maxVowelLen = vowelLookup.keys.map(\.count).max() ?? 1
         self.vowelKeysSorted = vowelLookup.keys.sorted { lhs, rhs in
             if lhs.count != rhs.count {
                 return lhs.count > rhs.count
