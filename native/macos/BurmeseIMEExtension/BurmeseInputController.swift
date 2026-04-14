@@ -61,6 +61,16 @@ class BurmeseInputController: IMKInputController {
             cycleCandidates(delta: delta)
             return true
 
+        case 125, 124: // Down / Right arrow — next candidate
+            guard state.isActive, !state.candidates.isEmpty else { return false }
+            cycleCandidates(delta: 1)
+            return true
+
+        case 126, 123: // Up / Left arrow — previous candidate
+            guard state.isActive, !state.candidates.isEmpty else { return false }
+            cycleCandidates(delta: -1)
+            return true
+
         case 36, 76: // Return / Enter — commit selection
             guard state.isActive else { return false }
             commitSelection(client: sender)
@@ -151,6 +161,18 @@ class BurmeseInputController: IMKInputController {
             return true
 
         case #selector(NSResponder.insertBacktab(_:)):
+            guard state.isActive, !state.candidates.isEmpty else { return false }
+            cycleCandidates(delta: -1)
+            return true
+
+        case #selector(NSResponder.moveDown(_:)),
+             #selector(NSResponder.moveRight(_:)):
+            guard state.isActive, !state.candidates.isEmpty else { return false }
+            cycleCandidates(delta: 1)
+            return true
+
+        case #selector(NSResponder.moveUp(_:)),
+             #selector(NSResponder.moveLeft(_:)):
             guard state.isActive, !state.candidates.isEmpty else { return false }
             cycleCandidates(delta: -1)
             return true
