@@ -250,14 +250,49 @@ runTest("thar2_commitsDigitLiteral") {
     assertEqual(committed, "သာ2", "thar2_commitsDigitLiteral")
 }
 
-runTest("candidates_expandAaVariants") {
-    // The candidate window should offer both ာ (U+102C) and ါ (U+102B) so
-    // the user can pick the tall-aa form after a descender consonant.
-    let state = engine.update(buffer: "par", context: [])
-    let hasShort = state.candidates.contains { $0.surface.contains("\u{102C}") }
-    let hasTall = state.candidates.contains { $0.surface.contains("\u{102B}") }
-    assertTrue(hasShort, "candidates_hasShortAa", detail: "Expected ာ variant")
-    assertTrue(hasTall, "candidates_hasTallAa", detail: "Expected ါ variant")
+runTest("candidates_aaShapeMatchesDescender") {
+    // Grammar filtering: each candidate's aa sign is auto-corrected to
+    // match the preceding consonant. Descender onsets (ပ here) take tall
+    // ါ (U+102B); non-descender onsets (သ) take short ာ (U+102C). The
+    // wrong-shape sibling is never emitted.
+    let par = engine.update(buffer: "par", context: [])
+    let parHasTall = par.candidates.contains { $0.surface.contains("\u{102B}") }
+    let parHasShort = par.candidates.contains { $0.surface.contains("\u{102C}") }
+    assertTrue(parHasTall, "candidates_par_tallAa", detail: "Expected ါ variant for ပ onset")
+    assertFalse(parHasShort, "candidates_par_noShortAa", detail: "ာ must not appear after ပ")
+
+    let thar = engine.update(buffer: "thar", context: [])
+    let tharHasShort = thar.candidates.contains { $0.surface.contains("\u{102C}") }
+    let tharHasTall = thar.candidates.contains { $0.surface.contains("\u{102B}") }
+    assertTrue(tharHasShort, "candidates_thar_shortAa", detail: "Expected ာ variant for သ onset")
+    assertFalse(tharHasTall, "candidates_thar_noTallAa", detail: "ါ must not appear after သ")
+}
+
+runTest("grammarFilter_medialHaLongI_rejected") {
+    let score = Grammar.validateSyllable(
+        onset: Myanmar.ka,
+        medials: [Myanmar.medialHa],
+        vowelRoman: "i:"
+    )
+    assertEqual(score, 0, "grammarFilter_medialHaLongI")
+}
+
+runTest("grammarFilter_tripleMedialComplexVowel_rejected") {
+    let score = Grammar.validateSyllable(
+        onset: Myanmar.ka,
+        medials: [Myanmar.medialYa, Myanmar.medialWa, Myanmar.medialHa],
+        vowelRoman: "aung"
+    )
+    assertEqual(score, 0, "grammarFilter_tripleMedial")
+}
+
+runTest("grammarFilter_palaRetroflexDiphthong_rejected") {
+    let score = Grammar.validateSyllable(
+        onset: Myanmar.tta,
+        medials: [],
+        vowelRoman: "ote"
+    )
+    assertEqual(score, 0, "grammarFilter_palaRetroflex")
 }
 
 runTest("standaloneTallAa_splitsAsLiteralTail") {

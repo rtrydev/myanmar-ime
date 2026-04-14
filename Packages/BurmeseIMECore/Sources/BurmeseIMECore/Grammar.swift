@@ -84,28 +84,47 @@ public enum Grammar {
     // MARK: - Tall/Short Aa Legality
 
     /// Consonants with descenders that require tall aa (ါ U+102B) instead of
-    /// short aa (ာ U+102C).
+    /// short aa (ာ U+102C). The engine post-processes candidate surfaces to
+    /// force the orthographically-correct aa shape based on the preceding
+    /// consonant — the user never sees the wrong-shape sibling.
     public static let requiresTallAa: Set<Character> = [
         Myanmar.kha, Myanmar.ga, Myanmar.nga,
         Myanmar.da, Myanmar.pa, Myanmar.wa,
     ]
 
-    /// Vowel roman keys that produce short aa (U+102C).
-    /// When the onset requires tall aa, these are illegal.
-    private static let shortAaVowels: Set<String> = [
-        "ar", "ar:",
-        "aw", "aw:", "aw.",
-        "out",
-        "aung", "aung:", "aung.",
+    // MARK: - Vowel / Medial Compatibility
+
+    /// Medial ha-htoe (ှ) combined with the long-i (ီ) or long-u (ူ) vowel
+    /// signs is not used in modern Burmese orthography. Reject these
+    /// pairings so their parses drop below the legality threshold.
+    private static let forbiddenVowelsWithMedialHa: Set<String> = [
+        "i:", "i2:", "u:", "u2:",
     ]
 
-    /// Vowel roman keys that produce tall aa (U+102B).
-    /// When the onset does NOT require tall aa, these are illegal.
-    private static let tallAaVowels: Set<String> = [
-        "ar2", "ar2:",
-        "aw2", "aw2:", "aw2.",
-        "out2",
-        "aung2", "aung2:", "aung2.",
+    /// Triple-medial onsets (3 medials, e.g. ြွှ / ျွှ) are rare and only
+    /// legitimately combine with the inherent vowel or aa in real text.
+    /// Other vowels on a triple-medial onset produce orthographic shapes
+    /// that native writers would never spell.
+    private static let tripleMedialPermittedVowels: Set<String> = [
+        "a", "ar", "ar:", "ar2", "ar2:",
+    ]
+
+    // MARK: - Pali / Retroflex Onset Restrictions
+
+    /// Pali-derived retroflex consonants that appear almost exclusively in
+    /// Sanskrit/Pali loanwords with a restricted vowel inventory (inherent
+    /// a, ar*, i*, u*, ay*, plus asat/anusvara finals). Native-Burmese
+    /// diphthong finals on these onsets produce orthographic garbage.
+    public static let palaRestrictedOnsets: Set<Character> = [
+        Myanmar.tta, Myanmar.ttha, Myanmar.dda, Myanmar.ddha,
+        Myanmar.nna, Myanmar.lla,
+    ]
+
+    /// Native-Burmese compound/diphthong finals that never occur on Pali
+    /// retroflex onsets in real text.
+    private static let forbiddenVowelsOnPalaOnsets: Set<String> = [
+        "own", "own:", "own.",
+        "ote", "ate", "ain", "ite", "ai",
     ]
 
     // MARK: - Stacking (Virama / Kinzi)
@@ -170,9 +189,27 @@ public enum Grammar {
             }
         }
 
-        // Tall-aa vs short-aa is no longer a legality gate — the parser
-        // auto-selects the shape appropriate for the onset at render time,
-        // and users pick between variants via the candidate window.
+        // Tall/short aa is not gated here — the engine auto-corrects the
+        // aa sign to match the onset's descender requirement during
+        // candidate post-processing, so the parser can emit either shape.
+
+        // Reject medial ha-htoe + long-i/long-u combinations (not used in
+        // modern orthography).
+        if medials.contains(Myanmar.medialHa) && forbiddenVowelsWithMedialHa.contains(vowelRoman) {
+            return 0
+        }
+
+        // Reject triple-medial onsets paired with anything other than the
+        // inherent vowel or aa.
+        if medials.count >= 3 && !tripleMedialPermittedVowels.contains(vowelRoman) {
+            return 0
+        }
+
+        // Reject Pali/retroflex onsets paired with native-Burmese
+        // diphthong finals.
+        if palaRestrictedOnsets.contains(onset) && forbiddenVowelsOnPalaOnsets.contains(vowelRoman) {
+            return 0
+        }
 
         // Base score: legal
         var score = 100

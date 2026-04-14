@@ -212,36 +212,53 @@ public final class BurmeseEngine: Sendable {
         state.rawBuffer
     }
 
-    /// For each candidate whose surface contains ာ (U+102C) or ါ (U+102B),
-    /// emit the opposite-aa variant as a sibling candidate so the user can
-    /// pick between short- and tall-aa forms in the candidate window.
+    /// Auto-correct the aa sign in each candidate surface to match the
+    /// descender requirement of its preceding consonant: descender onsets
+    /// (kha, ga, nga, da, pa, wa) take tall ါ (U+102B); others take short
+    /// ာ (U+102C). Previously both shapes were emitted as siblings, which
+    /// roughly doubled the candidate panel with orthographically wrong
+    /// forms. Collapsing to the single correct shape removes that noise.
     private static func expandAaVariants(_ candidates: [Candidate]) -> [Candidate] {
-        let shortAa: Character = "\u{102C}"
-        let tallAa: Character = "\u{102B}"
         var result: [Candidate] = []
         var seen: Set<String> = []
         for candidate in candidates {
-            if seen.insert(candidate.surface).inserted {
+            let corrected = correctAaShape(candidate.surface)
+            let surface = corrected == candidate.surface ? candidate.surface : corrected
+            guard seen.insert(surface).inserted else { continue }
+            if surface == candidate.surface {
                 result.append(candidate)
-            }
-            let swapped: String
-            if candidate.surface.contains(shortAa) {
-                swapped = String(candidate.surface.map { $0 == shortAa ? tallAa : $0 })
-            } else if candidate.surface.contains(tallAa) {
-                swapped = String(candidate.surface.map { $0 == tallAa ? shortAa : $0 })
             } else {
-                continue
-            }
-            if seen.insert(swapped).inserted {
                 result.append(Candidate(
-                    surface: swapped,
+                    surface: surface,
                     reading: candidate.reading,
                     source: candidate.source,
-                    score: candidate.score - 1
+                    score: candidate.score
                 ))
             }
         }
         return result
+    }
+
+    /// Walk a surface string and rewrite each ာ/ါ to the shape appropriate
+    /// for its preceding consonant. Medials and signs between the
+    /// consonant and the aa sign are skipped over.
+    private static func correctAaShape(_ text: String) -> String {
+        let shortAa: Character = "\u{102C}"
+        let tallAa: Character = "\u{102B}"
+        var chars = Array(text)
+        for i in 0..<chars.count where chars[i] == shortAa || chars[i] == tallAa {
+            var j = i - 1
+            while j >= 0 {
+                let prev = chars[j]
+                if let scalar = prev.unicodeScalars.first, Myanmar.isConsonant(scalar) {
+                    let wantsTall = Grammar.requiresTallAa.contains(prev)
+                    chars[i] = wantsTall ? tallAa : shortAa
+                    break
+                }
+                j -= 1
+            }
+        }
+        return String(chars)
     }
 
     /// Tall-aa vowel keys that only make sense after a descender consonant.

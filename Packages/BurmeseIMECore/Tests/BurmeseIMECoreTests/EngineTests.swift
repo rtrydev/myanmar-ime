@@ -101,16 +101,34 @@ final class EngineTests: XCTestCase {
         XCTAssertTrue(state.candidates.contains(where: { $0.source == .grammar }))
     }
 
-    func testCandidates_bothAaVariantsOffered() {
-        // Both ာ (U+102C) and ါ (U+102B) forms are always offered as sibling
-        // candidates so the user can pick between them.
-        let state = engine.update(buffer: "par", context: [])
-        XCTAssertTrue(state.candidates.contains { $0.surface.contains("\u{102C}") })
-        XCTAssertTrue(state.candidates.contains { $0.surface.contains("\u{102B}") })
+    func testCandidates_aaShapeMatchesOnsetDescender() {
+        // Grammar filtering: each candidate's aa sign is auto-corrected to
+        // match the preceding consonant's descender requirement. Descender
+        // onsets (ပ, ခ, ဂ, င, ဒ, ဝ) take tall ါ (U+102B); others take
+        // short ာ (U+102C). Wrong-shape siblings are never emitted.
+        let par = engine.update(buffer: "par", context: [])
+        XCTAssertTrue(par.candidates.contains { $0.surface.contains("\u{102B}") })
+        XCTAssertFalse(par.candidates.contains { $0.surface.contains("\u{102C}") })
 
-        let state2 = engine.update(buffer: "thar", context: [])
-        XCTAssertTrue(state2.candidates.contains { $0.surface.contains("\u{102C}") })
-        XCTAssertTrue(state2.candidates.contains { $0.surface.contains("\u{102B}") })
+        let thar = engine.update(buffer: "thar", context: [])
+        XCTAssertTrue(thar.candidates.contains { $0.surface.contains("\u{102C}") })
+        XCTAssertFalse(thar.candidates.contains { $0.surface.contains("\u{102B}") })
+    }
+
+    // MARK: - Grammar Filtering
+
+    func testGrammarFilter_retroflexDiphthongRejected() {
+        // Retroflex Pali onset ဋ (t2) never combines with native-Burmese
+        // "ote" final in real orthography; the illegal parse must not win.
+        let state = engine.update(buffer: "t2ote", context: [])
+        XCTAssertFalse(state.candidates.contains { $0.surface == "ဋောက်" || $0.surface.contains("\u{1031}\u{102C}\u{1000}\u{103A}") && $0.surface.hasPrefix("ဋ") })
+    }
+
+    func testGrammarFilter_medialHaPlusLongI_rejected() {
+        // Medial ha-htoe (ှ) + long-i (ီ) is not used in modern orthography.
+        // Parse falls back to a shorter legal prefix + literal tail.
+        let state = engine.update(buffer: "hki:", context: [])
+        XCTAssertFalse(state.candidates.contains { $0.surface.contains("\u{103E}") && $0.surface.contains("\u{102E}") })
     }
 
     func testCommit_digitIsLiteral() {
@@ -133,12 +151,18 @@ final class EngineTests: XCTestCase {
         XCTAssertEqual(state.candidates.first?.source, .lexicon)
     }
 
-    func testCandidates_longerInputKeepsTerminalNumericAlternateVisible() {
+    func testCandidates_longerInputPreservesTallAaAfterDescender() {
+        // "mingalarpar" ends on ပ (descender → requires tall ါ). After
+        // grammar filtering, the visible surface must carry ါ, not ာ, even
+        // though the buffer uses the no-digit "ar" form.
         let engine = BurmeseEngine(candidateStore: ComposeKeyCandidateStore())
         let state = engine.update(buffer: "mingalarpar", context: [])
 
         XCTAssertTrue(
-            state.candidates.contains(where: { $0.source == .grammar && $0.reading.hasSuffix("par2") })
+            state.candidates.contains(where: { $0.source == .grammar && $0.surface.hasSuffix("ပါ") })
+        )
+        XCTAssertFalse(
+            state.candidates.contains(where: { $0.surface.hasSuffix("ပာ") })
         )
     }
 

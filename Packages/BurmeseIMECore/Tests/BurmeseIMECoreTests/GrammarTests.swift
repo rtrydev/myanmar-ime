@@ -49,4 +49,78 @@ final class GrammarTests: XCTestCase {
         XCTAssertGreaterThan(score, 0)
         XCTAssertLessThan(score, 100)
     }
+
+    // MARK: - Advanced Grammar Filters
+
+    func testValidateSyllable_medialHaPlusLongI_rejected() {
+        let score = Grammar.validateSyllable(
+            onset: Myanmar.ka,
+            medials: [Myanmar.medialHa],
+            vowelRoman: "i:"
+        )
+        XCTAssertEqual(score, 0)
+    }
+
+    func testValidateSyllable_medialHaPlusLongU_rejected() {
+        let score = Grammar.validateSyllable(
+            onset: Myanmar.ka,
+            medials: [Myanmar.medialHa],
+            vowelRoman: "u:"
+        )
+        XCTAssertEqual(score, 0)
+    }
+
+    func testValidateSyllable_medialHaPlusShortI_legal() {
+        let score = Grammar.validateSyllable(
+            onset: Myanmar.ka,
+            medials: [Myanmar.medialHa],
+            vowelRoman: "i"
+        )
+        XCTAssertGreaterThan(score, 0)
+    }
+
+    func testValidateSyllable_tripleMedialWithInherentVowel_legal() {
+        let score = Grammar.validateSyllable(
+            onset: Myanmar.ka,
+            medials: [Myanmar.medialYa, Myanmar.medialWa, Myanmar.medialHa],
+            vowelRoman: "a"
+        )
+        XCTAssertGreaterThan(score, 0)
+    }
+
+    func testValidateSyllable_tripleMedialWithComplexVowel_rejected() {
+        let score = Grammar.validateSyllable(
+            onset: Myanmar.ka,
+            medials: [Myanmar.medialYa, Myanmar.medialWa, Myanmar.medialHa],
+            vowelRoman: "aung"
+        )
+        XCTAssertEqual(score, 0)
+    }
+
+    func testValidateSyllable_palaRetroflexWithDiphthong_rejected() {
+        let score = Grammar.validateSyllable(
+            onset: Myanmar.tta,
+            medials: [],
+            vowelRoman: "ote"
+        )
+        XCTAssertEqual(score, 0)
+    }
+
+    func testValidateSyllable_palaRetroflexWithSimpleVowel_legal() {
+        let score = Grammar.validateSyllable(
+            onset: Myanmar.tta,
+            medials: [],
+            vowelRoman: "i"
+        )
+        XCTAssertGreaterThan(score, 0)
+    }
+
+    func testValidateSyllable_palaRetroflexWithAr_legal() {
+        let score = Grammar.validateSyllable(
+            onset: Myanmar.nna,
+            medials: [],
+            vowelRoman: "ar"
+        )
+        XCTAssertGreaterThan(score, 0)
+    }
 }
