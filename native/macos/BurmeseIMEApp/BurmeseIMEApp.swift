@@ -120,12 +120,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         server = IMKServer(name: connectionName, bundleIdentifier: bundleIdentifier)
-        guard server != nil else {
+        guard let server else {
             NSLog("Burmese IME failed to create IMKServer for %@", connectionName)
             return
         }
 
-        sharedCandidatePanelController = BurmeseCandidatePanelController()
+        sharedCandidates = IMKCandidates(
+            server: server,
+            panelType: kIMKSingleColumnScrollingCandidatePanel
+        )
     }
 
     private func registerInstalledInputMethodBundle() {

@@ -1,9 +1,9 @@
 import InputMethodKit
 import BurmeseIMECore
 
-/// Shared custom candidates panel — created by AppDelegate in the app target.
+/// Shared IMKCandidates panel — created by AppDelegate in the app target.
 /// Nil in the extension target (where it is never set), so all calls are safe no-ops there.
-var sharedCandidatePanelController: BurmeseCandidatePanelController?
+var sharedCandidates: IMKCandidates?
 
 /// Primary InputMethodKit controller for the Burmese IME extension.
 ///
@@ -12,7 +12,6 @@ var sharedCandidatePanelController: BurmeseCandidatePanelController?
 ///   - `handle(_:client:)` receives every key-down event while the IME is active.
 ///   - `commitComposition(_:)` is called by the system when the client requests a
 ///     forced commit (e.g. window focus loss).
-///   - A custom candidate panel is kept in sync with the selected candidate index.
 @objc(BurmeseInputController)
 class BurmeseInputController: IMKInputController {
     private static let sharedCandidateStore: any CandidateStore = {
@@ -38,11 +37,6 @@ class BurmeseInputController: IMKInputController {
     private let engine = BurmeseEngine(candidateStore: BurmeseInputController.sharedCandidateStore)
     private var state = CompositionState()
 
-    /// Most recent anchor rect returned by the client. Cached so transient
-    /// `firstRect` failures during a composition session don't snap the panel
-    /// to a different location on every keystroke.
-    private var lastAnchorRect: NSRect?
-
     // MARK: - IMKInputController overrides
 
     override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
@@ -53,22 +47,6 @@ class BurmeseInputController: IMKInputController {
         switch keyCode {
         case 53: // Escape — commit raw latin
             commitRaw(client: sender)
-            return true
-
-        case 48: // Tab / Shift+Tab — cycle candidate selection in the panel
-            guard state.isActive, !state.candidates.isEmpty else { return false }
-            let delta = event.modifierFlags.contains(.shift) ? -1 : 1
-            cycleCandidates(delta: delta)
-            return true
-
-        case 125, 124: // Down / Right arrow — next candidate
-            guard state.isActive, !state.candidates.isEmpty else { return false }
-            cycleCandidates(delta: 1)
-            return true
-
-        case 126, 123: // Up / Left arrow — previous candidate
-            guard state.isActive, !state.candidates.isEmpty else { return false }
-            cycleCandidates(delta: -1)
             return true
 
         case 36, 76: // Return / Enter — commit selection
@@ -100,31 +78,36 @@ class BurmeseInputController: IMKInputController {
             break
         }
 
-        let chars: String = {
-            let direct = event.characters ?? ""
-            if !direct.isEmpty {
-                return direct
+        // Let IMKCandidates handle arrow keys and page up/down while the panel is
+        // visible. Tab/Shift-Tab aren't navigation keys to IMKCandidates by default,
+        // so we translate them into synthetic Down/Up arrow events. The panel calls
+        // back through candidateSelected(_:) and candidateSelectionChanged(_:).
+        if state.isActive, let panel = sharedCandidates, panel.isVisible() {
+            if isCandidateNavigationKey(keyCode) {
+                panel.interpretKeyEvents([event])
+                return true
             }
-            return event.charactersIgnoringModifiers ?? ""
-        }()
-        guard !chars.isEmpty else { return false }
-
-        // Option+digit (1–5) is always a candidate shortcut, regardless of
-        // whether those digits would otherwise extend the buffer. This matches
-        // how system IMEs expose numbered candidate selection without
-        // interfering with literal digit input.
-        if event.modifierFlags.contains(.option),
-           let digit = Int(chars), (1...5).contains(digit) {
-            if selectCandidateShortcut(digit - 1, client: sender) {
+            if keyCode == 48 { // Tab / Shift+Tab
+                let arrowKeyCode: UInt16 = event.modifierFlags.contains(.shift) ? 126 : 125
+                if let synthetic = arrowEvent(like: event, keyCode: arrowKeyCode) {
+                    panel.interpretKeyEvents([synthetic])
+                }
                 return true
             }
         }
 
-        // "Typeable" characters — ASCII letters, digits, and common
-        // punctuation — extend the composition buffer rather than forcing a
-        // commit. This mirrors the behaviour of system IMEs like Pinyin and
-        // Kotoeri: the user can interleave non-convertible text, and the
-        // engine emits the raw buffer verbatim if no Burmese parse is found.
+        let chars: String = {
+            let direct = event.characters ?? ""
+            if !direct.isEmpty { return direct }
+            return event.charactersIgnoringModifiers ?? ""
+        }()
+        guard !chars.isEmpty else { return false }
+
+        // "Typeable" characters — ASCII letters, digits, and common punctuation —
+        // extend the composition buffer rather than forcing a commit. This mirrors
+        // the behaviour of system IMEs like Pinyin and Kotoeri: the user can
+        // interleave non-convertible text, and the engine emits the raw buffer
+        // verbatim if no Burmese parse is found.
         if isTypeableInput(chars) {
             let seed = state.isActive ? state.rawBuffer : ""
             let nextBuffer = seed + chars.lowercased()
@@ -133,18 +116,52 @@ class BurmeseInputController: IMKInputController {
             return true
         }
 
-        // Anything else (control characters, function keys forwarded as text,
-        // etc.) commits the pending candidate first and falls through.
+        // Anything else (control characters, function keys forwarded as text, etc.)
+        // commits the pending candidate first and falls through.
         if state.isActive {
             commitSelection(client: sender)
         }
         return false
     }
 
-    /// Printable characters that should extend the composition buffer. We
-    /// accept the printable ASCII range excluding whitespace (space is a
-    /// commit key) so mixed-content input stays in the buffer until the user
-    /// explicitly commits.
+    /// Printable characters that should extend the composition buffer. We accept
+    /// the printable ASCII range excluding whitespace (space is a commit key) so
+    /// mixed-content input stays in the buffer until the user explicitly commits.
+    /// Key codes that IMKCandidates natively treats as navigation: Left/Right/Down/Up
+    /// arrows (123/124/125/126) and PageUp/PageDown (116/121). Tab is handled
+    /// separately via synthetic arrow events.
+    private func isCandidateNavigationKey(_ keyCode: UInt16) -> Bool {
+        switch keyCode {
+        case 116, 121, 123, 124, 125, 126: return true
+        default: return false
+        }
+    }
+
+    /// Build a synthetic key-down event matching `source` but with a different
+    /// keyCode — used to translate Tab/Shift-Tab into arrow keys for the panel.
+    private func arrowEvent(like source: NSEvent, keyCode: UInt16) -> NSEvent? {
+        let character: String
+        switch keyCode {
+        case 125: character = String(UnicodeScalar(NSDownArrowFunctionKey)!)
+        case 126: character = String(UnicodeScalar(NSUpArrowFunctionKey)!)
+        case 123: character = String(UnicodeScalar(NSLeftArrowFunctionKey)!)
+        case 124: character = String(UnicodeScalar(NSRightArrowFunctionKey)!)
+        default: character = ""
+        }
+        return NSEvent.keyEvent(
+            with: .keyDown,
+            location: source.locationInWindow,
+            modifierFlags: source.modifierFlags.subtracting(.shift),
+            timestamp: source.timestamp,
+            windowNumber: source.windowNumber,
+            context: nil,
+            characters: character,
+            charactersIgnoringModifiers: character,
+            isARepeat: false,
+            keyCode: keyCode
+        )
+    }
+
     private func isTypeableInput(_ chars: String) -> Bool {
         guard !chars.isEmpty else { return false }
         return chars.unicodeScalars.allSatisfy { scalar in
@@ -157,56 +174,8 @@ class BurmeseInputController: IMKInputController {
     }
 
     override func deactivateServer(_ sender: Any!) {
-        hideCandidatePanel()
-        lastAnchorRect = nil
+        hideCandidates()
         super.deactivateServer(sender)
-    }
-
-    override func didCommand(by aSelector: Selector!, client sender: Any!) -> Bool {
-        switch aSelector {
-        case #selector(NSResponder.insertTab(_:)):
-            guard state.isActive, !state.candidates.isEmpty else { return false }
-            cycleCandidates(delta: 1)
-            return true
-
-        case #selector(NSResponder.insertBacktab(_:)):
-            guard state.isActive, !state.candidates.isEmpty else { return false }
-            cycleCandidates(delta: -1)
-            return true
-
-        case #selector(NSResponder.moveDown(_:)),
-             #selector(NSResponder.moveRight(_:)):
-            guard state.isActive, !state.candidates.isEmpty else { return false }
-            cycleCandidates(delta: 1)
-            return true
-
-        case #selector(NSResponder.moveUp(_:)),
-             #selector(NSResponder.moveLeft(_:)):
-            guard state.isActive, !state.candidates.isEmpty else { return false }
-            cycleCandidates(delta: -1)
-            return true
-
-        case #selector(NSResponder.insertNewline(_:)),
-             #selector(NSResponder.insertLineBreak(_:)):
-            guard state.isActive else { return false }
-            commitSelection(client: sender)
-            return true
-
-        case #selector(NSResponder.deleteBackward(_:)):
-            guard !state.rawBuffer.isEmpty else { return false }
-            state.rawBuffer.removeLast()
-            state = engine.update(buffer: state.rawBuffer, context: state.committedContext)
-            updateMarkedText(client: sender)
-            return true
-
-        case #selector(NSResponder.cancelOperation(_:)):
-            guard state.isActive else { return false }
-            commitRaw(client: sender)
-            return true
-
-        default:
-            return false
-        }
     }
 
     override func candidates(_ sender: Any!) -> [Any]! {
@@ -231,15 +200,6 @@ class BurmeseInputController: IMKInputController {
 
     // MARK: - Private helpers
 
-    /// Advance the candidate selection by `delta` and highlight it in the panel.
-    /// The marked text (raw latin buffer) is intentionally left unchanged —
-    /// only the panel highlight moves. Space/Enter commits the highlighted candidate.
-    private func cycleCandidates(delta: Int) {
-        let count = state.candidates.count
-        state.selectedCandidateIndex = (state.selectedCandidateIndex + delta + count) % count
-        sharedCandidatePanelController?.updateSelection(selectedIndex: state.selectedCandidateIndex)
-    }
-
     private func updateMarkedText(client sender: Any!) {
         guard let client = sender as? IMKTextInput else { return }
         let display = state.rawBuffer
@@ -250,9 +210,9 @@ class BurmeseInputController: IMKInputController {
             replacementRange: NSRange(location: NSNotFound, length: 0)
         )
         if state.candidates.isEmpty {
-            hideCandidatePanel()
+            hideCandidates()
         } else {
-            showCandidatePanel()
+            showCandidates()
         }
     }
 
@@ -265,8 +225,7 @@ class BurmeseInputController: IMKInputController {
         )
         let newContext = Array((state.committedContext + [output]).suffix(3))
         state = CompositionState(committedContext: newContext)
-        hideCandidatePanel()
-        lastAnchorRect = nil
+        hideCandidates()
     }
 
     private func commitRaw(client sender: Any!) {
@@ -277,367 +236,16 @@ class BurmeseInputController: IMKInputController {
             replacementRange: NSRange(location: NSNotFound, length: 0)
         )
         state = CompositionState(committedContext: state.committedContext)
-        hideCandidatePanel()
-        lastAnchorRect = nil
+        hideCandidates()
     }
 
-    private func selectCandidateShortcut(_ index: Int, client sender: Any!) -> Bool {
-        guard state.isActive, index >= 0, index < state.candidates.count else { return false }
-        state.selectedCandidateIndex = index
-        commitSelection(client: sender)
-        return true
+    private func showCandidates() {
+        guard let panel = sharedCandidates else { return }
+        panel.update()
+        panel.show(kIMKLocateCandidatesBelowHint)
     }
 
-    private func showCandidatePanel() {
-        guard let panel = sharedCandidatePanelController else { return }
-        panel.delegate = self
-        panel.show(
-            candidates: state.candidates,
-            selectedIndex: state.selectedCandidateIndex,
-            anchorRect: candidateAnchorRect()
-        )
-    }
-
-    private func hideCandidatePanel() {
-        if sharedCandidatePanelController?.delegate === self {
-            sharedCandidatePanelController?.delegate = nil
-        }
-        sharedCandidatePanelController?.hide()
-    }
-
-    private func candidateAnchorRect() -> NSRect? {
-        // Use the IMKTextInput proxy directly — it declares firstRect/markedRange/selectedRange.
-        // Casting to NSTextInputClient is unreliable because the IMK proxy forwards selectors
-        // rather than declaring structural conformance, so `as? NSTextInputClient` can miss.
-        guard let textClient = client() else { return lastAnchorRect }
-
-        let markedRange = textClient.markedRange()
-        let selectedRange = textClient.selectedRange()
-
-        // Preferred ranges, in order of reliability for placing a candidate panel
-        // right at the text cursor during marked-text composition.
-        var rangesToTry: [NSRange] = []
-
-        if markedRange.location != NSNotFound {
-            // Start-of-composition insertion point — matches where the text caret is drawn.
-            rangesToTry.append(NSRange(location: markedRange.location, length: 0))
-            if markedRange.length > 0 {
-                // First glyph of the marked text — non-zero-length fallback for clients that
-                // return NSZeroRect for zero-length queries.
-                rangesToTry.append(NSRange(location: markedRange.location, length: 1))
-                rangesToTry.append(markedRange)
-            }
-        }
-
-        if selectedRange.location != NSNotFound {
-            rangesToTry.append(NSRange(location: selectedRange.location, length: 0))
-            if selectedRange.length > 0 {
-                rangesToTry.append(selectedRange)
-            }
-            if selectedRange.location > 0 {
-                rangesToTry.append(NSRange(location: selectedRange.location - 1, length: 1))
-            }
-        }
-
-        for range in rangesToTry {
-            var actualRange = NSRange(location: NSNotFound, length: 0)
-            let rect = textClient.firstRect(forCharacterRange: range, actualRange: &actualRange)
-            // firstRect returns NSZeroRect (or a rect with zero size at 0,0) on failure.
-            guard rect.size.width > 0 || rect.size.height > 0 else { continue }
-
-            if let resolved = rectIfOnScreen(rect) {
-                lastAnchorRect = resolved
-                return resolved
-            }
-        }
-
-        // Preserve the last known good position so transient failures during a single
-        // composition session don't cause the panel to jump to a random fallback.
-        return lastAnchorRect
-    }
-
-    /// Validate a rect returned by `firstRect` and normalise it into AppKit screen
-    /// coordinates (bottom-left origin). Some text clients return CG-style
-    /// (top-left origin, Y down) coordinates; this also handles that case.
-    private func rectIfOnScreen(_ rect: NSRect) -> NSRect? {
-        if NSScreen.screens.contains(where: { $0.frame.intersects(rect) }) {
-            return rect
-        }
-        if let primary = NSScreen.screens.first(where: { $0.frame.origin == .zero }) {
-            let flipped = NSRect(
-                x: rect.minX,
-                y: primary.frame.height - rect.maxY,
-                width: rect.width,
-                height: rect.height
-            )
-            if NSScreen.screens.contains(where: { $0.frame.intersects(flipped) }) {
-                return flipped
-            }
-        }
-        return nil
-    }
-}
-
-extension BurmeseInputController: BurmeseCandidatePanelControllerDelegate {
-    func candidatePanelController(_ controller: BurmeseCandidatePanelController, didCommitCandidateAt index: Int) {
-        guard state.isActive, index >= 0, index < state.candidates.count else { return }
-        state.selectedCandidateIndex = index
-        guard let activeClient = client() else { return }
-        commitSelection(client: activeClient)
-    }
-}
-
-protocol BurmeseCandidatePanelControllerDelegate: AnyObject {
-    func candidatePanelController(_ controller: BurmeseCandidatePanelController, didCommitCandidateAt index: Int)
-}
-
-final class BurmeseCandidatePanelController: NSObject {
-    weak var delegate: BurmeseCandidatePanelControllerDelegate?
-
-    private let panel: BurmeseCandidatePanelWindow
-    private let backgroundView = NSVisualEffectView()
-    private let stackView = NSStackView()
-    private var itemViews: [BurmeseCandidateItemView] = []
-
-    override init() {
-        panel = BurmeseCandidatePanelWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 10, height: 10),
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-        super.init()
-        configurePanel()
-    }
-
-    func show(candidates: [Candidate], selectedIndex: Int, anchorRect: NSRect?) {
-        rebuildItemViews(candidates: candidates, selectedIndex: selectedIndex)
-        panel.contentView?.layoutSubtreeIfNeeded()
-        let contentSize = backgroundView.fittingSize
-        panel.setContentSize(contentSize)
-        positionPanel(anchorRect: anchorRect, panelSize: contentSize)
-        panel.orderFrontRegardless()
-    }
-
-    func updateSelection(selectedIndex: Int) {
-        for (index, itemView) in itemViews.enumerated() {
-            itemView.isSelectedCandidate = index == selectedIndex
-            let hideSeparator = index == 0
-                || index == selectedIndex
-                || (index - 1) == selectedIndex
-            itemView.showsSeparator = !hideSeparator
-        }
-    }
-
-    func hide() {
-        panel.orderOut(nil)
-    }
-
-    private func configurePanel() {
-        panel.isReleasedWhenClosed = false
-        panel.hidesOnDeactivate = false
-        panel.isFloatingPanel = true
-        panel.hasShadow = true
-        panel.backgroundColor = .clear
-        panel.isOpaque = false
-        panel.level = .statusBar
-        panel.collectionBehavior = [.moveToActiveSpace, .transient, .ignoresCycle]
-        panel.ignoresMouseEvents = false
-
-        backgroundView.material = .popover
-        backgroundView.state = .active
-        backgroundView.blendingMode = .behindWindow
-        backgroundView.wantsLayer = true
-        backgroundView.layer?.cornerRadius = 8
-        backgroundView.layer?.masksToBounds = true
-        backgroundView.layer?.borderWidth = 0.5
-        backgroundView.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.5).cgColor
-
-        stackView.orientation = .vertical
-        stackView.alignment = .leading
-        stackView.spacing = 0
-        stackView.edgeInsets = NSEdgeInsets(top: 4, left: 4, bottom: 4, right: 4)
-        stackView.translatesAutoresizingMaskIntoConstraints = false
-
-        backgroundView.addSubview(stackView)
-        NSLayoutConstraint.activate([
-            stackView.leadingAnchor.constraint(equalTo: backgroundView.leadingAnchor),
-            stackView.trailingAnchor.constraint(equalTo: backgroundView.trailingAnchor),
-            stackView.topAnchor.constraint(equalTo: backgroundView.topAnchor),
-            stackView.bottomAnchor.constraint(equalTo: backgroundView.bottomAnchor),
-        ])
-
-        panel.contentView = backgroundView
-    }
-
-    private func rebuildItemViews(candidates: [Candidate], selectedIndex: Int) {
-        for itemView in itemViews {
-            stackView.removeArrangedSubview(itemView)
-            itemView.removeFromSuperview()
-        }
-        itemViews.removeAll(keepingCapacity: true)
-
-        for (index, candidate) in candidates.enumerated() {
-            let itemView = BurmeseCandidateItemView()
-            itemView.candidateIndex = index
-            itemView.target = self
-            itemView.action = #selector(candidateItemPressed(_:))
-            itemView.configure(
-                title: candidate.surface,
-                selected: index == selectedIndex,
-                showsSeparator: index > 0 && index != selectedIndex && (index - 1) != selectedIndex
-            )
-            stackView.addArrangedSubview(itemView)
-            itemViews.append(itemView)
-        }
-
-        // Force all rows to match the widest row so the selection highlight spans the full width.
-        stackView.layoutSubtreeIfNeeded()
-        let widest = itemViews.map { $0.intrinsicContentSize.width }.max() ?? 0
-        for itemView in itemViews {
-            itemView.widthConstraint.constant = widest
-        }
-    }
-
-    private func positionPanel(anchorRect: NSRect?, panelSize: NSSize) {
-        // If we have no anchor AND the panel is already visible, leave it where it is
-        // rather than jumping somewhere arbitrary. Better stale than wrong.
-        guard let anchor = anchorRect else {
-            if !panel.isVisible {
-                let screen = NSScreen.main ?? NSScreen.screens.first
-                let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-                panel.setFrameOrigin(NSPoint(
-                    x: visible.midX - panelSize.width / 2,
-                    y: visible.midY
-                ))
-            }
-            return
-        }
-
-        let screen = NSScreen.screens.first(where: { $0.frame.intersects(anchor) })
-            ?? NSScreen.main
-            ?? NSScreen.screens.first
-        let visibleFrame = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-
-        // Standard IME placement: a gap below the text baseline (anchor.minY in AppKit
-        // screen coords is the bottom of the glyph run).  Horizontally align the panel's
-        // left edge with the start of the composition.  The gap is deliberately larger
-        // than the clamp margin so the panel clears descenders and doesn't cover the
-        // marked text the user is still editing.
-        let gap: CGFloat = 24
-        let edgeMargin: CGFloat = 4
-        var origin = NSPoint(x: anchor.minX, y: anchor.minY - panelSize.height - gap)
-
-        // If placing below would clip off the bottom of the visible area, flip above the text.
-        if origin.y < visibleFrame.minY + edgeMargin {
-            origin.y = anchor.maxY + gap
-        }
-
-        // Clamp into the visible frame so the panel never lands off-screen.
-        origin.x = max(visibleFrame.minX + edgeMargin, min(origin.x, visibleFrame.maxX - panelSize.width - edgeMargin))
-        origin.y = max(visibleFrame.minY + edgeMargin, min(origin.y, visibleFrame.maxY - panelSize.height - edgeMargin))
-
-        panel.setFrameOrigin(origin)
-    }
-
-    @objc private func candidateItemPressed(_ sender: BurmeseCandidateItemView) {
-        delegate?.candidatePanelController(self, didCommitCandidateAt: sender.candidateIndex)
-    }
-}
-
-final class BurmeseCandidatePanelWindow: NSPanel {
-    override var canBecomeKey: Bool { false }
-    override var canBecomeMain: Bool { false }
-}
-
-final class BurmeseCandidateItemView: NSControl {
-    var candidateIndex = 0
-    var isSelectedCandidate = false {
-        didSet { updateAppearance() }
-    }
-    var showsSeparator = false {
-        didSet { separator.isHidden = !showsSeparator }
-    }
-
-    private(set) var widthConstraint: NSLayoutConstraint!
-
-    private let highlightView = NSView()
-    private let label = NSTextField(labelWithString: "")
-    private let separator = NSBox()
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-
-        highlightView.translatesAutoresizingMaskIntoConstraints = false
-        highlightView.wantsLayer = true
-        highlightView.layer?.cornerRadius = 4
-        addSubview(highlightView)
-
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.lineBreakMode = .byTruncatingTail
-        addSubview(label)
-
-        separator.translatesAutoresizingMaskIntoConstraints = false
-        separator.boxType = .custom
-        separator.borderWidth = 0
-        separator.fillColor = NSColor.separatorColor.withAlphaComponent(0.35)
-        separator.isHidden = true
-        addSubview(separator)
-
-        let widthC = widthAnchor.constraint(equalToConstant: 0)
-        widthC.priority = .required
-        widthConstraint = widthC
-        NSLayoutConstraint.activate([
-            widthC,
-            highlightView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
-            highlightView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
-            highlightView.topAnchor.constraint(equalTo: topAnchor, constant: 1),
-            highlightView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -1),
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -10),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor),
-            separator.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-            separator.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
-            separator.topAnchor.constraint(equalTo: topAnchor),
-            separator.heightAnchor.constraint(equalToConstant: 0.5),
-        ])
-        updateAppearance()
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override var acceptsFirstResponder: Bool { false }
-
-    override var intrinsicContentSize: NSSize {
-        let labelSize = label.intrinsicContentSize
-        return NSSize(width: labelSize.width + 20, height: max(26, labelSize.height + 8))
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        sendAction(action, to: target)
-    }
-
-    func configure(title: String, selected: Bool, showsSeparator: Bool) {
-        let titleColor = selected ? NSColor.white : NSColor.labelColor
-        label.attributedStringValue = NSAttributedString(
-            string: title,
-            attributes: [
-                .font: NSFont.systemFont(ofSize: 14),
-                .foregroundColor: titleColor,
-            ]
-        )
-        isSelectedCandidate = selected
-        self.showsSeparator = showsSeparator
-        invalidateIntrinsicContentSize()
-    }
-
-    private func updateAppearance() {
-        highlightView.layer?.backgroundColor = (
-            isSelectedCandidate ? NSColor.controlAccentColor.cgColor : NSColor.clear.cgColor
-        )
-        label.textColor = isSelectedCandidate ? .white : .labelColor
+    private func hideCandidates() {
+        sharedCandidates?.hide()
     }
 }
