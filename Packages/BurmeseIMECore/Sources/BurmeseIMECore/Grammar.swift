@@ -81,6 +81,33 @@ public enum Grammar {
         [Myanmar.medialYa, Myanmar.medialWa, Myanmar.medialHa],     // ျွှ (y2wh)
     ]
 
+    // MARK: - Tall/Short Aa Legality
+
+    /// Consonants with descenders that require tall aa (ါ U+102B) instead of
+    /// short aa (ာ U+102C).
+    public static let requiresTallAa: Set<Character> = [
+        Myanmar.kha, Myanmar.ga, Myanmar.nga,
+        Myanmar.da, Myanmar.pa, Myanmar.wa,
+    ]
+
+    /// Vowel roman keys that produce short aa (U+102C).
+    /// When the onset requires tall aa, these are illegal.
+    private static let shortAaVowels: Set<String> = [
+        "ar", "ar:",
+        "aw", "aw:", "aw.",
+        "out",
+        "aung", "aung:", "aung.",
+    ]
+
+    /// Vowel roman keys that produce tall aa (U+102B).
+    /// When the onset does NOT require tall aa, these are illegal.
+    private static let tallAaVowels: Set<String> = [
+        "ar2", "ar2:",
+        "aw2", "aw2:", "aw2.",
+        "out2",
+        "aung2", "aung2:", "aung2.",
+    ]
+
     // MARK: - Stacking (Virama / Kinzi)
 
     /// Consonants commonly seen as the subscript in a virama stack (္ + consonant).
@@ -141,6 +168,13 @@ public enum Grammar {
                     return 0
                 }
             }
+        }
+
+        // Validate tall/short aa form against consonant
+        if requiresTallAa.contains(onset) {
+            if shortAaVowels.contains(vowelRoman) { return 0 }
+        } else {
+            if tallAaVowels.contains(vowelRoman) { return 0 }
         }
 
         // Base score: legal

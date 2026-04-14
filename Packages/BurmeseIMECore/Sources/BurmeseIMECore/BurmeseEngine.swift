@@ -3,8 +3,25 @@
 /// Manages the composition buffer, generates candidates from grammar parsing
 /// and lexicon lookup, and handles commit/cancel operations.
 ///
-/// Ranking order: grammar validity > canonical alias cost > lexicon frequency > user history.
+/// Ranking order: grammar legality > alias cost > parser score > lexicon frequency.
 public final class BurmeseEngine: Sendable {
+
+    private struct RankedGrammarCandidate {
+        var candidate: Candidate
+        let legalityScore: Int
+        let aliasCost: Int
+        let parserScore: Int
+        let structureCost: Int
+    }
+
+    private struct RankedLexiconCandidate {
+        let candidate: Candidate
+        let aliasPenalty: Int
+        let aliasReading: String
+        let composeReading: String
+    }
+
+    private static let grammarCandidateBudget = 16
 
     private let parser: SyllableParser
     private let candidateStore: any CandidateStore
@@ -25,45 +42,100 @@ public final class BurmeseEngine: Sendable {
             return CompositionState()
         }
 
-        var candidates: [Candidate] = []
+        let grammarParses = parser.parseCandidates(normalized, maxResults: Self.grammarCandidateBudget)
+        var grammarCandidates = grammarParses.map { parse in
+            RankedGrammarCandidate(
+                candidate: Candidate(
+                    surface: parse.output,
+                    reading: parse.reading,
+                    source: .grammar,
+                    score: Double(parse.score)
+                ),
+                legalityScore: parse.legalityScore,
+                aliasCost: parse.aliasCost,
+                parserScore: parse.score,
+                structureCost: parse.structureCost
+            )
+        }
+        grammarCandidates.sort { lhs, rhs in
+            grammarCandidateIsBetter(lhs, than: rhs)
+        }
+        grammarCandidates = promoteAliasAlternate(grammarCandidates)
 
-        // 1. Grammar-based candidates from the parser
-        let parses = parser.parse(normalized)
-        for parse in parses {
-            candidates.append(Candidate(
-                surface: parse.output,
-                reading: parse.reading,
-                source: .grammar,
-                score: Double(parse.legalityScore) * 1000.0
-                    + Double(normalized.count) * 10.0
-                    - Double(parse.aliasCost) * 5.0
-            ))
+        let previousSurface = context.last
+        let aliasPrefix = Romanization.aliasReading(normalized)
+        let composePrefix = Romanization.composeLookupKey(normalized)
+        let lexiconCandidates = candidateStore.lookup(
+            prefix: aliasPrefix,
+            previousSurface: previousSurface
+        )
+
+        var grammarSurfaceIndex: [String: Int] = [:]
+        for (index, candidate) in grammarCandidates.enumerated() {
+            grammarSurfaceIndex[candidate.candidate.surface] = index
         }
 
-        // 2. Lexicon candidates
-        let previousSurface = context.last
-        let lexiconCandidates = candidateStore.lookup(
-            prefix: normalized, previousSurface: previousSurface
-        )
-        for lc in lexiconCandidates {
-            // Avoid duplicates with grammar candidates
-            if !candidates.contains(where: { $0.surface == lc.surface }) {
-                candidates.append(lc)
+        var uniqueLexiconCandidates: [RankedLexiconCandidate] = []
+        var seenLexiconSurfaces: Set<String> = []
+
+        for lexiconCandidate in lexiconCandidates {
+            if let grammarIndex = grammarSurfaceIndex[lexiconCandidate.surface] {
+                grammarCandidates[grammarIndex].candidate = Candidate(
+                    surface: grammarCandidates[grammarIndex].candidate.surface,
+                    reading: grammarCandidates[grammarIndex].candidate.reading,
+                    source: .grammar,
+                    score: grammarCandidates[grammarIndex].candidate.score + lexiconCandidate.score
+                )
+                continue
+            }
+
+            if seenLexiconSurfaces.insert(lexiconCandidate.surface).inserted {
+                uniqueLexiconCandidates.append(
+                    RankedLexiconCandidate(
+                        candidate: lexiconCandidate,
+                        aliasPenalty: Romanization.aliasPenaltyCount(for: lexiconCandidate.reading),
+                        aliasReading: Romanization.aliasReading(lexiconCandidate.reading),
+                        composeReading: Romanization.composeLookupKey(lexiconCandidate.reading)
+                    )
+                )
             }
         }
 
-        // 3. Sort by score descending
-        candidates.sort { $0.score > $1.score }
+        uniqueLexiconCandidates.sort { lhs, rhs in
+            lexiconCandidateIsBetter(lhs, than: rhs, aliasPrefix: aliasPrefix, composePrefix: composePrefix)
+        }
 
-        // 4. Limit to page size
-        if candidates.count > Self.candidatePageSize {
-            candidates = Array(candidates.prefix(Self.candidatePageSize))
+        let primaryGrammar = Array(grammarCandidates.prefix(3))
+        let remainingGrammar = Array(grammarCandidates.dropFirst(3))
+        let exactAliasLexicon = uniqueLexiconCandidates.filter { $0.aliasReading == aliasPrefix }
+        let exactComposeLexicon = uniqueLexiconCandidates.filter {
+            $0.aliasReading != aliasPrefix && $0.composeReading == composePrefix
+        }
+        let prioritizedLexicon = Array(
+            (exactAliasLexicon.isEmpty ? exactComposeLexicon : exactAliasLexicon)
+                .prefix(2)
+        )
+        let prioritizedKeys = Set(prioritizedLexicon.map(lexiconCandidateKey))
+        let trailingLexicon = uniqueLexiconCandidates.filter { !prioritizedKeys.contains(lexiconCandidateKey($0)) }
+
+        var merged: [Candidate] = prioritizedLexicon.map(\.candidate)
+
+        for grammarCandidate in primaryGrammar where merged.count < Self.candidatePageSize {
+            merged.append(grammarCandidate.candidate)
+        }
+
+        for lexiconCandidate in trailingLexicon where merged.count < Self.candidatePageSize {
+            merged.append(lexiconCandidate.candidate)
+        }
+
+        for grammarCandidate in remainingGrammar where merged.count < Self.candidatePageSize {
+            merged.append(grammarCandidate.candidate)
         }
 
         return CompositionState(
             rawBuffer: normalized,
             selectedCandidateIndex: 0,
-            candidates: candidates,
+            candidates: merged,
             committedContext: context
         )
     }
@@ -82,5 +154,98 @@ public final class BurmeseEngine: Sendable {
     /// Cancel composition: return the raw buffer unchanged.
     public func cancel(state: CompositionState) -> String {
         state.rawBuffer
+    }
+
+    private func grammarCandidateIsBetter(_ lhs: RankedGrammarCandidate, than rhs: RankedGrammarCandidate) -> Bool {
+        if lhs.legalityScore != rhs.legalityScore {
+            return lhs.legalityScore > rhs.legalityScore
+        }
+        if lhs.aliasCost != rhs.aliasCost {
+            return lhs.aliasCost < rhs.aliasCost
+        }
+        if lhs.parserScore != rhs.parserScore {
+            return lhs.parserScore > rhs.parserScore
+        }
+        if lhs.structureCost != rhs.structureCost {
+            return lhs.structureCost < rhs.structureCost
+        }
+        if lhs.candidate.score != rhs.candidate.score {
+            return lhs.candidate.score > rhs.candidate.score
+        }
+        if lhs.candidate.surface != rhs.candidate.surface {
+            return lhs.candidate.surface < rhs.candidate.surface
+        }
+        return lhs.candidate.reading < rhs.candidate.reading
+    }
+
+    private func lexiconCandidateIsBetter(
+        _ lhs: RankedLexiconCandidate,
+        than rhs: RankedLexiconCandidate,
+        aliasPrefix: String,
+        composePrefix: String
+    ) -> Bool {
+        let lhsMatch = lexiconMatchQuality(lhs, aliasPrefix: aliasPrefix, composePrefix: composePrefix)
+        let rhsMatch = lexiconMatchQuality(rhs, aliasPrefix: aliasPrefix, composePrefix: composePrefix)
+        if lhsMatch != rhsMatch {
+            return lhsMatch > rhsMatch
+        }
+        if lhs.aliasPenalty != rhs.aliasPenalty {
+            return lhs.aliasPenalty < rhs.aliasPenalty
+        }
+        if lhs.candidate.score != rhs.candidate.score {
+            return lhs.candidate.score > rhs.candidate.score
+        }
+        if lhs.candidate.surface != rhs.candidate.surface {
+            return lhs.candidate.surface < rhs.candidate.surface
+        }
+        return lhs.candidate.reading < rhs.candidate.reading
+    }
+
+    private func lexiconMatchQuality(
+        _ candidate: RankedLexiconCandidate,
+        aliasPrefix: String,
+        composePrefix: String
+    ) -> Int {
+        if candidate.aliasReading == aliasPrefix {
+            return 2
+        }
+        if candidate.composeReading == composePrefix {
+            return 1
+        }
+        return 0
+    }
+
+    private func lexiconCandidateKey(_ candidate: RankedLexiconCandidate) -> String {
+        "\(candidate.candidate.surface)\u{0}\(candidate.candidate.reading)"
+    }
+
+    private func promoteAliasAlternate(_ candidates: [RankedGrammarCandidate]) -> [RankedGrammarCandidate] {
+        guard candidates.count > 2 else { return candidates }
+
+        let topReading = candidates[0].candidate.reading
+
+        // Among alias candidates ranked beyond position 2, prefer the one
+        // whose reading shares the longest common prefix with the top
+        // candidate. This selects the terminal-syllable alternate (e.g.
+        // "par2" over "lar2") which is what the user most likely wants.
+        var bestIndex: Int?
+        var bestPrefixLen = -1
+        for i in 2..<candidates.count where candidates[i].aliasCost > 0 {
+            let reading = candidates[i].candidate.reading
+            let commonLen = topReading.commonPrefix(with: reading).count
+            if commonLen > bestPrefixLen {
+                bestPrefixLen = commonLen
+                bestIndex = i
+            }
+        }
+
+        guard let aliasIndex = bestIndex, aliasIndex > 2 else {
+            return candidates
+        }
+
+        var reordered = candidates
+        let aliasCandidate = reordered.remove(at: aliasIndex)
+        reordered.insert(aliasCandidate, at: min(2, reordered.count))
+        return reordered
     }
 }

@@ -1,6 +1,7 @@
 /// Protocol for looking up candidates from a backing store (lexicon, history, etc.).
 public protocol CandidateStore: Sendable {
-    /// Look up candidates matching a reading prefix, optionally considering previous context.
+    /// Look up candidates matching the compose buffer prefix, optionally considering previous context.
+    /// Implementations may ignore numeric markers and optional syllable separators.
     func lookup(prefix: String, previousSurface: String?) -> [Candidate]
 }
 

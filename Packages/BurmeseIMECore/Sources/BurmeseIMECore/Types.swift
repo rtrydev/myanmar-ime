@@ -55,11 +55,22 @@ public struct SyllableParse: Sendable, Equatable {
     public let reading: String
     public let aliasCost: Int
     public let legalityScore: Int
+    public let score: Int
+    public let structureCost: Int
 
-    public init(output: String, reading: String, aliasCost: Int = 0, legalityScore: Int = 0) {
+    public init(
+        output: String,
+        reading: String,
+        aliasCost: Int = 0,
+        legalityScore: Int = 0,
+        score: Int = 0,
+        structureCost: Int = 0
+    ) {
         self.output = output
         self.reading = reading
         self.aliasCost = aliasCost
         self.legalityScore = legalityScore
+        self.score = score
+        self.structureCost = structureCost
     }
 }

@@ -1,12 +1,12 @@
 # Myanmar IME for macOS
 
-A native macOS Input Method Editor (IME) for typing Burmese/Myanmar script using a standard Latin (QWERTY) keyboard. Built in Swift using the **Hybrid Burmese** romanization scheme — a grammar-aware engine that enforces orthographic legality and ranks candidates through grammar, lexicon frequency, and user history.
+A native macOS Input Method Editor (IME) for typing Burmese/Myanmar script using a standard Latin (QWERTY) keyboard. Built in Swift using the **Hybrid Burmese** romanization scheme — a grammar-aware engine that enforces orthographic legality and ranks candidates through grammar alternatives, lexicon frequency, and user history.
 
 ---
 
 ## Overview
 
-Myanmar IME replaces a prior browser-based transliteration engine with a fully native macOS input method. The legacy web engine used a flat 490-rule lookup table that permitted illegal Burmese character combinations and leaked raw Latin characters on failed parses (e.g. `foo → fိုို`, `kya2 → ကြ2`). The native engine enforces formal orthographic rules: if a consonant cannot legally take a vowel or medial pattern, the combination never reaches the output.
+Myanmar IME replaces a prior browser-based transliteration engine with a fully native macOS input method. The legacy web engine used a flat 490-rule lookup table that permitted illegal Burmese character combinations and leaked raw Latin characters on failed parses (e.g. `foo → fိုို`, `kya2 → ကြ2`). The native engine enforces formal orthographic rules: if a consonant cannot legally take a vowel or medial pattern, the combination never reaches the output, and digit-marked ambiguities are resolved through the candidate window instead of forcing users to type `2` or `3`.
 
 **Key improvements over the legacy web IME:**
 
@@ -38,6 +38,9 @@ Candidates are ranked by a four-level priority:
 3. **Lexicon frequency** — 83,789-word corpus with log-scale unigram and bigram scores
 4. **User history** — Selection count + recency boost (planned for beta)
 
+### Digitless Candidate Disambiguation
+Compose mode accepts digitless input only. Instead of typing `ky2ar:` or `thar2`, users type the base reading (`kyar`, `thar`) and choose among grammar and lexicon candidates such as `ကြား` / `ကျား` or `သာ` / `သါ`.
+
 ### Hybrid Burmese Romanization
 The romanization scheme maps 33 base consonants × medial combinations × 97 vowel/final tokens = **490 total rules**. The encoding follows the pattern:
 
@@ -57,6 +60,7 @@ The romanization scheme maps 33 base consonants × medial combinations × 97 vow
 | Roman input | Myanmar output | Notes |
 |---|---|---|
 | `thar` | သာ | onset `th` + vowel `ar` |
+| `thar` → candidate | သါ | digitless input can still surface canonical `thar2` |
 | `kyaw` | ကြော် | onset `k`+ya-yit + vowel `aw` |
 | `min+galarpar2` | မင်္ဂလာပါ | multi-syllable with virama stack |
 | `hkwy2` | ကျွှ | onset with three medials |
@@ -73,6 +77,7 @@ Output characters are emitted in Unicode canonical order (ျ < ြ < ွ < ှ)
 The lexicon is compiled from a TSV source file into a bundled read-only SQLite database with:
 - `entries(id, surface, canonical_reading, unigram_score)` — log-scale frequency
 - `reading_index(canonical_reading, entry_id, rank_score)` — prefix lookup index
+- `reading_alias_index(alias_reading, canonical_reading, entry_id, rank_score, alias_penalty)` — digitless compose lookup index
 - `bigram_context(prev_surface, next_entry_id, score)` — contextual phrase ranking
 
 ### Native macOS Integration
@@ -250,28 +255,30 @@ open native/macos/BurmeseIME.xcworkspace
 
 | Key | Action |
 |-----|--------|
-| `a–z`, `0–9`, `+`, `*`, `'`, `:`, `.` | Extend the composition buffer |
+| `a–z`, `+`, `*`, `'`, `:`, `.` | Extend the composition buffer |
 | `Option+1–5` | Select candidate 1–5 |
 | `Space` (first) | Commit selected candidate |
 | `Space` (second) | Insert ASCII space |
 | `Return` | Commit selected candidate |
 | `Backspace` | Delete last character from buffer |
 | `Escape` | Commit raw Latin buffer unchanged, cancel composition |
+| `0–9` | Commit pending candidate, then insert the digit literally |
 | Punctuation | Commit candidate, then pass punctuation through |
 
 ---
 
 ## Testing
 
-Tests are organized into five files:
+Tests are organized into six files:
 
 | File | Coverage |
 |------|----------|
-| `EngineTests.swift` | Public API: empty buffer, input, commit/cancel, normalization, page size |
+| `EngineTests.swift` | Public API: empty buffer, input, commit/cancel, normalization, mixed grammar/lexicon pages |
 | `GrammarTests.swift` | Medial legality per consonant, valid/invalid syllable combinations |
-| `RomanizationTests.swift` | All 33 consonants, vowel sorting, composing charset |
+| `RomanizationTests.swift` | All 33 consonants, vowel sorting, normalization, alias helpers |
 | `ReverseRomanizerTests.swift` | Myanmar → roman conversion, round-trip stability |
-| `LegacyFixtureTests.swift` | Known-good conversions, no mixed-script output, leading vowel (U+200C) |
+| `LegacyFixtureTests.swift` | Known-good conversions, digitless numeric alternates, no mixed-script output, leading vowel (U+200C) |
+| `SQLiteCandidateStoreTests.swift` | Alias-aware lexicon prefix lookup against the bundled database |
 
 Run all tests:
 

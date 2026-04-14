@@ -69,6 +69,22 @@ final class RomanizationTests: XCTestCase {
         XCTAssertEqual(Romanization.normalize("hello!@#"), "hello")
     }
 
+    func testAliasReading_stripsNumericMarkers() {
+        XCTAssertEqual(Romanization.aliasReading("ky2ar3"), "kyar")
+    }
+
+    func testAliasReading_keepsOtherCharacters() {
+        XCTAssertEqual(Romanization.aliasReading("u2:+"), "u:+")
+    }
+
+    func testComposeLookupKey_stripsDigitsAndSeparators() {
+        XCTAssertEqual(Romanization.composeLookupKey("min+galarpar2"), "mingalarpar")
+    }
+
+    func testComposeSeparatorPenaltyCount_countsOptionalSeparators() {
+        XCTAssertEqual(Romanization.composeSeparatorPenaltyCount(for: "min+'galar"), 2)
+    }
+
     // MARK: - Composing Characters
 
     func testComposingCharacters_containsExpected() {

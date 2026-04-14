@@ -286,6 +286,56 @@ public enum Romanization {
         return dict
     }()
 
+    // MARK: - Alias Keys
+
+    private static let numericAliasMarkers: Set<Character> = ["2", "3"]
+    private static let composeSeparators: Set<Character> = ["+", "'"]
+
+    /// Strip numeric disambiguation markers used by canonical readings.
+    package static func aliasReading(_ canonical: String) -> String {
+        String(canonical.filter { !numericAliasMarkers.contains($0) })
+    }
+
+    static func aliasPenalty(for canonical: String) -> Int {
+        canonical.reduce(into: 0) { penalty, character in
+            if numericAliasMarkers.contains(character) {
+                penalty += 100
+            }
+        }
+    }
+
+    package static func aliasPenaltyCount(for canonical: String) -> Int {
+        canonical.reduce(into: 0) { penalty, character in
+            if numericAliasMarkers.contains(character) {
+                penalty += 1
+            }
+        }
+    }
+
+    /// Compose-mode lookup key used for lexicon prefix search.
+    /// This strips numeric disambiguators and optional syllable separators so
+    /// `mingalarpar` can match canonical readings like `min+galarpar2`.
+    package static func composeLookupKey(_ canonical: String) -> String {
+        String(canonical.filter { !numericAliasMarkers.contains($0) && !composeSeparators.contains($0) })
+    }
+
+    package static func composeSeparatorPenaltyCount(for canonical: String) -> Int {
+        canonical.reduce(into: 0) { penalty, character in
+            if composeSeparators.contains(character) {
+                penalty += 1
+            }
+        }
+    }
+
+    static func aliasVariants(for canonical: String, baseAliasCost: Int = 0) -> [(key: String, aliasCost: Int)] {
+        var variants: [(String, Int)] = [(canonical, baseAliasCost)]
+        let alias = aliasReading(canonical)
+        if alias != canonical {
+            variants.append((alias, baseAliasCost + aliasPenalty(for: canonical)))
+        }
+        return variants
+    }
+
     // MARK: - Composing Character Set
 
     /// Characters accepted in the composing buffer.

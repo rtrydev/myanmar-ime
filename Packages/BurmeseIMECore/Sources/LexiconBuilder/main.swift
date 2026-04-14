@@ -12,6 +12,8 @@ import SQLite3
 /// Output tables:
 ///   entries(id, surface, canonical_reading, unigram_score)
 ///   reading_index(canonical_reading, entry_id, rank_score)
+///   reading_alias_index(alias_reading, canonical_reading, entry_id, rank_score, alias_penalty)
+///   reading_compose_index(compose_reading, canonical_reading, entry_id, rank_score, alias_penalty, separator_penalty)
 ///   bigram_context(prev_surface, next_entry_id, score)
 
 guard CommandLine.arguments.count >= 3 else {
@@ -109,6 +111,25 @@ exec("""
     )
     """)
 exec("""
+    CREATE TABLE reading_alias_index (
+        alias_reading TEXT NOT NULL,
+        canonical_reading TEXT NOT NULL,
+        entry_id INTEGER NOT NULL REFERENCES entries(id),
+        rank_score REAL NOT NULL,
+        alias_penalty INTEGER NOT NULL
+    )
+    """)
+exec("""
+    CREATE TABLE reading_compose_index (
+        compose_reading TEXT NOT NULL,
+        canonical_reading TEXT NOT NULL,
+        entry_id INTEGER NOT NULL REFERENCES entries(id),
+        rank_score REAL NOT NULL,
+        alias_penalty INTEGER NOT NULL,
+        separator_penalty INTEGER NOT NULL
+    )
+    """)
+exec("""
     CREATE TABLE bigram_context (
         prev_surface TEXT NOT NULL,
         next_entry_id INTEGER NOT NULL REFERENCES entries(id),
@@ -124,6 +145,24 @@ sqlite3_prepare_v2(db, "INSERT INTO entries (surface, canonical_reading, unigram
 
 var insertReadingStmt: OpaquePointer?
 sqlite3_prepare_v2(db, "INSERT INTO reading_index (canonical_reading, entry_id, rank_score) VALUES (?1, ?2, ?3)", -1, &insertReadingStmt, nil)
+
+var insertAliasStmt: OpaquePointer?
+sqlite3_prepare_v2(
+    db,
+    "INSERT INTO reading_alias_index (alias_reading, canonical_reading, entry_id, rank_score, alias_penalty) VALUES (?1, ?2, ?3, ?4, ?5)",
+    -1,
+    &insertAliasStmt,
+    nil
+)
+
+var insertComposeStmt: OpaquePointer?
+sqlite3_prepare_v2(
+    db,
+    "INSERT INTO reading_compose_index (compose_reading, canonical_reading, entry_id, rank_score, alias_penalty, separator_penalty) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    -1,
+    &insertComposeStmt,
+    nil
+)
 
 var reverseFailCount = 0
 var insertCount = 0
@@ -172,16 +211,49 @@ for entry in entries {
     }
     sqlite3_reset(insertReadingStmt)
 
+    let aliasReading = Romanization.aliasReading(reading)
+    let aliasPenalty = Romanization.aliasPenaltyCount(for: reading)
+    sqlite3_bind_text(insertAliasStmt, 1, aliasReading, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+    sqlite3_bind_text(insertAliasStmt, 2, readingCStr, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+    sqlite3_bind_int64(insertAliasStmt, 3, entryId)
+    sqlite3_bind_double(insertAliasStmt, 4, score)
+    sqlite3_bind_int(insertAliasStmt, 5, Int32(aliasPenalty))
+
+    guard sqlite3_step(insertAliasStmt) == SQLITE_DONE else {
+        sqlite3_reset(insertAliasStmt)
+        continue
+    }
+    sqlite3_reset(insertAliasStmt)
+
+    let composeReading = Romanization.composeLookupKey(reading)
+    let separatorPenalty = Romanization.composeSeparatorPenaltyCount(for: reading)
+    sqlite3_bind_text(insertComposeStmt, 1, composeReading, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+    sqlite3_bind_text(insertComposeStmt, 2, readingCStr, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+    sqlite3_bind_int64(insertComposeStmt, 3, entryId)
+    sqlite3_bind_double(insertComposeStmt, 4, score)
+    sqlite3_bind_int(insertComposeStmt, 5, Int32(aliasPenalty))
+    sqlite3_bind_int(insertComposeStmt, 6, Int32(separatorPenalty))
+
+    guard sqlite3_step(insertComposeStmt) == SQLITE_DONE else {
+        sqlite3_reset(insertComposeStmt)
+        continue
+    }
+    sqlite3_reset(insertComposeStmt)
+
     insertCount += 1
 }
 
 sqlite3_finalize(insertEntryStmt)
 sqlite3_finalize(insertReadingStmt)
+sqlite3_finalize(insertAliasStmt)
+sqlite3_finalize(insertComposeStmt)
 
 exec("COMMIT")
 
 // Create indexes
 exec("CREATE INDEX idx_reading ON reading_index (canonical_reading)")
+exec("CREATE INDEX idx_reading_alias ON reading_alias_index (alias_reading)")
+exec("CREATE INDEX idx_reading_compose ON reading_compose_index (compose_reading)")
 exec("CREATE INDEX idx_bigram ON bigram_context (prev_surface)")
 exec("CREATE INDEX idx_entry_reading ON entries (canonical_reading)")
 

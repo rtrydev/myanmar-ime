@@ -125,10 +125,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        sharedCandidatesPanel = IMKCandidates(
-            server: server!,
-            panelType: kIMKSingleRowSteppingCandidatePanel
-        )
+        sharedCandidatePanelController = BurmeseCandidatePanelController()
     }
 
     private func registerInstalledInputMethodBundle() {

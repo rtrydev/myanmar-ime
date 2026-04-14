@@ -1,4 +1,5 @@
 **/.build
+**/build
 **/.swiftpm
 .claude
 .codex-home

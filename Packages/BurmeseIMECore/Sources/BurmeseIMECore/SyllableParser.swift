@@ -9,31 +9,46 @@ import Foundation
 ///   - "hk" = က + ှ (ka + medial ha-htoe)
 ///   - "hkwy2" = က + ျ + ွ + ှ (ka + all four medials)
 ///
-/// The parser uses a Viterbi-style best-path DP search over the buffer,
-/// matching pre-computed consonant+medial combinations followed by vowel suffixes.
+/// The parser uses an N-best Viterbi-style DP search over the buffer, matching
+/// pre-computed consonant+medial combinations followed by vowel suffixes.
 public final class SyllableParser: Sendable {
 
-    struct ParseNode {
+    struct ParseState: Sendable {
         let output: String
+        let reading: String
         let score: Int
+        let legalityScore: Int
+        let aliasCost: Int
         let syllableCount: Int
+        let structureCost: Int
         let isLegal: Bool
     }
 
     /// Pre-computed consonant+medial combinations mapped from roman key to Myanmar output.
     struct OnsetEntry: Sendable {
-        let roman: String
+        let canonicalRoman: String
         let myanmar: String       // consonant + medials as Myanmar string
         let onset: Character      // the base consonant
         let medials: [Character]  // medial characters used
         let aliasCost: Int
+        let structureCost: Int
     }
 
-    /// All possible onset entries (consonant + optional medials).
+    struct VowelMatchEntry: Sendable {
+        let canonicalRoman: String
+        let myanmar: String
+        let aliasCost: Int
+    }
+
+    private typealias OnsetMatch = (end: Int, entry: OnsetEntry)
+    private typealias VowelMatch = (end: Int, entry: VowelMatchEntry)
+
+    /// All possible onset entries (consonant + optional medials), keyed by the
+    /// exact match string or its digitless alias.
     private let onsetEntries: [String: [OnsetEntry]]
 
-    /// Vowel entries by roman key.
-    private let vowelEntries: [String: Romanization.VowelEntry]
+    /// Vowel entries keyed by the exact match string or its digitless alias.
+    private let vowelEntries: [String: [VowelMatchEntry]]
 
     /// Vowel keys sorted by descending length for longest-match.
     private let vowelKeysSorted: [String]
@@ -42,19 +57,36 @@ public final class SyllableParser: Sendable {
     private let maxOnsetLen: Int
 
     public init() {
-        var entries: [String: [OnsetEntry]] = [:]
+        var onsetLookup: [String: [OnsetEntry]] = [:]
+
+        func appendOnset(
+            canonicalRoman: String,
+            myanmar: String,
+            onset: Character,
+            medials: [Character],
+            baseAliasCost: Int
+        ) {
+            for variant in Romanization.aliasVariants(for: canonicalRoman, baseAliasCost: baseAliasCost) {
+                onsetLookup[variant.key, default: []].append(OnsetEntry(
+                    canonicalRoman: canonicalRoman,
+                    myanmar: myanmar,
+                    onset: onset,
+                    medials: medials,
+                    aliasCost: variant.aliasCost,
+                    structureCost: medials.count
+                ))
+            }
+        }
 
         // Generate all consonant + medial combinations (matching the legacy engine)
         for cons in Romanization.consonants {
-            // Base consonant alone
-            let baseEntry = OnsetEntry(
-                roman: cons.roman,
+            appendOnset(
+                canonicalRoman: cons.roman,
                 myanmar: String(cons.myanmar),
                 onset: cons.myanmar,
                 medials: [],
-                aliasCost: cons.aliasCost
+                baseAliasCost: cons.aliasCost
             )
-            entries[cons.roman, default: []].append(baseEntry)
 
             // Generate medial combinations matching the legacy engine's scheme:
             // h prefix → ha-htoe (ှ), w suffix → wa-hswe (ွ),
@@ -65,174 +97,270 @@ public final class SyllableParser: Sendable {
                 let hasY = combo.contains(Myanmar.medialRa)   // ြ = ya-yit, roman "y"
                 let hasY2 = combo.contains(Myanmar.medialYa)  // ျ = ya-pin, roman "y2"
 
-                // Check legality of each medial with this consonant
                 var allLegal = true
-                for medial in combo {
-                    if !Grammar.canConsonantTakeMedial(cons.myanmar, medial) {
-                        allLegal = false
-                        break
-                    }
+                for medial in combo where !Grammar.canConsonantTakeMedial(cons.myanmar, medial) {
+                    allLegal = false
+                    break
                 }
 
-                // Build roman key: [h]<consonant_base>[w][y|y2]
-                let romanKey =
+                let canonicalRoman =
                     (hasH ? "h" : "") +
                     cons.roman +
                     (hasW ? "w" : "") +
                     (hasY ? "y" : "") +
                     (hasY2 ? "y2" : "")
 
-                // Build Myanmar output: consonant + medials in canonical order
-                // Canonical order: ျ (U+103B) < ြ (U+103C) < ွ (U+103D) < ှ (U+103E)
                 var myanmarOutput = String(cons.myanmar)
-                if hasY  { myanmarOutput += String(Myanmar.medialRa) }   // ြ
-                if hasY2 { myanmarOutput += String(Myanmar.medialYa) }   // ျ
-                if hasW  { myanmarOutput += String(Myanmar.medialWa) }   // ွ
-                if hasH  { myanmarOutput += String(Myanmar.medialHa) }   // ှ
+                if hasY  { myanmarOutput += String(Myanmar.medialRa) }
+                if hasY2 { myanmarOutput += String(Myanmar.medialYa) }
+                if hasW  { myanmarOutput += String(Myanmar.medialWa) }
+                if hasH  { myanmarOutput += String(Myanmar.medialHa) }
 
-                let entry = OnsetEntry(
-                    roman: romanKey,
+                appendOnset(
+                    canonicalRoman: canonicalRoman,
                     myanmar: myanmarOutput,
                     onset: cons.myanmar,
                     medials: combo,
-                    aliasCost: allLegal ? cons.aliasCost : cons.aliasCost + 100
+                    baseAliasCost: cons.aliasCost + (allLegal ? 0 : 100)
                 )
-                entries[romanKey, default: []].append(entry)
             }
         }
 
-        self.onsetEntries = entries
-        self.maxOnsetLen = entries.keys.map(\.count).max() ?? 1
+        self.onsetEntries = onsetLookup
+        self.maxOnsetLen = onsetLookup.keys.map(\.count).max() ?? 1
 
-        self.vowelEntries = Romanization.romanToVowel
-        self.vowelKeysSorted = Romanization.vowelKeysByLength
+        var vowelLookup: [String: [VowelMatchEntry]] = [:]
+        for entry in Romanization.vowels {
+            for variant in Romanization.aliasVariants(for: entry.roman, baseAliasCost: entry.aliasCost) {
+                vowelLookup[variant.key, default: []].append(VowelMatchEntry(
+                    canonicalRoman: entry.roman,
+                    myanmar: entry.myanmar,
+                    aliasCost: variant.aliasCost
+                ))
+            }
+        }
+        self.vowelEntries = vowelLookup
+        self.vowelKeysSorted = vowelLookup.keys.sorted { lhs, rhs in
+            if lhs.count != rhs.count {
+                return lhs.count > rhs.count
+            }
+            return lhs < rhs
+        }
     }
 
     // MARK: - Public API
 
-    /// Parse a romanized buffer into Burmese output.
+    /// Parse a romanized buffer into its best Burmese output.
     public func parse(_ input: String) -> [SyllableParse] {
-        let normalized = Romanization.normalize(input)
-        guard !normalized.isEmpty else { return [] }
-
-        let bestPath = viterbiParse(normalized)
-        guard !bestPath.output.isEmpty else { return [] }
-
-        let adjusted = adjustLeadingVowel(bestPath.output)
-        return [SyllableParse(
-            output: adjusted,
-            reading: normalized,
-            aliasCost: 0,
-            legalityScore: bestPath.isLegal ? bestPath.score : 0
-        )]
+        parseCandidates(input, maxResults: 1)
     }
 
-    // MARK: - Viterbi DP Parse
+    /// Parse a romanized buffer into multiple Burmese candidates.
+    public func parseCandidates(_ input: String, maxResults: Int = 8) -> [SyllableParse] {
+        let normalized = Romanization.normalize(input)
+        guard !normalized.isEmpty, maxResults > 0 else { return [] }
 
-    private func viterbiParse(_ input: String) -> ParseNode {
-        let chars = Array(input)
+        let chars = Array(normalized)
+        let beamWidth = max(maxResults * 16, 64)
+        let onsetMatchesByStart = precomputeOnsetMatches(chars)
+        let vowelMatchesByStart = precomputeVowelMatches(chars)
+        let states = finalizeStates(
+            nBestParse(
+                chars,
+                onsetMatchesByStart: onsetMatchesByStart,
+                vowelMatchesByStart: vowelMatchesByStart,
+                maxResults: beamWidth
+            ),
+            limit: maxResults
+        )
+        return states.map { state in
+            SyllableParse(
+                output: adjustLeadingVowel(state.output),
+                reading: state.reading,
+                aliasCost: state.aliasCost,
+                legalityScore: state.isLegal ? 100 : 0,
+                score: state.score,
+                structureCost: state.structureCost
+            )
+        }
+    }
+
+    // MARK: - N-best DP Parse
+
+    /// Bucket at a single DP position. Uses a dictionary for O(1) dedup
+    /// and defers sorting until all transitions into this position are done.
+    private struct DPBucket {
+        /// Best state for each (output, reading) key.
+        var index: [StateKey: Int] = [:]
+        var states: [ParseState] = []
+        var needsPrune = false
+    }
+
+    private struct StateKey: Hashable {
+        let output: String
+        let reading: String
+    }
+
+    private func nBestParse(
+        _ chars: [Character],
+        onsetMatchesByStart: [[OnsetMatch]],
+        vowelMatchesByStart: [[VowelMatch]],
+        maxResults: Int
+    ) -> [ParseState] {
         let n = chars.count
-        var dp = [ParseNode?](repeating: nil, count: n + 1)
-        dp[0] = ParseNode(output: "", score: 0, syllableCount: 0, isLegal: true)
+        var dp = [DPBucket](repeating: DPBucket(), count: n + 1)
+        let seed = ParseState(
+            output: "",
+            reading: "",
+            score: 0,
+            legalityScore: 0,
+            aliasCost: 0,
+            syllableCount: 0,
+            structureCost: 0,
+            isLegal: true
+        )
+        dp[0].states.append(seed)
+        dp[0].index[StateKey(output: "", reading: "")] = 0
 
-        var i = 0
-        while i < n {
-            guard let prev = dp[i] else { i += 1; continue }
+        for i in 0..<n {
+            guard !dp[i].states.isEmpty else { continue }
 
-            var anyMatch = false
+            // Prune the current bucket before expanding, if it grew large.
+            if dp[i].needsPrune {
+                pruneBucket(&dp[i], limit: maxResults)
+            }
 
-            // 1. Try onset (consonant + optional medials) followed by optional vowel
-            let onsetMatches = matchOnsets(chars, from: i)
-            for (onsetEnd, onsetEntry) in onsetMatches {
-                // Consonant alone (inherent 'a' vowel): counts as 1 rule
-                do {
-                    let out = prev.output + onsetEntry.myanmar
-                    let legality = Grammar.validateSyllable(
-                        onset: onsetEntry.onset, medials: onsetEntry.medials, vowelRoman: "a"
+            let onsetMatches = onsetMatchesByStart[i]
+            let standaloneVowels = vowelMatchesByStart[i]
+            for previous in dp[i].states {
+                var matched = false
+
+                for (onsetEnd, onsetEntry) in onsetMatches {
+                    let onsetReading = onsetEntry.canonicalRoman + "a"
+                    let onsetLegality = Grammar.validateSyllable(
+                        onset: onsetEntry.onset,
+                        medials: onsetEntry.medials,
+                        vowelRoman: "a"
                     )
-                    // Score: consumed - 1 (one rule)
-                    let score = prev.score + scoreMatch(
-                        consumed: onsetEnd - i, ruleCount: 1, legality: legality,
-                        aliasCost: onsetEntry.aliasCost
+                    insertState(
+                        &dp,
+                        at: onsetEnd,
+                        state: ParseState(
+                            output: previous.output + onsetEntry.myanmar,
+                            reading: previous.reading + onsetReading,
+                            score: previous.score + scoreMatch(
+                                consumed: onsetEnd - i,
+                                ruleCount: 1,
+                                legality: onsetLegality,
+                                aliasCost: onsetEntry.aliasCost
+                            ),
+                            legalityScore: previous.legalityScore + max(onsetLegality, 0),
+                            aliasCost: previous.aliasCost + onsetEntry.aliasCost,
+                            syllableCount: previous.syllableCount + 1,
+                            structureCost: previous.structureCost + onsetEntry.structureCost,
+                            isLegal: previous.isLegal && onsetLegality > 0
+                        ),
+                        limit: maxResults
                     )
-                    updateDP(&dp, at: onsetEnd, node: ParseNode(
-                        output: out, score: score,
-                        syllableCount: prev.syllableCount + 1,
-                        isLegal: prev.isLegal && legality > 0
-                    ))
-                    anyMatch = true
+                    matched = true
+
+                    let vowelMatches = vowelMatchesByStart[onsetEnd]
+                    for (vowelEnd, vowelEntry) in vowelMatches {
+                        let legality = Grammar.validateSyllable(
+                            onset: onsetEntry.onset,
+                            medials: onsetEntry.medials,
+                            vowelRoman: vowelEntry.canonicalRoman
+                        )
+                        insertState(
+                            &dp,
+                            at: vowelEnd,
+                            state: ParseState(
+                                output: previous.output + onsetEntry.myanmar + vowelEntry.myanmar,
+                                reading: previous.reading + onsetEntry.canonicalRoman + vowelEntry.canonicalRoman,
+                                score: previous.score + scoreMatch(
+                                    consumed: vowelEnd - i,
+                                    ruleCount: 2,
+                                    legality: legality,
+                                    aliasCost: onsetEntry.aliasCost + vowelEntry.aliasCost
+                                ),
+                                legalityScore: previous.legalityScore + max(legality, 0),
+                                aliasCost: previous.aliasCost + onsetEntry.aliasCost + vowelEntry.aliasCost,
+                                syllableCount: previous.syllableCount + 1,
+                                structureCost: previous.structureCost + onsetEntry.structureCost,
+                                isLegal: previous.isLegal && legality > 0
+                            ),
+                            limit: maxResults
+                        )
+                        matched = true
+                    }
                 }
 
-                // Consonant + explicit vowel suffix: counts as 2 rules
-                let vowelMatches = matchVowels(chars, from: onsetEnd)
-                for (vowEnd, vowEntry) in vowelMatches {
-                    let out = prev.output + onsetEntry.myanmar + vowEntry.myanmar
+                for (vowelEnd, vowelEntry) in standaloneVowels {
                     let legality = Grammar.validateSyllable(
-                        onset: onsetEntry.onset, medials: onsetEntry.medials,
-                        vowelRoman: vowEntry.roman
+                        onset: nil,
+                        medials: [],
+                        vowelRoman: vowelEntry.canonicalRoman
                     )
-                    // Score: consumed - 2 (two rules: onset + vowel)
-                    let score = prev.score + scoreMatch(
-                        consumed: vowEnd - i, ruleCount: 2, legality: legality,
-                        aliasCost: onsetEntry.aliasCost + vowEntry.aliasCost
+                    insertState(
+                        &dp,
+                        at: vowelEnd,
+                        state: ParseState(
+                            output: previous.output + vowelEntry.myanmar,
+                            reading: previous.reading + vowelEntry.canonicalRoman,
+                            score: previous.score + scoreMatch(
+                                consumed: vowelEnd - i,
+                                ruleCount: 1,
+                                legality: legality,
+                                aliasCost: vowelEntry.aliasCost
+                            ),
+                            legalityScore: previous.legalityScore + max(legality, 0),
+                            aliasCost: previous.aliasCost + vowelEntry.aliasCost,
+                            syllableCount: previous.syllableCount + 1,
+                            structureCost: previous.structureCost,
+                            isLegal: previous.isLegal && legality > 0
+                        ),
+                        limit: maxResults
                     )
-                    updateDP(&dp, at: vowEnd, node: ParseNode(
-                        output: out, score: score,
-                        syllableCount: prev.syllableCount + 1,
-                        isLegal: prev.isLegal && legality > 0
-                    ))
-                    anyMatch = true
+                    matched = true
+                }
+
+                if !matched {
+                    insertState(
+                        &dp,
+                        at: i + 1,
+                        state: ParseState(
+                            output: previous.output,
+                            reading: previous.reading,
+                            score: previous.score - 100,
+                            legalityScore: previous.legalityScore,
+                            aliasCost: previous.aliasCost,
+                            syllableCount: previous.syllableCount,
+                            structureCost: previous.structureCost,
+                            isLegal: false
+                        ),
+                        limit: maxResults
+                    )
                 }
             }
-
-            // 2. Try standalone vowel/final (no consonant onset): counts as 1 rule
-            let standaloneVowels = matchVowels(chars, from: i)
-            for (vowEnd, vowEntry) in standaloneVowels {
-                let out = prev.output + vowEntry.myanmar
-                let legality = Grammar.validateSyllable(
-                    onset: nil, medials: [], vowelRoman: vowEntry.roman
-                )
-                let score = prev.score + scoreMatch(
-                    consumed: vowEnd - i, ruleCount: 1, legality: legality,
-                    aliasCost: vowEntry.aliasCost
-                )
-                updateDP(&dp, at: vowEnd, node: ParseNode(
-                    output: out, score: score,
-                    syllableCount: prev.syllableCount + 1,
-                    isLegal: prev.isLegal && legality > 0
-                ))
-                anyMatch = true
-            }
-
-            // 3. Fallback: unmatched character is skipped (not emitted)
-            // to prevent Latin/digit leakage into Myanmar output
-            if !anyMatch {
-                let out = prev.output
-                let score = prev.score - 100
-                updateDP(&dp, at: i + 1, node: ParseNode(
-                    output: out, score: score,
-                    syllableCount: prev.syllableCount,
-                    isLegal: false
-                ))
-            }
-
-            i += 1
         }
 
-        return dp[n] ?? ParseNode(output: input, score: -1000, syllableCount: 0, isLegal: false)
+        if dp[n].needsPrune {
+            pruneBucket(&dp[n], limit: maxResults)
+        }
+        return dp[n].states
     }
 
     // MARK: - Matching
 
     /// Match onset entries (consonant + optional medials) at position.
     private func matchOnsets(_ chars: [Character], from start: Int) -> [(end: Int, entry: OnsetEntry)] {
-        var results: [(Int, OnsetEntry)] = []
+        var results: [OnsetMatch] = []
         let remaining = chars.count - start
         guard remaining > 0 else { return results }
 
         let maxLen = min(maxOnsetLen, remaining)
         for len in stride(from: maxLen, through: 1, by: -1) {
-            let key = String(chars[start..<start+len])
+            let key = String(chars[start..<start + len])
             if let entries = onsetEntries[key] {
                 for entry in entries {
                     results.append((start + len, entry))
@@ -243,19 +371,70 @@ public final class SyllableParser: Sendable {
     }
 
     /// Match vowel/final at position.
-    private func matchVowels(_ chars: [Character], from start: Int) -> [(end: Int, entry: Romanization.VowelEntry)] {
-        var results: [(Int, Romanization.VowelEntry)] = []
+    private func matchVowels(_ chars: [Character], from start: Int) -> [(end: Int, entry: VowelMatchEntry)] {
+        var results: [VowelMatch] = []
         let remaining = chars.count - start
         guard remaining > 0 else { return results }
 
         for key in vowelKeysSorted {
             guard key.count <= remaining else { continue }
-            let slice = String(chars[start..<start+key.count])
-            if slice == key, let entry = vowelEntries[key] {
-                results.append((start + key.count, entry))
+            let slice = String(chars[start..<start + key.count])
+            if slice == key, let entries = vowelEntries[key] {
+                for entry in entries {
+                    results.append((start + key.count, entry))
+                }
             }
         }
         return results
+    }
+
+    private func precomputeOnsetMatches(_ chars: [Character]) -> [[OnsetMatch]] {
+        var matches = Array(repeating: [OnsetMatch](), count: chars.count + 1)
+        guard !chars.isEmpty else { return matches }
+
+        for index in 0..<chars.count {
+            matches[index] = matchOnsets(chars, from: index)
+        }
+        return matches
+    }
+
+    private func precomputeVowelMatches(_ chars: [Character]) -> [[VowelMatch]] {
+        var matches = Array(repeating: [VowelMatch](), count: chars.count + 1)
+        guard !chars.isEmpty else { return matches }
+
+        for index in 0..<chars.count {
+            matches[index] = matchVowels(chars, from: index)
+        }
+        return matches
+    }
+
+    // MARK: - Finalization
+
+    private func finalizeStates(_ states: [ParseState], limit: Int) -> [ParseState] {
+        let nonEmptyStates = states.filter { !$0.output.isEmpty }
+        let legalStates = nonEmptyStates.filter(\.isLegal)
+
+        let filteredStates: [ParseState]
+        if let minimumLegalSyllables = legalStates.map(\.syllableCount).min() {
+            filteredStates = legalStates.filter { $0.syllableCount == minimumLegalSyllables }
+        } else {
+            filteredStates = nonEmptyStates
+        }
+
+        var deduplicated: [String: ParseState] = [:]
+
+        for state in sortedStates(filteredStates) {
+            let adjustedOutput = adjustLeadingVowel(state.output)
+            if let existing = deduplicated[adjustedOutput] {
+                if isBetter(state, than: existing) {
+                    deduplicated[adjustedOutput] = state
+                }
+            } else {
+                deduplicated[adjustedOutput] = state
+            }
+        }
+
+        return Array(sortedStates(Array(deduplicated.values)).prefix(limit))
     }
 
     // MARK: - Leading Vowel Adjustment
@@ -293,16 +472,66 @@ public final class SyllableParser: Sendable {
         return score
     }
 
-    private func updateDP(_ dp: inout [ParseNode?], at index: Int, node: ParseNode) {
+    private func insertState(
+        _ dp: inout [DPBucket],
+        at index: Int,
+        state: ParseState,
+        limit: Int
+    ) {
         guard index < dp.count else { return }
-        if let existing = dp[index] {
-            if node.isLegal && !existing.isLegal {
-                dp[index] = node
-            } else if node.isLegal == existing.isLegal && node.score > existing.score {
-                dp[index] = node
+
+        let key = StateKey(output: state.output, reading: state.reading)
+        if let existingIdx = dp[index].index[key] {
+            if isBetter(state, than: dp[index].states[existingIdx]) {
+                dp[index].states[existingIdx] = state
             }
         } else {
-            dp[index] = node
+            dp[index].index[key] = dp[index].states.count
+            dp[index].states.append(state)
+            if dp[index].states.count > limit * 2 {
+                dp[index].needsPrune = true
+            }
         }
+    }
+
+    private func pruneBucket(_ bucket: inout DPBucket, limit: Int) {
+        guard bucket.states.count > limit else {
+            bucket.needsPrune = false
+            return
+        }
+        bucket.states = Array(sortedStates(bucket.states).prefix(limit))
+        bucket.index.removeAll(keepingCapacity: true)
+        for (i, state) in bucket.states.enumerated() {
+            bucket.index[StateKey(output: state.output, reading: state.reading)] = i
+        }
+        bucket.needsPrune = false
+    }
+
+    private func sortedStates(_ states: [ParseState]) -> [ParseState] {
+        states.sorted { lhs, rhs in
+            isBetter(lhs, than: rhs)
+        }
+    }
+
+    private func isBetter(_ lhs: ParseState, than rhs: ParseState) -> Bool {
+        if lhs.isLegal != rhs.isLegal {
+            return lhs.isLegal
+        }
+        if lhs.aliasCost != rhs.aliasCost {
+            return lhs.aliasCost < rhs.aliasCost
+        }
+        if lhs.score != rhs.score {
+            return lhs.score > rhs.score
+        }
+        if lhs.syllableCount != rhs.syllableCount {
+            return lhs.syllableCount < rhs.syllableCount
+        }
+        if lhs.structureCost != rhs.structureCost {
+            return lhs.structureCost < rhs.structureCost
+        }
+        if lhs.output != rhs.output {
+            return lhs.output < rhs.output
+        }
+        return lhs.reading < rhs.reading
     }
 }

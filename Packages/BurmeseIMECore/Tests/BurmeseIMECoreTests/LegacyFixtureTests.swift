@@ -49,6 +49,18 @@ final class LegacyFixtureTests: XCTestCase {
         XCTAssertEqual(parse("rway:khy2e"), "ရွေးချယ်")
     }
 
+    func testParseCandidates_thar_includesNumericAlternate() {
+        let parses = parser.parseCandidates("thar")
+        XCTAssertTrue(parses.contains(where: { $0.output == "သာ" && $0.reading == "thar" }))
+        XCTAssertTrue(parses.contains(where: { $0.output == "သါ" && $0.reading == "thar2" }))
+    }
+
+    func testParseCandidates_kyar_includesNumericAlternate() {
+        let parses = parser.parseCandidates("kyar")
+        XCTAssertTrue(parses.contains(where: { $0.reading == "kyar" }))
+        XCTAssertTrue(parses.contains(where: { $0.reading == "ky2ar" }))
+    }
+
     // MARK: - Additional Legacy Fixtures
 
     func testMingalarpar2_noLatinLeakage() {
