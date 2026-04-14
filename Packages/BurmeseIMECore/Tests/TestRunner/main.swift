@@ -328,6 +328,47 @@ runTest("kyaw") { assertEqual(parse("kyaw"), "ကြော်", "knownGood_kyaw"
 runTest("min+galarpar") { assertEqual(parse("min+galarpar"), "မင်္ဂလာပာ", "knownGood_minGalarPar") }
 
 // ===================================================================
+// CLUSTER-SOUND SHORTCUTS
+// ===================================================================
+
+print("=== Cluster-Sound Shortcut Tests ===")
+
+// Ja family (k + ya-pin, optional wa-hswe)
+runTest("cluster_j")         { assertEqual(parse("j"),        "ကျ",                "cluster_j") }
+runTest("cluster_ja")        { assertEqual(parse("ja"),       "ကျ",                "cluster_ja") }
+runTest("cluster_jw")        { assertEqual(parse("jw"),       "ကျွ",               "cluster_jw") }
+runTest("cluster_jwantaw")   { assertEqual(parse("jwantaw"),  "ကျွန်တော်",         "cluster_jwantaw") }
+
+// Cha family (kh + ya-pin)
+runTest("cluster_ch")        { assertEqual(parse("ch"),       "ချ",                "cluster_ch") }
+runTest("cluster_chit")      { assertEqual(parse("chit"),     "ချစ်",              "cluster_chit") }
+
+// Sha family (r + ha-htoe)
+runTest("cluster_sha")       { assertEqual(parse("sha"),      "ရှ",                "cluster_sha") }
+runTest("cluster_shar")      { assertEqual(parse("shar"),     "ရှာ",               "cluster_shar") }
+
+// Gy exists as a cluster candidate alongside the existing ဂြ reading.
+runTest("cluster_gyw_candidate") {
+    let outputs = parser.parseCandidates("gyw", maxResults: 4).map(\.output)
+    assertTrue(outputs.contains("ဂျွ"), "cluster_gyw_hasJwa",
+               detail: "candidates: \(outputs)")
+}
+
+// Aspirated sonorants already work via the h-prefix medial scheme.
+runTest("aspirated_hnga")    { assertEqual(parse("hnga"),     "ငှ",                "aspirated_hnga") }
+runTest("aspirated_hma")     { assertEqual(parse("hma"),      "မှ",                "aspirated_hma") }
+runTest("aspirated_hla")     { assertEqual(parse("hla"),      "လှ",                "aspirated_hla") }
+runTest("aspirated_hna")     { assertEqual(parse("hna"),      "နှ",                "aspirated_hna") }
+runTest("aspirated_hnya")    { assertEqual(parse("hnya"),     "\u{1009}\u{103E}",  "aspirated_hnya") }
+
+// Canonical regression: structural forms still produce the same outputs.
+// Digits are stripped by normalize(), so canonical alias keys are digit-free.
+runTest("canonical_hr")      { assertEqual(parse("hr"),       "ရှ",                "canonical_hr") }
+runTest("canonical_gy_isYaYit") { assertEqual(parse("gy"),    "ဂြ",                "canonical_gy_isYaYit") }
+runTest("canonical_kya_isYaYit") { assertEqual(parse("kya"),  "ကြ",                "canonical_kya_isYaYit") }
+
+
+// ===================================================================
 // KNOWN-BAD LEGACY DIVERGENCE TESTS
 // ===================================================================
 
@@ -450,3 +491,4 @@ print(String(repeating: "=", count: 60))
 if !failedTests.isEmpty {
     exit(1)
 }
+

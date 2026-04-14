@@ -129,6 +129,37 @@ public final class SyllableParser: Sendable {
             }
         }
 
+        // Phonetic cluster shortcuts (`j`, `ch`, `gy`, `sh`, + `w` variants).
+        // Inserted directly under the shortcut key so canonical aliasVariants
+        // handling for other onsets is unaffected.
+        for alias in Romanization.clusterAliases {
+            var myanmarOutput = String(alias.consonant)
+            for medial in alias.medials {
+                myanmarOutput.append(medial)
+            }
+
+            let hasH  = alias.medials.contains(Myanmar.medialHa)
+            let hasW  = alias.medials.contains(Myanmar.medialWa)
+            let hasY  = alias.medials.contains(Myanmar.medialRa)
+            let hasY2 = alias.medials.contains(Myanmar.medialYa)
+            let baseRoman = Romanization.consonantToRoman[alias.consonant] ?? ""
+            let canonical =
+                (hasH ? "h" : "") +
+                baseRoman +
+                (hasW ? "w" : "") +
+                (hasY ? "y" : "") +
+                (hasY2 ? "y2" : "")
+
+            onsetLookup[alias.roman, default: []].append(OnsetEntry(
+                canonicalRoman: canonical,
+                myanmar: myanmarOutput,
+                onset: alias.consonant,
+                medials: alias.medials,
+                aliasCost: alias.aliasCost,
+                structureCost: alias.medials.count
+            ))
+        }
+
         self.onsetEntries = onsetLookup
         self.maxOnsetLen = onsetLookup.keys.map(\.count).max() ?? 1
 

@@ -163,4 +163,31 @@ final class LegacyFixtureTests: XCTestCase {
     func testLeadingVowel_own3() {
         XCTAssertEqual(parse("own3"), "\u{200C}\u{102F}\u{1036}")
     }
+
+    // MARK: - Cluster-Sound Shortcuts
+
+    func testCluster_j()        { XCTAssertEqual(parse("j"),       "ကျ") }
+    func testCluster_ja()       { XCTAssertEqual(parse("ja"),      "ကျ") }
+    func testCluster_jw()       { XCTAssertEqual(parse("jw"),      "ကျွ") }
+    func testCluster_jwantaw()  { XCTAssertEqual(parse("jwantaw"), "ကျွန်တော်") }
+    func testCluster_ch()       { XCTAssertEqual(parse("ch"),      "ချ") }
+    func testCluster_chit()     { XCTAssertEqual(parse("chit"),    "ချစ်") }
+    func testCluster_sha()      { XCTAssertEqual(parse("sha"),     "ရှ") }
+    func testCluster_shar()     { XCTAssertEqual(parse("shar"),    "ရှာ") }
+
+    func testCluster_gyw_hasJwaCandidate() {
+        let outputs = parser.parseCandidates("gyw", maxResults: 4).map(\.output)
+        XCTAssertTrue(outputs.contains("ဂျွ"), "candidates: \(outputs)")
+    }
+
+    // Aspirated sonorants continue to work via the existing h-prefix scheme.
+    func testAspirated_hnga() { XCTAssertEqual(parse("hnga"), "ငှ") }
+    func testAspirated_hma()  { XCTAssertEqual(parse("hma"),  "မှ") }
+    func testAspirated_hla()  { XCTAssertEqual(parse("hla"),  "လှ") }
+    func testAspirated_hna()  { XCTAssertEqual(parse("hna"),  "နှ") }
+
+    // Canonical (digit-free) regressions.
+    func testCanonical_hr()              { XCTAssertEqual(parse("hr"),  "ရှ") }
+    func testCanonical_gy_isYaYit()      { XCTAssertEqual(parse("gy"),  "ဂြ") }
+    func testCanonical_kya_isYaYit()     { XCTAssertEqual(parse("kya"), "ကြ") }
 }

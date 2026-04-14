@@ -98,6 +98,38 @@ public enum Romanization {
         .init("h",  Myanmar.medialHa),    // ှ (ha-htoe)
     ]
 
+    // MARK: - Cluster-sound shortcut aliases
+    //
+    // Phonetic shortcuts for common consonant+medial clusters. These coexist
+    // with the structural romanization (`ky2`, `khy2`, `gy2`, `hr`, …) —
+    // canonical typing is unchanged; these just offer extra keys that produce
+    // the same onset.
+
+    public struct ClusterAliasEntry: Sendable {
+        public let roman: String
+        public let consonant: Character
+        public let medials: [Character]
+        public let aliasCost: Int
+
+        public init(roman: String, consonant: Character, medials: [Character], aliasCost: Int = 50) {
+            self.roman = roman
+            self.consonant = consonant
+            self.medials = medials
+            self.aliasCost = aliasCost
+        }
+    }
+
+    public static let clusterAliases: [ClusterAliasEntry] = [
+        .init(roman: "j",   consonant: Myanmar.ka,  medials: [Myanmar.medialYa]),
+        .init(roman: "jw",  consonant: Myanmar.ka,  medials: [Myanmar.medialYa, Myanmar.medialWa]),
+        .init(roman: "ch",  consonant: Myanmar.kha, medials: [Myanmar.medialYa]),
+        .init(roman: "chw", consonant: Myanmar.kha, medials: [Myanmar.medialYa, Myanmar.medialWa]),
+        .init(roman: "gy",  consonant: Myanmar.ga,  medials: [Myanmar.medialYa]),
+        .init(roman: "gyw", consonant: Myanmar.ga,  medials: [Myanmar.medialYa, Myanmar.medialWa]),
+        .init(roman: "sh",  consonant: Myanmar.ra,  medials: [Myanmar.medialHa]),
+        .init(roman: "shw", consonant: Myanmar.ra,  medials: [Myanmar.medialHa, Myanmar.medialWa]),
+    ]
+
     /// Lookup: roman → medial character.
     public static let romanToMedial: [String: Character] = {
         var dict: [String: Character] = [:]
