@@ -3,6 +3,9 @@
 
 import Foundation
 import BurmeseIMECore
+#if canImport(SQLite3)
+import SQLite3
+#endif
 
 // MARK: - Test Infrastructure
 
@@ -470,6 +473,380 @@ runTest("reverse_roundTrip") {
         let reversed = ReverseRomanizer.romanize(forward)
         let roundTrip = parse(reversed)
         assertEqual(forward, roundTrip, "roundTrip_\(input)")
+    }
+}
+
+// ===================================================================
+// LEXICON RANKING TESTS
+// ===================================================================
+
+print("=== Lexicon Ranking Tests ===")
+
+struct FixedLexiconStore: CandidateStore {
+    var byPrefix: [String: [Candidate]] = [:]
+    var byBigram: [String: [String: [Candidate]]] = [:]
+    func lookup(prefix: String, previousSurface: String?) -> [Candidate] {
+        var out: [Candidate] = []
+        if let prev = previousSurface, let hits = byBigram[prev]?[prefix] {
+            out += hits
+        }
+        if let hits = byPrefix[prefix] { out += hits }
+        return out
+    }
+}
+
+runTest("lexiconOrdering_higherFrequencyFirst") {
+    let store = FixedLexiconStore(byPrefix: [
+        "kyar": [
+            Candidate(surface: "ကျား", reading: "kyar", source: .lexicon, score: 400),
+            Candidate(surface: "ကြား", reading: "kyar", source: .lexicon, score: 900),
+        ]
+    ])
+    let engine = BurmeseEngine(candidateStore: store)
+    let state = engine.update(buffer: "kyar", context: [])
+    let lex = state.candidates.filter { $0.source == .lexicon }
+    let first = lex.firstIndex(where: { $0.surface == "ကြား" }) ?? -1
+    let second = lex.firstIndex(where: { $0.surface == "ကျား" }) ?? -1
+    assertTrue(first >= 0 && second >= 0 && first < second,
+        "lexiconOrdering_higherFrequencyFirst",
+        detail: "ordering: \(lex.map(\.surface))")
+}
+
+runTest("lexiconOrdering_aliasPenaltyBeatsFrequency") {
+    struct AnyPrefixStore: CandidateStore {
+        let candidates: [Candidate]
+        func lookup(prefix: String, previousSurface: String?) -> [Candidate] {
+            candidates
+        }
+    }
+    // Buffer "kyar:" yields aliasPrefix "kyar:". Both entries' aliasReading
+    // normalizes to "kyar:" (match quality 2), so the tiebreak falls to
+    // aliasPenalty (0 < 1) before score. Use surfaces that don't collide
+    // with grammar output so the lexicon-specific sort path is exercised.
+    let store = AnyPrefixStore(candidates: [
+        Candidate(surface: "HIGH", reading: "ky2ar:", source: .lexicon, score: 1500),
+        Candidate(surface: "LOW", reading: "kyar:", source: .lexicon, score: 800),
+    ])
+    let engine = BurmeseEngine(candidateStore: store)
+    let state = engine.update(buffer: "kyar:", context: [])
+    let firstLex = state.candidates.first(where: { $0.source == .lexicon })
+    assertEqual(firstLex?.surface ?? "<none>", "LOW", "lexiconOrdering_aliasPenaltyBeatsFrequency")
+}
+
+runTest("lexiconOrdering_exactAliasBeatsComposeMatchQuality") {
+    let store = FixedLexiconStore(byPrefix: [
+        "min+galarpar": [
+            Candidate(surface: "Bmin", reading: "mingalarpar2", source: .lexicon, score: 2000),
+            Candidate(surface: "Amin", reading: "min+galarpar2", source: .lexicon, score: 600),
+        ]
+    ])
+    let engine = BurmeseEngine(candidateStore: store)
+    let state = engine.update(buffer: "min+galarpar", context: [])
+    let firstLex = state.candidates.first(where: { $0.source == .lexicon })
+    assertEqual(firstLex?.surface ?? "<none>", "Amin", "lexiconOrdering_exactAliasBeatsComposeMatchQuality")
+}
+
+runTest("merge_exactAliasLexiconFillsSlotsZeroAndOne") {
+    let store = FixedLexiconStore(byPrefix: [
+        "min+galarpar": [
+            Candidate(surface: "AA", reading: "min+galarpar2", source: .lexicon, score: 1000),
+            Candidate(surface: "BB", reading: "min+galarpar3", source: .lexicon, score: 900),
+        ]
+    ])
+    let engine = BurmeseEngine(candidateStore: store)
+    let state = engine.update(buffer: "min+galarpar", context: [])
+    assertTrue(state.candidates.count >= 3, "merge_exactAliasSlots_countCheck",
+        detail: "got \(state.candidates.count) candidates")
+    assertEqual(state.candidates.first?.surface ?? "<none>", "AA", "merge_exactAliasSlot0")
+    if state.candidates.count >= 2 {
+        assertEqual(state.candidates[1].surface, "BB", "merge_exactAliasSlot1")
+    }
+}
+
+runTest("merge_onlyExactComposeWhenNoExactAlias") {
+    let store = FixedLexiconStore(byPrefix: [
+        "mingalarpar": [
+            Candidate(surface: "မင်္ဂလာပါ", reading: "min+galarpar2", source: .lexicon, score: 1000),
+        ]
+    ])
+    let engine = BurmeseEngine(candidateStore: store)
+    let state = engine.update(buffer: "mingalarpar", context: [])
+    assertEqual(state.candidates.first?.surface ?? "<none>", "မင်္ဂလာပါ",
+        "merge_composeOnlyPrioritized")
+    assertEqual(state.candidates.first?.source ?? .grammar, .lexicon,
+        "merge_composeOnlyPrioritized_source")
+}
+
+runTest("merge_trailingLexiconDoesNotDisplacePrimaryGrammar") {
+    let store = FixedLexiconStore(byPrefix: [
+        "thar": [
+            Candidate(surface: "FakeLexicon", reading: "tharx", source: .lexicon, score: 999),
+        ]
+    ])
+    let engine = BurmeseEngine(candidateStore: store)
+    let state = engine.update(buffer: "thar", context: [])
+    if let lexIdx = state.candidates.firstIndex(where: { $0.surface == "FakeLexicon" }) {
+        let gramIdx = state.candidates.firstIndex(where: { $0.source == .grammar }) ?? Int.max
+        assertTrue(gramIdx < lexIdx, "merge_trailingLexiconAfterGrammar",
+            detail: "grammar at \(gramIdx), lexicon at \(lexIdx)")
+    } else {
+        assertTrue(true, "merge_trailingLexiconAfterGrammar")
+    }
+}
+
+runTest("merge_lexiconSurfaceMatchingGrammarIsMergedNotDuplicated") {
+    let store = FixedLexiconStore(byPrefix: [
+        "thar": [
+            Candidate(surface: "သာ", reading: "thar", source: .lexicon, score: 750),
+        ]
+    ])
+    let engine = BurmeseEngine(candidateStore: store)
+    let state = engine.update(buffer: "thar", context: [])
+    let matches = state.candidates.filter { $0.surface == "သာ" }
+    assertEqual(matches.count, 1, "merge_surfaceMerge_noDupe")
+    assertEqual(matches.first?.source ?? .lexicon, .grammar, "merge_surfaceMerge_keepsGrammar")
+}
+
+runTest("merge_pageSizeNeverExceedsLimit") {
+    let store = FixedLexiconStore(byPrefix: [
+        "kyar": [
+            Candidate(surface: "ကြား", reading: "kyar:", source: .lexicon, score: 900),
+            Candidate(surface: "ကျား", reading: "ky2ar:", source: .lexicon, score: 800),
+            Candidate(surface: "ExtraA", reading: "kyarx1", source: .lexicon, score: 700),
+            Candidate(surface: "ExtraB", reading: "kyarx2", source: .lexicon, score: 600),
+            Candidate(surface: "ExtraC", reading: "kyarx3", source: .lexicon, score: 500),
+        ]
+    ])
+    let engine = BurmeseEngine(candidateStore: store)
+    let state = engine.update(buffer: "kyar", context: [])
+    assertTrue(state.candidates.count <= BurmeseEngine.candidatePageSize,
+        "merge_pageSizeLimit", detail: "got \(state.candidates.count)")
+}
+
+#if canImport(SQLite3)
+
+struct SQLiteFixtureRow {
+    let id: Int64
+    let surface: String
+    let reading: String
+    let score: Double
+}
+
+func makeInMemoryLexicon(
+    entries: [SQLiteFixtureRow],
+    bigrams: [(prev: String, entryID: Int64, score: Double)] = [],
+    name: String
+) -> SQLiteCandidateStore? {
+    let dbURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("lexrank_\(name)_\(UUID().uuidString).sqlite")
+    var db: OpaquePointer?
+    guard sqlite3_open(dbURL.path, &db) == SQLITE_OK else { return nil }
+    defer { sqlite3_close(db) }
+
+    let schema = """
+        CREATE TABLE entries (
+            id INTEGER PRIMARY KEY,
+            surface TEXT NOT NULL,
+            canonical_reading TEXT NOT NULL,
+            unigram_score REAL NOT NULL
+        );
+        CREATE TABLE reading_index (
+            canonical_reading TEXT NOT NULL,
+            entry_id INTEGER NOT NULL REFERENCES entries(id),
+            rank_score REAL NOT NULL
+        );
+        CREATE TABLE bigram_context (
+            prev_surface TEXT NOT NULL,
+            next_entry_id INTEGER NOT NULL REFERENCES entries(id),
+            score REAL NOT NULL
+        );
+        """
+    guard sqlite3_exec(db, schema, nil, nil, nil) == SQLITE_OK else { return nil }
+
+    for row in entries {
+        let sql = """
+            INSERT INTO entries (id, surface, canonical_reading, unigram_score)
+            VALUES (\(row.id), '\(row.surface)', '\(row.reading)', \(row.score));
+            INSERT INTO reading_index (canonical_reading, entry_id, rank_score)
+            VALUES ('\(row.reading)', \(row.id), \(row.score));
+            """
+        guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else { return nil }
+    }
+    for bg in bigrams {
+        let sql = """
+            INSERT INTO bigram_context (prev_surface, next_entry_id, score)
+            VALUES ('\(bg.prev)', \(bg.entryID), \(bg.score));
+            """
+        guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else { return nil }
+    }
+    return SQLiteCandidateStore(path: dbURL.path)
+}
+
+func doubleEqual(_ a: Double, _ b: Double, _ name: String, epsilon: Double = 0.001) {
+    totalTests += 1
+    if abs(a - b) < epsilon {
+        passedTests += 1
+    } else {
+        failedTests.append((name, "Expected \(b), got \(a)"))
+    }
+}
+
+runTest("sqliteScore_aliasPenaltyApplied") {
+    guard let store = makeInMemoryLexicon(
+        entries: [.init(id: 1, surface: "ကျား", reading: "ky2ar:", score: 500.0)],
+        name: "aliasPenalty"
+    ) else {
+        failedTests.append(("sqliteScore_aliasPenaltyApplied", "Failed to open in-memory lexicon"))
+        totalTests += 1
+        return
+    }
+    let results = store.lookup(prefix: "kyar:", previousSurface: nil)
+    guard let hit = results.first(where: { $0.surface == "ကျား" }) else {
+        failedTests.append(("sqliteScore_aliasPenaltyApplied", "No hit for 'kyar:'"))
+        totalTests += 1
+        return
+    }
+    doubleEqual(hit.score, 500.0 - 1000.0, "sqliteScore_aliasPenaltyApplied")
+}
+
+runTest("sqliteScore_separatorPenaltyAppliedOnComposeMatch") {
+    guard let store = makeInMemoryLexicon(
+        entries: [.init(id: 1, surface: "မင်္ဂလာပါ", reading: "min+galarpar2", score: 1000.0)],
+        name: "sepPenalty"
+    ) else {
+        failedTests.append(("sqliteScore_separatorPenalty", "Failed to open"))
+        totalTests += 1
+        return
+    }
+    let results = store.lookup(prefix: "mingalarpar", previousSurface: nil)
+    guard let hit = results.first(where: { $0.surface == "မင်္ဂလာပါ" }) else {
+        failedTests.append(("sqliteScore_separatorPenalty", "No compose hit; got \(results)"))
+        totalTests += 1
+        return
+    }
+    doubleEqual(hit.score, 1000.0 - 1000.0 - 250.0, "sqliteScore_separatorPenaltyAppliedOnComposeMatch")
+}
+
+runTest("sqliteScore_bigramBonusApplied") {
+    guard let store = makeInMemoryLexicon(
+        entries: [.init(id: 1, surface: "ကျား", reading: "kyar:", score: 500.0)],
+        bigrams: [(prev: "ကြီး", entryID: 1, score: 500.0)],
+        name: "bigramBonus"
+    ) else {
+        failedTests.append(("sqliteScore_bigramBonus", "Failed to open"))
+        totalTests += 1
+        return
+    }
+    let results = store.lookup(prefix: "kyar:", previousSurface: "ကြီး")
+    guard let hit = results.first else {
+        failedTests.append(("sqliteScore_bigramBonus", "No hit"))
+        totalTests += 1
+        return
+    }
+    doubleEqual(hit.score, 500.0 + 500.0, "sqliteScore_bigramBonusApplied")
+}
+
+runTest("sqliteDedup_bigramHitWinsOverPlainPrefixHit") {
+    guard let store = makeInMemoryLexicon(
+        entries: [.init(id: 1, surface: "ကျား", reading: "kyar:", score: 400.0)],
+        bigrams: [(prev: "ကြီး", entryID: 1, score: 400.0)],
+        name: "dedup"
+    ) else {
+        failedTests.append(("sqliteDedup_bigramWins", "Failed to open"))
+        totalTests += 1
+        return
+    }
+    let results = store.lookup(prefix: "kyar:", previousSurface: "ကြီး")
+    let matches = results.filter { $0.surface == "ကျား" }
+    assertEqual(matches.count, 1, "sqliteDedup_bigramWins_count")
+    if let hit = matches.first {
+        doubleEqual(hit.score, 400.0 + 500.0, "sqliteDedup_bigramHitSurvives")
+    }
+}
+
+#endif
+
+// -- Real-lexicon example word ranking (requires the bundled SQLite DB)
+
+func repoRootURL() -> URL {
+    URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()  // TestRunner/
+        .deletingLastPathComponent()  // Tests/
+        .deletingLastPathComponent()  // BurmeseIMECore/
+        .deletingLastPathComponent()  // Packages/
+        .deletingLastPathComponent()  // repo root
+}
+
+let bundledLexiconPath = repoRootURL()
+    .appendingPathComponent("native/macos/Data/BurmeseLexicon.sqlite")
+    .path
+
+if FileManager.default.fileExists(atPath: bundledLexiconPath),
+   let store = SQLiteCandidateStore(path: bundledLexiconPath) {
+
+    let realEngine = BurmeseEngine(candidateStore: store)
+
+    // (surface, approximate-frequency-from-TSV)
+    let commonWordCases: [(surface: String, frequency: Int)] = [
+        ("မင်္ဂလာပါ", 10000),
+        ("သို့", 9444),
+        ("ပါ", 9200),
+        ("မင်္ဂလာ", 9000),
+        ("မြန်မာ", 9000),
+        ("သာ", 9000),
+        ("သည်", 8729),
+        ("ကို", 8522),
+        ("ကောင်း", 8500),
+        ("လူ", 8460),
+        ("နှင့်", 8380),
+    ]
+
+    for testCase in commonWordCases {
+        let canonical = ReverseRomanizer.romanize(testCase.surface)
+        let typed = canonical
+            .filter { !"23+'".contains($0) }  // compose-lookup key
+        let name = "realLexicon_\(testCase.surface)_typed_\(typed)"
+        runTest(name) {
+            guard !typed.isEmpty else {
+                failedTests.append((name, "Empty typed form for \(testCase.surface)"))
+                totalTests += 1
+                return
+            }
+            let state = realEngine.update(buffer: typed, context: [])
+            let top3 = Array(state.candidates.prefix(3)).map(\.surface)
+            assertTrue(top3.contains(testCase.surface), name,
+                detail: "typed='\(typed)' freq=\(testCase.frequency) top3=\(top3)")
+        }
+    }
+
+    runTest("realLexicon_mingalarpar_baseWordNotOutrankedByContinuation") {
+        let rawResults = store.lookup(prefix: "mingalarpar", previousSurface: nil)
+        let surfaces = rawResults.map(\.surface)
+        guard let baseIdx = surfaces.firstIndex(of: "မင်္ဂလာပါ") else {
+            failedTests.append(("realLexicon_mingalarpar_base",
+                "Expected မင်္ဂလာပါ in results; got \(surfaces)"))
+            totalTests += 1
+            return
+        }
+        for (i, surface) in surfaces.enumerated()
+            where surface != "မင်္ဂလာပါ" && surface.hasPrefix("မင်္ဂလာပါ")
+        {
+            assertTrue(i >= baseIdx,
+                "realLexicon_mingalarpar_base_vs_\(surface)",
+                detail: "base at \(baseIdx), continuation \(surface) at \(i)")
+        }
+    }
+
+    runTest("realLexicon_par_exposesPaaParticle") {
+        let state = realEngine.update(buffer: "par", context: [])
+        let surfaces = state.candidates.map(\.surface)
+        assertTrue(surfaces.contains("ပါ"),
+            "realLexicon_par_exposesPaaParticle",
+            detail: "surfaces=\(surfaces)")
+    }
+} else {
+    runTest("realLexicon_skipped_noBundledDB") {
+        assertTrue(true, "realLexicon_skipped_noBundledDB")
     }
 }
 
