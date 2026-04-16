@@ -1,4 +1,4 @@
-import SwiftUI
+import AppKit
 import Carbon
 import InputMethodKit
 
@@ -63,51 +63,13 @@ private enum RegistrationHelper {
     }
 }
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+final class IMEAppDelegate: NSObject, NSApplicationDelegate {
     private var server: IMKServer?
     private var registrationHelperProcess: Process?
-    private var wasExplicitlyOpened = false
-
-    func applicationWillFinishLaunching(_ notification: Notification) {
-        // Intercept the "open application" Apple Event. macOS sends this ONLY when the
-        // user explicitly opens the app (Finder, Launchpad, Spotlight). It is NOT sent
-        // when macOS silently launches the process as an IME server in response to an
-        // input source selection — letting us suppress the window in that case.
-        NSAppleEventManager.shared().setEventHandler(
-            self,
-            andSelector: #selector(handleOpenApplicationEvent(_:withReplyEvent:)),
-            forEventClass: AEEventClass(kCoreEventClass),
-            andEventID: AEEventID(kAEOpenApplication)
-        )
-    }
-
-    @objc private func handleOpenApplicationEvent(
-        _ event: NSAppleEventDescriptor,
-        withReplyEvent: NSAppleEventDescriptor
-    ) {
-        wasExplicitlyOpened = true
-    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         startInputMethodServer()
         registerInstalledInputMethodBundle()
-
-        // Defer the window-visibility decision until after the run loop has processed
-        // any pending Apple Events (including kAEOpenApplication). If the app was
-        // launched as a background IME server rather than by the user, hide the window.
-        DispatchQueue.main.async { [weak self] in
-            guard self?.wasExplicitlyOpened == false else { return }
-            NSApp.windows.forEach { $0.orderOut(nil) }
-        }
-    }
-
-    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag {
-            // User activated the running app (e.g. double-clicked in Finder) — show the window.
-            NSApp.windows.forEach { $0.makeKeyAndOrderFront(self) }
-            NSApp.activate(ignoringOtherApps: true)
-        }
-        return true
     }
 
     private func startInputMethodServer() {
@@ -226,26 +188,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-struct BurmeseIMEApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-
-    var body: some Scene {
-        WindowGroup {
-            ContentView()
-        }
-        .windowStyle(.titleBar)
-        .windowResizability(.contentSize)
-        .defaultSize(width: 480, height: 360)
-    }
+guard !RegistrationHelper.runIfRequested(arguments: CommandLine.arguments) else {
+    exit(0)
 }
 
-@main
-enum BurmeseIMEEntryPoint {
-    static func main() {
-        guard !RegistrationHelper.runIfRequested(arguments: CommandLine.arguments) else {
-            return
-        }
-
-        BurmeseIMEApp.main()
-    }
-}
+let app = NSApplication.shared
+let delegate = IMEAppDelegate()
+app.delegate = delegate
+app.setActivationPolicy(.prohibited)
+app.run()

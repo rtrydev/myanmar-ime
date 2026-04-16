@@ -8,11 +8,14 @@ for user-facing documentation.
 ```
 Packages/BurmeseIMECore/   Swift Package — pure conversion engine, no UI
   Sources/BurmeseIMECore/  Engine source
-  Sources/TestRunner/      CLI test driver (replaces XCTest when unavailable)
   Sources/LexiconBuilder/  TSV → SQLite lexicon compiler
-  Tests/                   XCTest suite (requires Xcode toolchain)
+  Tests/TestRunner/        CLI test driver (replaces XCTest when unavailable)
+  Tests/BurmeseIMECoreTests XCTest suite (requires Xcode toolchain)
   Data/                    Lexicon source TSV
-native/macos/              Xcode app + IMKInputController extension
+native/macos/              Xcode project with two apps + installer
+  BurmeseIME/              Headless IMK bundle (installs to ~/Library/Input Methods/)
+  BurmeseIMEPreferences/   SwiftUI settings app (installs to /Applications/)
+  installer/               build.sh + postinstall for the unsigned .pkg
 ```
 
 The core package has **no macOS-only dependencies** — it builds and runs
@@ -43,19 +46,42 @@ swift run LexiconBuilder \
 
 Only needed when `BurmeseLexiconSource.tsv` changes.
 
-### macOS app + input method
+### macOS apps + installer
 
-Open `native/macos/BurmeseIME.xcworkspace` in Xcode and build the
-`BurmeseIMEApp` scheme. The app installs the input method extension; enable
-it in System Settings → Keyboard → Input Sources.
+Open `native/macos/BurmeseIME.xcworkspace` in Xcode. Three schemes:
+
+- `BurmeseIME` — the headless IMK bundle. Build to iterate on the
+  controller / IMK glue.
+- `BurmeseIMEPreferences` — the SwiftUI settings app.
+- `BurmeseIMEInstaller` — aggregate target that builds both apps and
+  packages them into an unsigned `.pkg` at
+  `native/macos/build/BurmeseIME-Install.pkg`. ⌘B on this scheme runs
+  `pkgbuild` under Xcode's automatic signing, giving the apps a stable
+  team signature (required for TCC to persist App-Group grants — see
+  below).
+
+Install by right-clicking the pkg → Open (unsigned, Gatekeeper blocks
+double-click). Postinstall relocates the IME to
+`~/Library/Input Methods/` and launches the Preferences app; enable the
+input source in System Settings → Keyboard → Text Input.
+
+Neither target is sandboxed. Earlier iterations sandboxed both and shared
+state through an App Group, but free Apple Development signing can't
+register App Groups centrally so macOS re-prompted "would like to access
+data from other apps" on every launch. Unsandboxed, both apps read/write
+the same `~/Library/Preferences/group.com.myangler.inputmethod.burmese.plist`
+via `UserDefaults(suiteName:)` — no entitlements, no prompts.
+
+The CLI `installer/build.sh` does the same packaging for headless builds
+(does not override signing).
 
 ## Architecture
 
 ### Conversion pipeline
 
-A keystroke lands in `BurmeseInputController` (the IMK extension), which
-accumulates a raw Roman buffer and calls `BurmeseEngine.update(buffer:context:)`
-on every change.
+A keystroke lands in `BurmeseInputController` (inside the IME bundle),
+which accumulates a raw Roman buffer and calls
+`BurmeseEngine.update(buffer:context:)` on every change.
 
 ```
 buffer ─► BurmeseEngine.update
@@ -119,15 +145,22 @@ Candidate ranking is anchored by a word-level Kneser-Ney trigram LM
 (`LanguageModel/FORMAT.md`) loaded via `TrigramLanguageModel`. `BurmeseEngine`
 combines: orthographic legality (hard filter) → alias cost → LM log-prob →
 parser tie-breaker. The LM `.bin` and the SQLite lexicon are produced in
-one pass by `Tools/corpus_builder/` so their vocabularies stay aligned.
+one pass by `Packages/BurmeseIMECore/Tools/corpus_builder/` so their vocabularies stay aligned.
 
 ## Working in this repo
 
 - Core engine changes: edit under `Packages/BurmeseIMECore/Sources/BurmeseIMECore/`,
   run `swift run TestRunner` from the package dir.
-- Adding a test: prefer adding to both `Tests/` (XCTest) and
-  `Sources/TestRunner/main.swift` so it runs without Xcode.
-- UI/keystroke behavior changes: edit `native/macos/BurmeseIMEExtension/BurmeseInputController.swift`
-  and test in the running IMK extension (no unit-test harness for IMK).
+- Adding a test: prefer adding to both
+  `Tests/BurmeseIMECoreTests/` (XCTest) and `Tests/TestRunner/main.swift`
+  so it runs without Xcode.
+- Keystroke behavior changes: edit
+  `native/macos/BurmeseIME/BurmeseInputController.swift` and test in the
+  running IME (no unit-test harness for IMK).
+- Settings UI changes: edit `native/macos/BurmeseIMEPreferences/ContentView.swift`.
+  Settings propagate across the process boundary via the shared
+  `UserDefaults` suite; the controller reconciles on the next keystroke
+  (see `reconcileClusterAliasesIfNeeded` — it exists because
+  SyllableParser bakes `useClusterAliases` at init time).
 - Rule changes: update `Romanization.swift` and/or `Grammar.swift`; the
   parser picks them up automatically via `SyllableParser.init()`.

@@ -1,0 +1,23 @@
+#!/bin/bash
+set -e
+
+# macOS installer framework sets $USER and $HOME to the installing user.
+IME_SRC="/private/tmp/BurmeseIME-payload/BurmeseIME.app"
+IME_DST_DIR="$HOME/Library/Input Methods"
+IME_DST="$IME_DST_DIR/BurmeseIME.app"
+
+if [ ! -d "$IME_SRC" ]; then
+    echo "postinstall: payload missing at $IME_SRC" >&2
+    exit 1
+fi
+
+mkdir -p "$IME_DST_DIR"
+rm -rf "$IME_DST"
+cp -R "$IME_SRC" "$IME_DST"
+chown -R "$USER" "$IME_DST_DIR"
+
+rm -rf "/private/tmp/BurmeseIME-payload"
+
+sudo -u "$USER" /usr/bin/open -a "/Applications/BurmeseIMEPreferences.app" || true
+
+exit 0

@@ -6,41 +6,81 @@
 	objectVersion = 60;
 	objects = {
 
+/* Begin PBXAggregateTarget section */
+		AA66666666666666666666AD /* BurmeseIMEInstaller */ = {
+			isa = PBXAggregateTarget;
+			buildConfigurationList = AA99999999999999999999AD /* Build configuration list for PBXAggregateTarget "BurmeseIMEInstaller" */;
+			buildPhases = (
+				AA5555555555555555555500 /* Build installer pkg */,
+			);
+			dependencies = (
+				AADD00000000000000000000 /* PBXTargetDependency */,
+				AADD00000000000000000001 /* PBXTargetDependency */,
+			);
+			name = BurmeseIMEInstaller;
+			productName = BurmeseIMEInstaller;
+		};
+/* End PBXAggregateTarget section */
+
 /* Begin PBXBuildFile section */
-		AA44444444444444444444AA /* BurmeseIMEApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333AC /* BurmeseIMEApp.swift */; };
-		AA44444444444444444444AB /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333AD /* ContentView.swift */; };
-		AA44444444444444444444B1 /* BurmeseInputController.swift in Sources (app) */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333AE /* BurmeseInputController.swift */; };
-		AA44444444444444444444AC /* BurmeseInputController.swift in Sources (ext) */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333AE /* BurmeseInputController.swift */; };
-		AA44444444444444444444AD /* BurmeseIMECore in Frameworks */ = {isa = PBXBuildFile; productRef = AA77777777777777777777AB /* BurmeseIMECore */; };
-		AA44444444444444444444AE /* BurmeseIMECore in Frameworks */ = {isa = PBXBuildFile; productRef = AA77777777777777777777AC /* BurmeseIMECore */; };
-		AA44444444444444444444B0 /* InputMethodKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333B3 /* InputMethodKit.framework */; };
-		AA44444444444444444444B2 /* BurmeseIMEIcon.tiff in Resources */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333B4 /* BurmeseIMEIcon.tiff */; };
-		AA44444444444444444444B3 /* BurmeseIMEIcon.tiff in Resources (app) */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333B7 /* BurmeseIMEIcon.tiff */; };
-		AA44444444444444444444B4 /* InfoPlist.strings in Resources (app) */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333B5 /* InfoPlist.strings */; };
-		AA44444444444444444444B5 /* BurmeseIMEIcon.icns in Resources (app) */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333B6 /* BurmeseIMEIcon.icns */; };
-		AA44444444444444444444B6 /* BurmeseLexicon.sqlite in Resources (app) */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333B8 /* BurmeseLexicon.sqlite */; };
-		AA44444444444444444444B7 /* BurmeseLexicon.sqlite in Resources */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333B8 /* BurmeseLexicon.sqlite */; };
-		BE44444444444444444444B8 /* BurmeseLM.bin in Resources (app) */ = {isa = PBXBuildFile; fileRef = BE33333333333333333333B9 /* BurmeseLM.bin */; };
-		BE44444444444444444444B9 /* BurmeseLM.bin in Resources */ = {isa = PBXBuildFile; fileRef = BE33333333333333333333B9 /* BurmeseLM.bin */; };
+		AA44444444444444444444D0 /* main.swift in Sources (ime) */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333D0 /* main.swift */; };
+		AA44444444444444444444AC /* BurmeseInputController.swift in Sources (ime) */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333AE /* BurmeseInputController.swift */; };
+		AA44444444444444444444AD /* BurmeseIMECore in Frameworks (ime) */ = {isa = PBXBuildFile; productRef = AA77777777777777777777AB /* BurmeseIMECore */; };
+		AA44444444444444444444B0 /* InputMethodKit.framework in Frameworks (ime) */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333B3 /* InputMethodKit.framework */; };
+		AA44444444444444444444B2 /* BurmeseIMEIcon.tiff in Resources (ime) */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333B4 /* BurmeseIMEIcon.tiff */; };
+		AA44444444444444444444B5 /* BurmeseIMEIcon.icns in Resources (ime) */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333D2 /* BurmeseIMEIcon.icns */; };
+		AA44444444444444444444B4 /* InfoPlist.strings in Resources (ime) */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333B5 /* InfoPlist.strings */; };
+		AA44444444444444444444B7 /* BurmeseLexicon.sqlite in Resources (ime) */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333B8 /* BurmeseLexicon.sqlite */; };
+		BE44444444444444444444B9 /* BurmeseLM.bin in Resources (ime) */ = {isa = PBXBuildFile; fileRef = BE33333333333333333333B9 /* BurmeseLM.bin */; };
+
+		AA44444444444444444444D1 /* BurmeseIMEPreferences.swift in Sources (prefs) */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333D1 /* BurmeseIMEPreferences.swift */; };
+		AA44444444444444444444AB /* ContentView.swift in Sources (prefs) */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333AD /* ContentView.swift */; };
+		AA44444444444444444444C0 /* IMESettingsViewModel.swift in Sources (prefs) */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333C0 /* IMESettingsViewModel.swift */; };
+		AA44444444444444444444AE /* BurmeseIMECore in Frameworks (prefs) */ = {isa = PBXBuildFile; productRef = AA77777777777777777777AC /* BurmeseIMECore */; };
+		AA44444444444444444444B3 /* BurmeseIMEIcon.tiff in Resources (prefs) */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333B7 /* BurmeseIMEIcon.tiff */; };
+		AA44444444444444444444B6 /* BurmeseIMEIcon.icns in Resources (prefs) */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333B6 /* BurmeseIMEIcon.icns */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		AAEE00000000000000000000 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = AA11111111111111111111AA /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AA66666666666666666666AA;
+			remoteInfo = BurmeseIME;
+		};
+		AAEE00000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = AA11111111111111111111AA /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AA66666666666666666666AC;
+			remoteInfo = BurmeseIMEPreferences;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
-		AA33333333333333333333AA /* BurmeseIMEApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BurmeseIMEApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		AA33333333333333333333AB /* BurmeseIMEExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BurmeseIMEExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		AA33333333333333333333AC /* BurmeseIMEApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BurmeseIMEApp.swift; sourceTree = "<group>"; };
-		AA33333333333333333333AD /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		AA33333333333333333333AA /* BurmeseIME.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BurmeseIME.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA33333333333333333333CA /* BurmeseIMEPreferences.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BurmeseIMEPreferences.app; sourceTree = BUILT_PRODUCTS_DIR; };
+
+		AA33333333333333333333D0 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		AA33333333333333333333AE /* BurmeseInputController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BurmeseInputController.swift; sourceTree = "<group>"; };
-		AA33333333333333333333AF /* BurmeseIMEApp-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "BurmeseIMEApp-Info.plist"; sourceTree = "<group>"; };
-		AA33333333333333333333B0 /* BurmeseIMEExtension-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "BurmeseIMEExtension-Info.plist"; sourceTree = "<group>"; };
-		AA33333333333333333333B1 /* BurmeseIMEApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BurmeseIMEApp.entitlements; sourceTree = "<group>"; };
-		AA33333333333333333333B2 /* BurmeseIMEExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BurmeseIMEExtension.entitlements; sourceTree = "<group>"; };
-		AA33333333333333333333B3 /* InputMethodKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = InputMethodKit.framework; path = System/Library/Frameworks/InputMethodKit.framework; sourceTree = SDKROOT; };
-		AA33333333333333333333B4 /* BurmeseIMEIcon.tiff */ = {isa = PBXFileReference; lastKnownFileType = image.tiff; path = BurmeseIMEIcon.tiff; sourceTree = "<group>"; };
-		AA33333333333333333333B7 /* BurmeseIMEIcon.tiff */ = {isa = PBXFileReference; lastKnownFileType = image.tiff; path = BurmeseIMEIcon.tiff; sourceTree = "<group>"; };
+		AA33333333333333333333AF /* BurmeseIME-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "BurmeseIME-Info.plist"; sourceTree = "<group>"; };
+		AA33333333333333333333B1 /* BurmeseIME.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BurmeseIME.entitlements; sourceTree = "<group>"; };
+		AA33333333333333333333B4 /* BurmeseIMEIcon.tiff (ime) */ = {isa = PBXFileReference; lastKnownFileType = image.tiff; path = BurmeseIMEIcon.tiff; sourceTree = "<group>"; };
+		AA33333333333333333333D2 /* BurmeseIMEIcon.icns (ime) */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = BurmeseIMEIcon.icns; sourceTree = "<group>"; };
 		AA33333333333333333333B5 /* InfoPlist.strings */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = InfoPlist.strings; path = "en.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
-		AA33333333333333333333B6 /* BurmeseIMEIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = BurmeseIMEIcon.icns; sourceTree = "<group>"; };
 		AA33333333333333333333B8 /* BurmeseLexicon.sqlite */ = {isa = PBXFileReference; lastKnownFileType = file; name = BurmeseLexicon.sqlite; path = ../Data/BurmeseLexicon.sqlite; sourceTree = "<group>"; };
 		BE33333333333333333333B9 /* BurmeseLM.bin */ = {isa = PBXFileReference; lastKnownFileType = file; name = BurmeseLM.bin; path = ../Data/BurmeseLM.bin; sourceTree = "<group>"; };
+
+		AA33333333333333333333D1 /* BurmeseIMEPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BurmeseIMEPreferences.swift; sourceTree = "<group>"; };
+		AA33333333333333333333AD /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		AA33333333333333333333C0 /* IMESettingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IMESettingsViewModel.swift; sourceTree = "<group>"; };
+		AA33333333333333333333B0 /* BurmeseIMEPreferences-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "BurmeseIMEPreferences-Info.plist"; sourceTree = "<group>"; };
+		AA33333333333333333333B2 /* BurmeseIMEPreferences.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BurmeseIMEPreferences.entitlements; sourceTree = "<group>"; };
+		AA33333333333333333333B7 /* BurmeseIMEIcon.tiff (prefs) */ = {isa = PBXFileReference; lastKnownFileType = image.tiff; path = BurmeseIMEIcon.tiff; sourceTree = "<group>"; };
+		AA33333333333333333333B6 /* BurmeseIMEIcon.icns (prefs) */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = BurmeseIMEIcon.icns; sourceTree = "<group>"; };
+
+		AA33333333333333333333B3 /* InputMethodKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = InputMethodKit.framework; path = System/Library/Frameworks/InputMethodKit.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -48,8 +88,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				AA44444444444444444444AD /* BurmeseIMECore in Frameworks */,
-				AA44444444444444444444B0 /* InputMethodKit.framework in Frameworks */,
+				AA44444444444444444444AD /* BurmeseIMECore in Frameworks (ime) */,
+				AA44444444444444444444B0 /* InputMethodKit.framework in Frameworks (ime) */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -57,7 +97,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				AA44444444444444444444AE /* BurmeseIMECore in Frameworks */,
+				AA44444444444444444444AE /* BurmeseIMECore in Frameworks (prefs) */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -67,8 +107,8 @@
 		AA22222222222222222222AA = {
 			isa = PBXGroup;
 			children = (
-				AA22222222222222222222AC /* BurmeseIMEApp */,
-				AA22222222222222222222AD /* BurmeseIMEExtension */,
+				AA22222222222222222222AC /* BurmeseIME */,
+				AA22222222222222222222AE /* BurmeseIMEPreferences */,
 				AA22222222222222222222AB /* Products */,
 			);
 			sourceTree = "<group>";
@@ -76,45 +116,48 @@
 		AA22222222222222222222AB /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				AA33333333333333333333AA /* BurmeseIMEApp.app */,
-				AA33333333333333333333AB /* BurmeseIMEExtension.appex */,
+				AA33333333333333333333AA /* BurmeseIME.app */,
+				AA33333333333333333333CA /* BurmeseIMEPreferences.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
 		};
-		AA22222222222222222222AC /* BurmeseIMEApp */ = {
+		AA22222222222222222222AC /* BurmeseIME */ = {
 			isa = PBXGroup;
 			children = (
-				AA33333333333333333333AC /* BurmeseIMEApp.swift */,
-				AA33333333333333333333AD /* ContentView.swift */,
-				AA33333333333333333333AF /* BurmeseIMEApp-Info.plist */,
-				AA33333333333333333333B1 /* BurmeseIMEApp.entitlements */,
-				AA33333333333333333333B5 /* InfoPlist.strings */,
-				AA33333333333333333333B6 /* BurmeseIMEIcon.icns */,
-				AA33333333333333333333B7 /* BurmeseIMEIcon.tiff */,
-			);
-			path = BurmeseIMEApp;
-			sourceTree = "<group>";
-		};
-		AA22222222222222222222AD /* BurmeseIMEExtension */ = {
-			isa = PBXGroup;
-			children = (
+				AA33333333333333333333D0 /* main.swift */,
 				AA33333333333333333333AE /* BurmeseInputController.swift */,
-				AA33333333333333333333B4 /* BurmeseIMEIcon.tiff */,
+				AA33333333333333333333AF /* BurmeseIME-Info.plist */,
+				AA33333333333333333333B1 /* BurmeseIME.entitlements */,
+				AA33333333333333333333B5 /* InfoPlist.strings */,
+				AA33333333333333333333D2 /* BurmeseIMEIcon.icns (ime) */,
+				AA33333333333333333333B4 /* BurmeseIMEIcon.tiff (ime) */,
 				AA33333333333333333333B8 /* BurmeseLexicon.sqlite */,
 				BE33333333333333333333B9 /* BurmeseLM.bin */,
-				AA33333333333333333333B0 /* BurmeseIMEExtension-Info.plist */,
-				AA33333333333333333333B2 /* BurmeseIMEExtension.entitlements */,
 			);
-			path = BurmeseIMEExtension;
+			path = BurmeseIME;
+			sourceTree = "<group>";
+		};
+		AA22222222222222222222AE /* BurmeseIMEPreferences */ = {
+			isa = PBXGroup;
+			children = (
+				AA33333333333333333333D1 /* BurmeseIMEPreferences.swift */,
+				AA33333333333333333333AD /* ContentView.swift */,
+				AA33333333333333333333C0 /* IMESettingsViewModel.swift */,
+				AA33333333333333333333B0 /* BurmeseIMEPreferences-Info.plist */,
+				AA33333333333333333333B2 /* BurmeseIMEPreferences.entitlements */,
+				AA33333333333333333333B6 /* BurmeseIMEIcon.icns (prefs) */,
+				AA33333333333333333333B7 /* BurmeseIMEIcon.tiff (prefs) */,
+			);
+			path = BurmeseIMEPreferences;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		AA66666666666666666666AA /* BurmeseIMEApp */ = {
+		AA66666666666666666666AA /* BurmeseIME */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = AA99999999999999999999AB /* Build configuration list for PBXNativeTarget "BurmeseIMEApp" */;
+			buildConfigurationList = AA99999999999999999999AB /* Build configuration list for PBXNativeTarget "BurmeseIME" */;
 			buildPhases = (
 				AA55555555555555555555AA /* Sources */,
 				AA55555555555555555555AB /* Frameworks */,
@@ -124,17 +167,17 @@
 			);
 			dependencies = (
 			);
-			name = BurmeseIMEApp;
+			name = BurmeseIME;
 			packageProductDependencies = (
 				AA77777777777777777777AB /* BurmeseIMECore */,
 			);
-			productName = BurmeseIMEApp;
-			productReference = AA33333333333333333333AA /* BurmeseIMEApp.app */;
+			productName = BurmeseIME;
+			productReference = AA33333333333333333333AA /* BurmeseIME.app */;
 			productType = "com.apple.product-type.application";
 		};
-		AA66666666666666666666AB /* BurmeseIMEExtension */ = {
+		AA66666666666666666666AC /* BurmeseIMEPreferences */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = AA99999999999999999999AC /* Build configuration list for PBXNativeTarget "BurmeseIMEExtension" */;
+			buildConfigurationList = AA99999999999999999999AC /* Build configuration list for PBXNativeTarget "BurmeseIMEPreferences" */;
 			buildPhases = (
 				AA55555555555555555555AE /* Sources */,
 				AA55555555555555555555AC /* Frameworks */,
@@ -144,13 +187,13 @@
 			);
 			dependencies = (
 			);
-			name = BurmeseIMEExtension;
+			name = BurmeseIMEPreferences;
 			packageProductDependencies = (
 				AA77777777777777777777AC /* BurmeseIMECore */,
 			);
-			productName = BurmeseIMEExtension;
-			productReference = AA33333333333333333333AB /* BurmeseIMEExtension.appex */;
-			productType = "com.apple.product-type.app-extension";
+			productName = BurmeseIMEPreferences;
+			productReference = AA33333333333333333333CA /* BurmeseIMEPreferences.app */;
+			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
 
@@ -165,7 +208,7 @@
 					AA66666666666666666666AA = {
 						CreatedOnToolsVersion = 16.0;
 					};
-					AA66666666666666666666AB = {
+					AA66666666666666666666AC = {
 						CreatedOnToolsVersion = 16.0;
 					};
 				};
@@ -186,45 +229,66 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				AA66666666666666666666AA /* BurmeseIMEApp */,
-				AA66666666666666666666AB /* BurmeseIMEExtension */,
+				AA66666666666666666666AA /* BurmeseIME */,
+				AA66666666666666666666AC /* BurmeseIMEPreferences */,
+				AA66666666666666666666AD /* BurmeseIMEInstaller */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		AA55555555555555555555AF /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				AA44444444444444444444B2 /* BurmeseIMEIcon.tiff in Resources */,
-				AA44444444444444444444B7 /* BurmeseLexicon.sqlite in Resources */,
-				BE44444444444444444444B9 /* BurmeseLM.bin in Resources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		AA55555555555555555555B0 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				AA44444444444444444444B3 /* BurmeseIMEIcon.tiff in Resources (app) */,
-				AA44444444444444444444B4 /* InfoPlist.strings in Resources (app) */,
-				AA44444444444444444444B5 /* BurmeseIMEIcon.icns in Resources (app) */,
-				AA44444444444444444444B6 /* BurmeseLexicon.sqlite in Resources (app) */,
-				BE44444444444444444444B8 /* BurmeseLM.bin in Resources (app) */,
+				AA44444444444444444444B2 /* BurmeseIMEIcon.tiff in Resources (ime) */,
+				AA44444444444444444444B5 /* BurmeseIMEIcon.icns in Resources (ime) */,
+				AA44444444444444444444B4 /* InfoPlist.strings in Resources (ime) */,
+				AA44444444444444444444B7 /* BurmeseLexicon.sqlite in Resources (ime) */,
+				BE44444444444444444444B9 /* BurmeseLM.bin in Resources (ime) */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AA55555555555555555555AF /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AA44444444444444444444B3 /* BurmeseIMEIcon.tiff in Resources (prefs) */,
+				AA44444444444444444444B6 /* BurmeseIMEIcon.icns in Resources (prefs) */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		AA5555555555555555555500 /* Build installer pkg */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Build installer pkg";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "set -euo pipefail\n\nSTAGING=\"${DERIVED_FILE_DIR}/installer-staging\"\nPAYLOAD=\"${STAGING}/private/tmp/BurmeseIME-payload\"\nAPPS=\"${STAGING}/Applications\"\nOUT_DIR=\"${SRCROOT}/build\"\nOUT_PKG=\"${OUT_DIR}/BurmeseIME-Install.pkg\"\n\nIME_BUILT=\"${BUILT_PRODUCTS_DIR}/BurmeseIME.app\"\nPREFS_BUILT=\"${BUILT_PRODUCTS_DIR}/BurmeseIMEPreferences.app\"\n\nif [ ! -d \"${IME_BUILT}\" ]; then\n    echo \"error: ${IME_BUILT} not found — aggregate target must build after BurmeseIME\" >&2\n    exit 1\nfi\nif [ ! -d \"${PREFS_BUILT}\" ]; then\n    echo \"error: ${PREFS_BUILT} not found — aggregate target must build after BurmeseIMEPreferences\" >&2\n    exit 1\nfi\n\nrm -rf \"${STAGING}\"\nmkdir -p \"${PAYLOAD}\" \"${APPS}\" \"${OUT_DIR}\"\n\n/usr/bin/ditto \"${IME_BUILT}\" \"${PAYLOAD}/BurmeseIME.app\"\n/usr/bin/ditto \"${PREFS_BUILT}\" \"${APPS}/BurmeseIMEPreferences.app\"\n\nVERSION=\"${MARKETING_VERSION:-0.1.0}\"\n\n/usr/bin/pkgbuild \\\n    --root \"${STAGING}\" \\\n    --identifier com.myangler.inputmethod.burmese.installer \\\n    --version \"${VERSION}\" \\\n    --install-location / \\\n    --scripts \"${SRCROOT}/installer/scripts\" \\\n    \"${OUT_PKG}\"\n\necho \"note: built ${OUT_PKG}\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		AA55555555555555555555AA /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				AA44444444444444444444AA /* BurmeseIMEApp.swift in Sources */,
-				AA44444444444444444444AB /* ContentView.swift in Sources */,
-				AA44444444444444444444B1 /* BurmeseInputController.swift in Sources (app) */,
+				AA44444444444444444444D0 /* main.swift in Sources (ime) */,
+				AA44444444444444444444AC /* BurmeseInputController.swift in Sources (ime) */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -232,11 +296,26 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				AA44444444444444444444AC /* BurmeseInputController.swift in Sources */,
+				AA44444444444444444444D1 /* BurmeseIMEPreferences.swift in Sources (prefs) */,
+				AA44444444444444444444AB /* ContentView.swift in Sources (prefs) */,
+				AA44444444444444444444C0 /* IMESettingsViewModel.swift in Sources (prefs) */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		AADD00000000000000000000 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = AA66666666666666666666AA /* BurmeseIME */;
+			targetProxy = AAEE00000000000000000000 /* PBXContainerItemProxy */;
+		};
+		AADD00000000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = AA66666666666666666666AC /* BurmeseIMEPreferences */;
+			targetProxy = AAEE00000000000000000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		AA88888888888888888888AA /* Debug */ = {
@@ -361,7 +440,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = BurmeseIMEApp/BurmeseIMEApp.entitlements;
+				CODE_SIGN_ENTITLEMENTS = BurmeseIME/BurmeseIME.entitlements;
 				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -369,7 +448,7 @@
 				DEVELOPMENT_TEAM = X56TW88V5S;
 				ENABLE_DEBUG_DYLIB = NO;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = "BurmeseIMEApp/BurmeseIMEApp-Info.plist";
+				INFOPLIST_FILE = "BurmeseIME/BurmeseIME-Info.plist";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -389,7 +468,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = BurmeseIMEApp/BurmeseIMEApp.entitlements;
+				CODE_SIGN_ENTITLEMENTS = BurmeseIME/BurmeseIME.entitlements;
 				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -397,7 +476,7 @@
 				DEVELOPMENT_TEAM = X56TW88V5S;
 				ENABLE_DEBUG_DYLIB = NO;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = "BurmeseIMEApp/BurmeseIMEApp-Info.plist";
+				INFOPLIST_FILE = "BurmeseIME/BurmeseIME-Info.plist";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -416,8 +495,8 @@
 		AA88888888888888888888AE /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = BurmeseIMEExtension/BurmeseIMEExtension.entitlements;
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = BurmeseIMEPreferences/BurmeseIMEPreferences.entitlements;
 				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -425,18 +504,17 @@
 				DEVELOPMENT_TEAM = X56TW88V5S;
 				ENABLE_DEBUG_DYLIB = NO;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = "BurmeseIMEExtension/BurmeseIMEExtension-Info.plist";
+				INFOPLIST_FILE = "BurmeseIMEPreferences/BurmeseIMEPreferences-Info.plist";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
-					"@executable_path/../../../../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.myangler.inputmethod.burmese.extension;
+				PRODUCT_BUNDLE_IDENTIFIER = com.myangler.inputmethod.burmese.preferences;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
-				SKIP_INSTALL = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -445,8 +523,8 @@
 		AA88888888888888888888AF /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = BurmeseIMEExtension/BurmeseIMEExtension.entitlements;
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = BurmeseIMEPreferences/BurmeseIMEPreferences.entitlements;
 				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -454,20 +532,35 @@
 				DEVELOPMENT_TEAM = X56TW88V5S;
 				ENABLE_DEBUG_DYLIB = NO;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = "BurmeseIMEExtension/BurmeseIMEExtension-Info.plist";
+				INFOPLIST_FILE = "BurmeseIMEPreferences/BurmeseIMEPreferences-Info.plist";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
-					"@executable_path/../../../../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.myangler.inputmethod.burmese.extension;
+				PRODUCT_BUNDLE_IDENTIFIER = com.myangler.inputmethod.burmese.preferences;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
-				SKIP_INSTALL = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		AA8888888888888888888800 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Debug;
+		};
+		AA8888888888888888888801 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
 			name = Release;
 		};
@@ -483,7 +576,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		AA99999999999999999999AB /* Build configuration list for PBXNativeTarget "BurmeseIMEApp" */ = {
+		AA99999999999999999999AB /* Build configuration list for PBXNativeTarget "BurmeseIME" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				AA88888888888888888888AC /* Debug */,
@@ -492,11 +585,20 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		AA99999999999999999999AC /* Build configuration list for PBXNativeTarget "BurmeseIMEExtension" */ = {
+		AA99999999999999999999AC /* Build configuration list for PBXNativeTarget "BurmeseIMEPreferences" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				AA88888888888888888888AE /* Debug */,
 				AA88888888888888888888AF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AA99999999999999999999AD /* Build configuration list for PBXAggregateTarget "BurmeseIMEInstaller" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA8888888888888888888800 /* Debug */,
+				AA8888888888888888888801 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

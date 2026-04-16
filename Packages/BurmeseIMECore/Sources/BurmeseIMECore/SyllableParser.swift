@@ -66,7 +66,11 @@ public final class SyllableParser: Sendable {
     /// Maximum vowel key length for bounded search.
     public let maxVowelLen: Int
 
-    public init() {
+    /// - Parameter useClusterAliases: when `false`, the phonetic cluster
+    ///   shortcuts (`j`, `ch`, `gy`, `sh`, and their `w` variants) are not
+    ///   inserted into the onset table. Every other onset, vowel, medial,
+    ///   and canonical alias is loaded unconditionally.
+    public init(useClusterAliases: Bool = true) {
         var onsetLookup: [String: [OnsetEntry]] = [:]
 
         func appendOnset(
@@ -138,33 +142,36 @@ public final class SyllableParser: Sendable {
 
         // Phonetic cluster shortcuts (`j`, `ch`, `gy`, `sh`, + `w` variants).
         // Inserted directly under the shortcut key so canonical aliasVariants
-        // handling for other onsets is unaffected.
-        for alias in Romanization.clusterAliases {
-            var myanmarOutput = String(alias.consonant)
-            for medial in alias.medials {
-                myanmarOutput.append(medial)
+        // handling for other onsets is unaffected. Gated by the init flag
+        // so users who prefer structural typing can opt out.
+        if useClusterAliases {
+            for alias in Romanization.clusterAliases {
+                var myanmarOutput = String(alias.consonant)
+                for medial in alias.medials {
+                    myanmarOutput.append(medial)
+                }
+
+                let hasH  = alias.medials.contains(Myanmar.medialHa)
+                let hasW  = alias.medials.contains(Myanmar.medialWa)
+                let hasY  = alias.medials.contains(Myanmar.medialRa)
+                let hasY2 = alias.medials.contains(Myanmar.medialYa)
+                let baseRoman = Romanization.consonantToRoman[alias.consonant] ?? ""
+                let canonical =
+                    (hasH ? "h" : "") +
+                    baseRoman +
+                    (hasW ? "w" : "") +
+                    (hasY ? "y" : "") +
+                    (hasY2 ? "y2" : "")
+
+                onsetLookup[alias.roman, default: []].append(OnsetEntry(
+                    canonicalRoman: canonical,
+                    myanmar: myanmarOutput,
+                    onset: alias.consonant,
+                    medials: alias.medials,
+                    aliasCost: alias.aliasCost,
+                    structureCost: alias.medials.count
+                ))
             }
-
-            let hasH  = alias.medials.contains(Myanmar.medialHa)
-            let hasW  = alias.medials.contains(Myanmar.medialWa)
-            let hasY  = alias.medials.contains(Myanmar.medialRa)
-            let hasY2 = alias.medials.contains(Myanmar.medialYa)
-            let baseRoman = Romanization.consonantToRoman[alias.consonant] ?? ""
-            let canonical =
-                (hasH ? "h" : "") +
-                baseRoman +
-                (hasW ? "w" : "") +
-                (hasY ? "y" : "") +
-                (hasY2 ? "y2" : "")
-
-            onsetLookup[alias.roman, default: []].append(OnsetEntry(
-                canonicalRoman: canonical,
-                myanmar: myanmarOutput,
-                onset: alias.consonant,
-                medials: alias.medials,
-                aliasCost: alias.aliasCost,
-                structureCost: alias.medials.count
-            ))
         }
 
         self.onsetEntries = onsetLookup

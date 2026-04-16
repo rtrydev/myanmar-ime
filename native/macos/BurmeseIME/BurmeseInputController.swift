@@ -1,11 +1,12 @@
 import InputMethodKit
+import AppKit
 import BurmeseIMECore
 
-/// Shared IMKCandidates panel — created by AppDelegate in the app target.
-/// Nil in the extension target (where it is never set), so all calls are safe no-ops there.
+/// Shared IMKCandidates panel, created by main.swift when the process boots as
+/// an IMK server.
 var sharedCandidates: IMKCandidates?
 
-/// Primary InputMethodKit controller for the Burmese IME extension.
+/// Primary InputMethodKit controller for the Burmese IME.
 ///
 /// Lifecycle:
 ///   - One instance is created per input session by IMKServer.
@@ -30,6 +31,12 @@ class BurmeseInputController: IMKInputController {
         return NullLanguageModel()
     }()
 
+    /// Shared settings instance, backed by the App Group UserDefaults suite.
+    /// The Preferences app writes to the same suite from a separate process —
+    /// UserDefaults makes the new value visible here, but not via notifications.
+    /// See `reconcileClusterAliasesIfNeeded`.
+    fileprivate static let sharedSettings = IMESettings()
+
     private static func locateResourceURL(name: String, ext: String) -> URL? {
         let bundles = [Bundle(for: BurmeseInputController.self), Bundle.main]
         for bundle in bundles {
@@ -42,16 +49,42 @@ class BurmeseInputController: IMKInputController {
 
     // MARK: - State
 
-    private let engine = BurmeseEngine(
+    private var engine = BurmeseEngine(
         candidateStore: BurmeseInputController.sharedCandidateStore,
-        languageModel: BurmeseInputController.sharedLanguageModel
+        languageModel: BurmeseInputController.sharedLanguageModel,
+        settings: BurmeseInputController.sharedSettings
     )
     private var state = CompositionState()
+    /// Snapshot of the cluster-alias setting baked into `engine`'s SyllableParser
+    /// at construction time. Compared against the live value on each keystroke.
+    private var engineClusterAliases: Bool = BurmeseInputController.sharedSettings.clusterAliasesEnabled
 
     // MARK: - IMKInputController overrides
 
+    /// The cluster-alias loop bakes into SyllableParser's onsetLookup at init
+    /// time (Packages/BurmeseIMECore/Sources/BurmeseIMECore/SyllableParser.swift),
+    /// so the engine must be rebuilt when that one setting changes. Preferences
+    /// live in another process; we can't rely on in-process notifications, so
+    /// we reconcile lazily on the next keystroke.
+    private func reconcileClusterAliasesIfNeeded(client sender: Any!) {
+        let current = Self.sharedSettings.clusterAliasesEnabled
+        guard current != engineClusterAliases else { return }
+        if state.isActive {
+            commitRaw(client: sender)
+        }
+        engine = BurmeseEngine(
+            candidateStore: Self.sharedCandidateStore,
+            languageModel: Self.sharedLanguageModel,
+            settings: Self.sharedSettings
+        )
+        state = CompositionState()
+        engineClusterAliases = current
+    }
+
     override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
         guard event.type == .keyDown else { return false }
+
+        reconcileClusterAliasesIfNeeded(client: sender)
 
         let keyCode = event.keyCode
 
@@ -68,6 +101,12 @@ class BurmeseInputController: IMKInputController {
         case 49: // Space — commit selection (first press) or insert space (second)
             if state.isActive {
                 commitSelection(client: sender)
+                if Self.sharedSettings.commitOnSpace {
+                    (sender as? IMKTextInput)?.insertText(
+                        " ",
+                        replacementRange: NSRange(location: NSNotFound, length: 0)
+                    )
+                }
             } else {
                 (sender as? IMKTextInput)?.insertText(
                     " ",
@@ -135,9 +174,6 @@ class BurmeseInputController: IMKInputController {
         return false
     }
 
-    /// Printable characters that should extend the composition buffer. We accept
-    /// the printable ASCII range excluding whitespace (space is a commit key) so
-    /// mixed-content input stays in the buffer until the user explicitly commits.
     /// Key codes that IMKCandidates natively treats as navigation: Left/Right/Down/Up
     /// arrows (123/124/125/126) and PageUp/PageDown (116/121). Tab is handled
     /// separately via synthetic arrow events.
@@ -206,6 +242,37 @@ class BurmeseInputController: IMKInputController {
         let surface = candidateString.string
         if let idx = state.candidates.firstIndex(where: { $0.surface == surface }) {
             state.selectedCandidateIndex = idx
+        }
+    }
+
+    override func menu() -> NSMenu! {
+        let menu = NSMenu()
+        let item = NSMenuItem(
+            title: "Preferences…",
+            action: #selector(openPreferences),
+            keyEquivalent: ""
+        )
+        item.target = self
+        if let icon = NSImage(systemSymbolName: "gearshape",
+                              accessibilityDescription: "Preferences") {
+            let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
+            item.image = icon.withSymbolConfiguration(config)
+        }
+        menu.addItem(item)
+        return menu
+    }
+
+    @objc private func openPreferences() {
+        let prefsBundleID = "com.myangler.inputmethod.burmese.preferences"
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: prefsBundleID) {
+            NSWorkspace.shared.openApplication(
+                at: url,
+                configuration: NSWorkspace.OpenConfiguration()
+            )
+            return
+        }
+        if let fallback = URL(string: "x-apple.systempreferences:com.apple.preference.keyboard") {
+            NSWorkspace.shared.open(fallback)
         }
     }
 

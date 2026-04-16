@@ -79,7 +79,7 @@ final class EngineTests: XCTestCase {
 
     func testCandidates_maxPageSize() {
         let state = engine.update(buffer: "k", context: [])
-        XCTAssertLessThanOrEqual(state.candidates.count, BurmeseEngine.candidatePageSize)
+        XCTAssertLessThanOrEqual(state.candidates.count, BurmeseEngine.candidatePageSizeDefault)
     }
 
     func testCandidates_mixedGrammarAndLexicon() {

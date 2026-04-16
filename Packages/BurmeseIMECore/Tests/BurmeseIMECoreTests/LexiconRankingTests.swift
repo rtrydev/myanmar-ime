@@ -189,7 +189,7 @@ final class LexiconRankingTests: XCTestCase {
         let engine = BurmeseEngine(candidateStore: store)
         let state = engine.update(buffer: "kyar", context: [])
 
-        XCTAssertLessThanOrEqual(state.candidates.count, BurmeseEngine.candidatePageSize)
+        XCTAssertLessThanOrEqual(state.candidates.count, BurmeseEngine.candidatePageSizeDefault)
     }
 
     // MARK: - C. SQLite score formula verification

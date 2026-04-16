@@ -206,7 +206,7 @@ runTest("grammarFirst") {
 
 runTest("maxPageSize") {
     let state = engine.update(buffer: "k", context: [])
-    assertTrue(state.candidates.count <= BurmeseEngine.candidatePageSize, "maxPageSize")
+    assertTrue(state.candidates.count <= BurmeseEngine.candidatePageSizeDefault, "maxPageSize")
 }
 
 runTest("longerBufferPreservesPreviouslyRenderedPrefix") {
@@ -726,7 +726,7 @@ runTest("merge_pageSizeNeverExceedsLimit") {
     ])
     let engine = BurmeseEngine(candidateStore: store)
     let state = engine.update(buffer: "kyar", context: [])
-    assertTrue(state.candidates.count <= BurmeseEngine.candidatePageSize,
+    assertTrue(state.candidates.count <= BurmeseEngine.candidatePageSizeDefault,
         "merge_pageSizeLimit", detail: "got \(state.candidates.count)")
 }
 
@@ -1447,6 +1447,115 @@ runTest("lm_reader_scoreSurface_decomposesMultiWord") {
     } catch {
         failedTests.append(("lm_reader_scoreSurface_decomposesMultiWord", "Load failed: \(error)"))
     }
+}
+
+// ===================================================================
+// SETTINGS (IMESettings + engine integration)
+// ===================================================================
+
+print("=== Settings Tests ===")
+
+func makeFreshSettings() -> (IMESettings, String) {
+    let suiteName = "TestRunnerSettings.\(UUID().uuidString)"
+    return (IMESettings(suiteName: suiteName), suiteName)
+}
+
+runTest("settings_defaultsSeeded") {
+    let (settings, suite) = makeFreshSettings()
+    defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+    assertEqual(settings.candidatePageSize, 9, "settings_defaultPageSize")
+    assertTrue(settings.clusterAliasesEnabled, "settings_defaultClusterAliases")
+    assertTrue(settings.learningEnabled, "settings_defaultLearning")
+    assertFalse(settings.commitOnSpace, "settings_defaultCommitOnSpace")
+}
+
+runTest("settings_roundTripThroughSuite") {
+    let (settings, suite) = makeFreshSettings()
+    defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+    settings.candidatePageSize = 5
+    settings.lmPruneMargin = 3.5
+    settings.anchorCommitThreshold = 12
+    let reread = IMESettings(suiteName: suite)
+    assertEqual(reread.candidatePageSize, 5, "settings_rt_pageSize")
+    assertEqual(reread.anchorCommitThreshold, 12, "settings_rt_anchor")
+    assertTrue(abs(reread.lmPruneMargin - 3.5) < 1e-9, "settings_rt_margin")
+}
+
+runTest("settings_restoreDefaultsScopedToSection") {
+    let (settings, suite) = makeFreshSettings()
+    defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+    settings.candidatePageSize = 3
+    settings.lmPruneMargin = 0.5
+    settings.learningEnabled = false
+
+    settings.restoreDefaults(section: .candidateRanking)
+    assertTrue(abs(settings.lmPruneMargin - 8.0) < 1e-9, "settings_restore_margin")
+    assertEqual(settings.candidatePageSize, 3, "settings_restore_otherSectionsUntouched")
+    assertFalse(settings.learningEnabled, "settings_restore_learningUntouched")
+}
+
+runTest("settings_engineHonorsCustomPageSize") {
+    let (settings, suite) = makeFreshSettings()
+    defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+    settings.candidatePageSize = 3
+    let engine = BurmeseEngine(settings: settings)
+    let state = engine.update(buffer: "k", context: [])
+    assertTrue(state.candidates.count <= 3,
+        "settings_enginePageSizeHonored", detail: "got \(state.candidates.count)")
+}
+
+runTest("settings_engineWithoutSettingsUsesDefaults") {
+    let engine = BurmeseEngine()
+    assertEqual(engine.candidatePageSize, BurmeseEngine.candidatePageSizeDefault, "settings_nil_fallback")
+}
+
+runTest("settings_parserClusterAliasesDisabled") {
+    let parser = SyllableParser(useClusterAliases: false)
+    let parses = parser.parseCandidates("j", maxResults: 8)
+    let haveCluster = parses.contains { $0.output == "ကျ" }
+    assertFalse(haveCluster, "settings_cluster_disabled_noKaMedial")
+}
+
+runTest("settings_parserClusterAliasesEnabled") {
+    let parser = SyllableParser(useClusterAliases: true)
+    let parses = parser.parseCandidates("j", maxResults: 8)
+    let haveCluster = parses.contains { $0.output == "ကျ" }
+    assertTrue(haveCluster, "settings_cluster_enabled_hasKaMedial")
+}
+
+// Locks in the lazy-rebuild contract relied on by the macOS input controller:
+// SyllableParser bakes `useClusterAliases` into its onset lookup at init time,
+// so flipping the setting on a live engine does not alter its behaviour. A
+// freshly constructed engine must observe the new value.
+runTest("settings_clusterAliasesToggleRequiresEngineRebuild") {
+    let (settings, suite) = makeFreshSettings()
+    defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+    settings.clusterAliasesEnabled = true
+    let engine = BurmeseEngine(settings: settings)
+
+    let before = engine.update(buffer: "ja", context: [])
+    assertTrue(
+        before.candidates.map(\.surface).contains { $0.hasPrefix("ကျ") },
+        "settings_clusterToggle_preconditionEnabled"
+    )
+
+    settings.clusterAliasesEnabled = false
+    let afterToggle = engine.update(buffer: "ja", context: [])
+    assertTrue(
+        afterToggle.candidates.map(\.surface).contains { $0.hasPrefix("ကျ") },
+        "settings_clusterToggle_liveEngineUnchanged"
+    )
+
+    let rebuilt = BurmeseEngine(settings: settings)
+    let afterRebuild = rebuilt.update(buffer: "ja", context: [])
+    let rebuiltGrammar = afterRebuild.candidates
+        .filter { $0.source == .grammar }
+        .map(\.surface)
+    assertFalse(
+        rebuiltGrammar.contains { $0.hasPrefix("ကျ") },
+        "settings_clusterToggle_rebuiltEngineHonorsSetting",
+        detail: "\(rebuiltGrammar)"
+    )
 }
 
 // ===================================================================

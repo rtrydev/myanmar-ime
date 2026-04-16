@@ -137,10 +137,12 @@ SQLite schema.
 ### Native macOS Integration
 - Built on **InputMethodKit** (`IMKInputController`).
 - Uses the native **IMKCandidates** panel
-  (`kIMKSingleRowSteppingCandidatePanel`).
+  (`kIMKSingleColumnScrollingCandidatePanel`).
 - Marked text via `setMarkedText`, committed text via `insertText`.
 - Two input modes: **Compose** (က) and **Roman** (ABC).
-- 5-candidate page with arrow-key navigation and `Option+1–5` selection.
+- Configurable candidate page size (3 / 5 / 9 / 12), with arrow-key and
+  Tab/Shift-Tab navigation. Tab is translated to Down-arrow; Shift-Tab
+  to Up-arrow so users familiar with CJK IMEs get expected behaviour.
 
 ---
 
@@ -164,12 +166,16 @@ myanmar-ime/
 │   │   │       ├── FORMAT.md             # Binary format spec for BurmeseLM.bin
 │   │   │       ├── LanguageModel.swift   # Protocol for language model scoring
 │   │   │       └── TrigramLanguageModel.swift  # Kneser-Ney trigram LM loader
-│   │   ├── LexiconBuilder/main.swift     # TSV → SQLite compilation pipeline
+│   │   └── LexiconBuilder/main.swift     # TSV → SQLite compilation pipeline
+│   ├── Tests/
+│   │   ├── BurmeseIMECoreTests/          # XCTest suite (Xcode toolchain)
 │   │   └── TestRunner/main.swift         # CLI test driver (runs without XCTest)
-│   ├── Tests/BurmeseIMECoreTests/        # XCTest suite (Xcode toolchain)
 │   └── Data/
 │       └── BurmeseLexiconSource.tsv      # Word list source
-└── native/macos/                         # Xcode app + IMK extension
+└── native/macos/
+    ├── BurmeseIME/                       # Headless IMK bundle → ~/Library/Input Methods/
+    ├── BurmeseIMEPreferences/            # SwiftUI settings app → /Applications/
+    ├── installer/                        # build.sh + postinstall for the unsigned .pkg
     └── Data/
         ├── BurmeseLexicon.sqlite         # Prebuilt lexicon database
         └── BurmeseLM.bin                 # Trigram language model binary
@@ -177,8 +183,8 @@ myanmar-ime/
 
 ### Conversion pipeline
 
-A keystroke lands in `BurmeseInputController` (the IMK extension), which
-accumulates a raw Roman buffer and calls
+A keystroke lands in `BurmeseInputController` (inside the IME bundle),
+which accumulates a raw Roman buffer and calls
 `BurmeseEngine.update(buffer:context:)` on every change.
 
 ```
@@ -273,38 +279,60 @@ surface<TAB>frequency[<TAB>override_reading]
 - `override_reading` — Optional explicit romanization for irregular
   entries
 
-### macOS app + input method
+### macOS apps + installer
+
+Open the Xcode workspace and pick a scheme:
 
 ```bash
 open native/macos/BurmeseIME.xcworkspace
-# Build scheme: BurmeseIMEApp (Release)
 ```
+
+| Scheme | What it builds |
+|---|---|
+| `BurmeseIME` | Headless IMK bundle (the IME itself) |
+| `BurmeseIMEPreferences` | SwiftUI settings app |
+| `BurmeseIMEInstaller` | Aggregate target: builds both and produces `build/BurmeseIME-Install.pkg` |
+
+`BurmeseIMEInstaller` uses Xcode's automatic signing (stable team
+signature) — that's what lets TCC persist grants instead of re-prompting.
+A CLI equivalent is `native/macos/installer/build.sh`.
+
+Neither app is sandboxed. Shared settings live in
+`~/Library/Preferences/group.com.myangler.inputmethod.burmese.plist`,
+read by both processes via `UserDefaults(suiteName:)`.
 
 ---
 
-## Installation (Internal Sideload)
+## Installation
 
-1. **Build** `BurmeseIMEApp` in Xcode with local code signing (no
-   provisioning profile required for personal use).
-2. **Copy** the built app to the Input Methods directory:
-   ```bash
-   cp -R BurmeseIMEApp.app ~/Library/Input\ Methods/
-   ```
-3. **Launch** the app once so macOS registers the input method bundle:
-   ```bash
-   open ~/Library/Input\ Methods/BurmeseIMEApp.app
-   ```
-4. **Wait a few seconds** after first launch.
-   - The app runs as a background agent, so it does not appear in the Dock.
-   - Registration is completed by a short helper process on launch. Give
-     macOS 5–10 seconds, then close and reopen System Settings if it was
-     already open.
-5. **Enable** the input source:
+1. Build the pkg: in Xcode, select scheme **BurmeseIMEInstaller** → ⌘B.
+   Output lands at `native/macos/build/BurmeseIME-Install.pkg`.
+2. Right-click the pkg → **Open** (the pkg is unsigned, so a
+   double-click is blocked by Gatekeeper).
+3. The installer:
+   - Places `BurmeseIME.app` in `~/Library/Input Methods/`
+   - Places `BurmeseIMEPreferences.app` in `/Applications/`
+   - Launches the Preferences app to kick off IME self-registration
+4. Enable the input source:
    - Open **System Settings → Keyboard → Text Input → Edit**.
-   - Click **+**, search for **Burmese**, and add it.
-6. **Switch** input modes using the macOS input menu in the menu bar:
+   - Click **+**, search for **Burmese**, add it.
+5. Switch input modes from the menu bar:
    - **က** — Burmese Compose mode
    - **ABC** — Roman passthrough mode
+
+### Updating
+
+Re-run the pkg. Postinstall removes the previous IME bundle before
+installing the new one. No uninstall step needed.
+
+### Uninstall
+
+```bash
+rm -rf "$HOME/Library/Input Methods/BurmeseIME.app"
+rm -rf /Applications/BurmeseIMEPreferences.app
+rm -f  "$HOME/Library/Preferences/group.com.myangler.inputmethod.burmese.plist"
+```
+Then remove the input source in System Settings → Keyboard → Text Input.
 
 ---
 
@@ -312,16 +340,14 @@ open native/macos/BurmeseIME.xcworkspace
 
 | Key | Action |
 |-----|--------|
-| `a–z`, `+`, `*`, `'`, `:`, `.` | Extend the composition buffer |
-| Arrow keys | Move between candidates |
-| `Option+1–5` | Select candidate 1–5 |
-| `Space` (first) | Commit selected candidate |
-| `Space` (second) | Insert ASCII space |
+| Any printable ASCII (`!`–`~`, excluding space) | Extend the composition buffer. Non-composable characters (digits, punctuation) flow through the engine's literal-tail pipeline. |
+| Arrow keys, Page Up / Page Down | Navigate the candidate panel |
+| `Tab` / `Shift+Tab` | Next / previous candidate (translated to arrows internally) |
+| `Space` (first) | Commit selected candidate (and insert a literal space if *Commit on space* is enabled) |
+| `Space` (no composition) | Insert ASCII space |
 | `Return` | Commit selected candidate |
 | `Backspace` | Delete last character from buffer |
 | `Escape` | Commit raw Latin buffer unchanged, cancel composition |
-| `0–9` | Commit pending candidate, then insert the digit literally |
-| Punctuation | Commit candidate, then pass punctuation through |
 
 ---
 
@@ -331,13 +357,16 @@ Tests live in two parallel targets that share the same cases:
 
 | File | Coverage |
 |------|----------|
-| `Sources/TestRunner/main.swift` | CLI driver for `swift run TestRunner` |
+| `Tests/TestRunner/main.swift` | CLI driver for `swift run TestRunner` |
 | `Tests/BurmeseIMECoreTests/EngineTests.swift` | Public API: empty buffer, input, commit/cancel, normalization |
+| `Tests/BurmeseIMECoreTests/EngineSettingsTests.swift` | Engine respects `IMESettings` values; cluster-alias toggle requires engine rebuild |
+| `Tests/BurmeseIMECoreTests/IMESettingsTests.swift` | UserDefaults suite round-trip, defaults seeding, section-scoped restore |
 | `Tests/BurmeseIMECoreTests/GrammarTests.swift` | Medial legality per consonant, valid/invalid syllable combinations |
 | `Tests/BurmeseIMECoreTests/RomanizationTests.swift` | Consonants, vowel sorting, normalization, alias helpers |
 | `Tests/BurmeseIMECoreTests/ReverseRomanizerTests.swift` | Myanmar → roman, round-trip stability |
 | `Tests/BurmeseIMECoreTests/LanguageModelTests.swift` | Binary-format round-trip, unigram/bigram/trigram lookup, backoff semantics |
 | `Tests/BurmeseIMECoreTests/LexiconRankingTests.swift` | Candidate merge ordering, alias penalties, fixture + real-lexicon spot checks |
+| `Tests/BurmeseIMECoreTests/ParserClusterAliasTests.swift` | Cluster-alias onset expansions at the parser level |
 | `Tests/BurmeseIMECoreTests/SQLiteCandidateStoreTests.swift` | Alias-aware lexicon prefix lookup against the bundled database |
 
 **Key invariants:**
@@ -354,7 +383,7 @@ Tests live in two parallel targets that share the same cases:
 The bundled lexicon (`BurmeseLexiconSource.tsv`) provides:
 
 - Log-scale unigram frequency scores normalized to the 0–1000 range
-  (corpus-derived; see `Tools/corpus_builder/`)
+  (corpus-derived; see `Packages/BurmeseIMECore/Tools/corpus_builder/`)
 - Optional explicit reading overrides for irregular or high-priority
   entries
 
@@ -371,11 +400,12 @@ expands.
 - [x] Cluster-sound shortcuts (`j`, `ch`, `gy`, `sh` + `w` variants)
 - [x] `LexiconBuilder` — TSV → SQLite compilation pipeline
 - [x] Unit tests — Grammar, romanization, engine, fixture regressions
-- [x] `BurmeseIMEExtension` — `IMKInputController` integration and key
-      handling
-- [x] `BurmeseIMEApp` — SwiftUI settings/onboarding container app
-- [x] Xcode workspace — `BurmeseIME.xcworkspace` with app + extension
-      targets
+- [x] `BurmeseIME` — headless IMK bundle with `IMKInputController`
+      integration and key handling
+- [x] `BurmeseIMEPreferences` — SwiftUI settings app with live
+      cross-process reconciliation
+- [x] `BurmeseIMEInstaller` — aggregate Xcode target + unsigned `.pkg`
+      one-click installer
 - [ ] User history store — `UserHistory.sqlite` with selection count +
       recency boost
 
@@ -402,7 +432,19 @@ SQLite provides prefix-index queries and bigram lookups with zero
 network or server dependency, sub-millisecond latency, and a stable
 on-disk format that survives app updates.
 
-**Why internal sideload?** Distributing an IME through the Mac App Store
-requires notarization and additional entitlements. Sideload installation
-to `~/Library/Input Methods/` is the standard path for all third-party
-macOS IMEs and requires only local signing.
+**Why an unsigned pkg + per-user install?** Distributing an IME through
+the Mac App Store requires notarization and a paid Developer Program
+membership. A `pkgbuild`-produced unsigned pkg signed ad-hoc for the pkg
+wrapper (but with team-signed app bundles inside) is enough for personal
+use and trusted sideload: Gatekeeper asks once for the pkg, after which
+the team-signed apps run without per-launch prompts.
+
+**Why no sandbox?** Sandboxed apps sharing state via an App Group need
+that App Group officially registered with Apple under the team — only
+possible with paid Developer Program membership. With free Apple
+Development signing, macOS can't persist the TCC grant for App-Group
+data access and re-prompts on every IME launch. Dropping the sandbox
+removes the App Group dependency; the two processes share settings
+through a plain `UserDefaults` suite file in
+`~/Library/Preferences/`. Trade-off: no MAS distribution path, which
+isn't a goal here.
