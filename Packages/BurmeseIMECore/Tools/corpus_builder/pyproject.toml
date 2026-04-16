@@ -1,0 +1,21 @@
+[project]
+name = "corpus_builder"
+version = "0.1.0"
+description = "Builds the Burmese lexicon TSV and trigram LM from Myanmar-C4."
+requires-python = ">=3.10"
+dependencies = [
+    "datasets>=2.16",
+    "myanmartools>=1.2.1",
+    "tqdm>=4.66",
+]
+
+[project.scripts]
+corpus-build = "corpus_builder.build:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["corpus_builder*"]

@@ -15,17 +15,25 @@ var sharedCandidates: IMKCandidates?
 @objc(BurmeseInputController)
 class BurmeseInputController: IMKInputController {
     private static let sharedCandidateStore: any CandidateStore = {
-        if let lexiconURL = locateLexiconURL(),
+        if let lexiconURL = locateResourceURL(name: "BurmeseLexicon", ext: "sqlite"),
            let store = SQLiteCandidateStore(path: lexiconURL.path) {
             return store
         }
         return EmptyCandidateStore()
     }()
 
-    private static func locateLexiconURL() -> URL? {
+    private static let sharedLanguageModel: any LanguageModel = {
+        if let lmURL = locateResourceURL(name: "BurmeseLM", ext: "bin"),
+           let model = try? TrigramLanguageModel(path: lmURL.path) {
+            return model
+        }
+        return NullLanguageModel()
+    }()
+
+    private static func locateResourceURL(name: String, ext: String) -> URL? {
         let bundles = [Bundle(for: BurmeseInputController.self), Bundle.main]
         for bundle in bundles {
-            if let url = bundle.url(forResource: "BurmeseLexicon", withExtension: "sqlite") {
+            if let url = bundle.url(forResource: name, withExtension: ext) {
                 return url
             }
         }
@@ -34,7 +42,10 @@ class BurmeseInputController: IMKInputController {
 
     // MARK: - State
 
-    private let engine = BurmeseEngine(candidateStore: BurmeseInputController.sharedCandidateStore)
+    private let engine = BurmeseEngine(
+        candidateStore: BurmeseInputController.sharedCandidateStore,
+        languageModel: BurmeseInputController.sharedLanguageModel
+    )
     private var state = CompositionState()
 
     // MARK: - IMKInputController overrides

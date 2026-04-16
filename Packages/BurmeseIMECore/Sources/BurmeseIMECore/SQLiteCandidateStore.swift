@@ -10,14 +10,14 @@ import SQLite3
 ///   reading_index(canonical_reading TEXT, entry_id INTEGER, rank_score REAL)
 ///   reading_alias_index(alias_reading TEXT, canonical_reading TEXT, entry_id INTEGER, rank_score REAL, alias_penalty INTEGER)
 ///   reading_compose_index(compose_reading TEXT, canonical_reading TEXT, entry_id INTEGER, rank_score REAL, alias_penalty INTEGER, separator_penalty INTEGER)
-///   bigram_context(prev_surface TEXT, next_entry_id INTEGER, score REAL)
+///
+/// Context-aware re-ranking (the former `bigram_context` table) now lives in
+/// the `LanguageModel` injected into `BurmeseEngine`.
 public final class SQLiteCandidateStore: CandidateStore, @unchecked Sendable {
 
     private var db: OpaquePointer?
     private var prefixStmt: OpaquePointer?
-    private var bigramStmt: OpaquePointer?
     private var composePrefixStmt: OpaquePointer?
-    private var composeBigramStmt: OpaquePointer?
 
     /// Open a lexicon database at the given path.
     /// Returns nil if the database cannot be opened.
@@ -54,9 +54,7 @@ public final class SQLiteCandidateStore: CandidateStore, @unchecked Sendable {
 
     deinit {
         sqlite3_finalize(prefixStmt)
-        sqlite3_finalize(bigramStmt)
         sqlite3_finalize(composePrefixStmt)
-        sqlite3_finalize(composeBigramStmt)
         sqlite3_close(db)
     }
 
@@ -71,12 +69,6 @@ public final class SQLiteCandidateStore: CandidateStore, @unchecked Sendable {
         let composeUpperBound = prefixUpperBound(composePrefix)
 
         var candidates: [Candidate] = []
-
-        if let prev = previousSurface {
-            candidates += lookupBigram(prev: prev, prefix: aliasPrefix, upperBound: upperBound)
-            candidates += lookupComposeBigram(prev: prev, prefix: composePrefix, upperBound: composeUpperBound)
-        }
-
         candidates += lookupPrefix(prefix: aliasPrefix, upperBound: upperBound)
         candidates += lookupComposePrefix(prefix: composePrefix, upperBound: composeUpperBound)
         return deduplicateCandidates(candidates)
@@ -86,9 +78,7 @@ public final class SQLiteCandidateStore: CandidateStore, @unchecked Sendable {
 
     private func prepareStatements(usesAliasIndex: Bool, usesComposeIndex: Bool) -> Bool {
         let prefixSQL: String
-        let bigramSQL: String
         let composePrefixSQL: String
-        let composeBigramSQL: String
 
         if usesAliasIndex {
             prefixSQL = """
@@ -100,17 +90,6 @@ public final class SQLiteCandidateStore: CandidateStore, @unchecked Sendable {
                 LIMIT 20
                 """
 
-            bigramSQL = """
-                SELECT e.surface, a.canonical_reading, b.score, a.alias_penalty
-                FROM bigram_context b
-                JOIN reading_alias_index a ON a.entry_id = b.next_entry_id
-                JOIN entries e ON e.id = b.next_entry_id
-                WHERE b.prev_surface = ?1
-                AND a.alias_reading >= ?2 AND a.alias_reading < ?3
-                ORDER BY a.alias_penalty ASC, b.score DESC
-                LIMIT 10
-                """
-
             if usesComposeIndex {
                 composePrefixSQL = """
                     SELECT e.surface, c.canonical_reading, c.rank_score, c.alias_penalty, c.separator_penalty
@@ -119,17 +98,6 @@ public final class SQLiteCandidateStore: CandidateStore, @unchecked Sendable {
                     WHERE c.compose_reading >= ?1 AND c.compose_reading < ?2
                     ORDER BY c.separator_penalty ASC, c.alias_penalty ASC, c.rank_score DESC
                     LIMIT 20
-                    """
-
-                composeBigramSQL = """
-                    SELECT e.surface, c.canonical_reading, b.score, c.alias_penalty, c.separator_penalty
-                    FROM bigram_context b
-                    JOIN reading_compose_index c ON c.entry_id = b.next_entry_id
-                    JOIN entries e ON e.id = b.next_entry_id
-                    WHERE b.prev_surface = ?1
-                    AND c.compose_reading >= ?2 AND c.compose_reading < ?3
-                    ORDER BY c.separator_penalty ASC, c.alias_penalty ASC, b.score DESC
-                    LIMIT 10
                     """
             } else {
                 composePrefixSQL = """
@@ -141,19 +109,6 @@ public final class SQLiteCandidateStore: CandidateStore, @unchecked Sendable {
                     AND REPLACE(REPLACE(a.alias_reading, '+', ''), '''', '') < ?2
                     ORDER BY separator_penalty ASC, a.alias_penalty ASC, a.rank_score DESC
                     LIMIT 20
-                    """
-
-                composeBigramSQL = """
-                    SELECT e.surface, a.canonical_reading, b.score, a.alias_penalty,
-                           (LENGTH(a.alias_reading) - LENGTH(REPLACE(REPLACE(a.alias_reading, '+', ''), '''', ''))) AS separator_penalty
-                    FROM bigram_context b
-                    JOIN reading_alias_index a ON a.entry_id = b.next_entry_id
-                    JOIN entries e ON e.id = b.next_entry_id
-                    WHERE b.prev_surface = ?1
-                    AND REPLACE(REPLACE(a.alias_reading, '+', ''), '''', '') >= ?2
-                    AND REPLACE(REPLACE(a.alias_reading, '+', ''), '''', '') < ?3
-                    ORDER BY separator_penalty ASC, a.alias_penalty ASC, b.score DESC
-                    LIMIT 10
                     """
             }
         } else {
@@ -168,18 +123,6 @@ public final class SQLiteCandidateStore: CandidateStore, @unchecked Sendable {
                 LIMIT 20
                 """
 
-            bigramSQL = """
-                SELECT e.surface, e.canonical_reading, b.score,
-                       (LENGTH(e.canonical_reading) - LENGTH(REPLACE(REPLACE(e.canonical_reading, '2', ''), '3', ''))) AS alias_penalty
-                FROM bigram_context b
-                JOIN entries e ON e.id = b.next_entry_id
-                WHERE b.prev_surface = ?1
-                AND REPLACE(REPLACE(e.canonical_reading, '2', ''), '3', '') >= ?2
-                AND REPLACE(REPLACE(e.canonical_reading, '2', ''), '3', '') < ?3
-                ORDER BY alias_penalty ASC, b.score DESC
-                LIMIT 10
-                """
-
             composePrefixSQL = """
                 SELECT e.surface, r.canonical_reading, r.rank_score,
                        (LENGTH(r.canonical_reading) - LENGTH(REPLACE(REPLACE(r.canonical_reading, '2', ''), '3', ''))) AS alias_penalty,
@@ -191,46 +134,15 @@ public final class SQLiteCandidateStore: CandidateStore, @unchecked Sendable {
                 ORDER BY separator_penalty ASC, alias_penalty ASC, r.rank_score DESC
                 LIMIT 20
                 """
-
-            composeBigramSQL = """
-                SELECT e.surface, e.canonical_reading, b.score,
-                       (LENGTH(e.canonical_reading) - LENGTH(REPLACE(REPLACE(e.canonical_reading, '2', ''), '3', ''))) AS alias_penalty,
-                       (LENGTH(e.canonical_reading) - LENGTH(REPLACE(REPLACE(e.canonical_reading, '+', ''), '''', ''))) AS separator_penalty
-                FROM bigram_context b
-                JOIN entries e ON e.id = b.next_entry_id
-                WHERE b.prev_surface = ?1
-                AND REPLACE(REPLACE(REPLACE(REPLACE(e.canonical_reading, '+', ''), '''', ''), '2', ''), '3', '') >= ?2
-                AND REPLACE(REPLACE(REPLACE(REPLACE(e.canonical_reading, '+', ''), '''', ''), '2', ''), '3', '') < ?3
-                ORDER BY separator_penalty ASC, alias_penalty ASC, b.score DESC
-                LIMIT 10
-                """
         }
 
         if sqlite3_prepare_v2(db, prefixSQL, -1, &prefixStmt, nil) != SQLITE_OK {
             return false
         }
 
-        if sqlite3_prepare_v2(db, bigramSQL, -1, &bigramStmt, nil) != SQLITE_OK {
-            sqlite3_finalize(prefixStmt)
-            prefixStmt = nil
-            return false
-        }
-
         if sqlite3_prepare_v2(db, composePrefixSQL, -1, &composePrefixStmt, nil) != SQLITE_OK {
             sqlite3_finalize(prefixStmt)
             prefixStmt = nil
-            sqlite3_finalize(bigramStmt)
-            bigramStmt = nil
-            return false
-        }
-
-        if sqlite3_prepare_v2(db, composeBigramSQL, -1, &composeBigramStmt, nil) != SQLITE_OK {
-            sqlite3_finalize(prefixStmt)
-            prefixStmt = nil
-            sqlite3_finalize(bigramStmt)
-            bigramStmt = nil
-            sqlite3_finalize(composePrefixStmt)
-            composePrefixStmt = nil
             return false
         }
 
@@ -261,31 +173,6 @@ public final class SQLiteCandidateStore: CandidateStore, @unchecked Sendable {
         return results
     }
 
-    private func lookupBigram(prev: String, prefix: String, upperBound: String) -> [Candidate] {
-        guard let stmt = bigramStmt else { return [] }
-        defer { sqlite3_reset(stmt) }
-
-        sqlite3_bind_text(stmt, 1, prev, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-        sqlite3_bind_text(stmt, 2, prefix, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-        sqlite3_bind_text(stmt, 3, upperBound, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-
-        var results: [Candidate] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            let surface = String(cString: sqlite3_column_text(stmt, 0))
-            let reading = String(cString: sqlite3_column_text(stmt, 1))
-            let rankScore = sqlite3_column_double(stmt, 2)
-            let aliasPenalty = Int(sqlite3_column_int(stmt, 3))
-
-            results.append(Candidate(
-                surface: surface,
-                reading: reading,
-                source: .lexicon,
-                score: rankScore + 500.0 - Double(aliasPenalty) * 1000.0
-            ))
-        }
-        return results
-    }
-
     private func lookupComposePrefix(prefix: String, upperBound: String) -> [Candidate] {
         guard !prefix.isEmpty, let stmt = composePrefixStmt else { return [] }
         defer { sqlite3_reset(stmt) }
@@ -306,32 +193,6 @@ public final class SQLiteCandidateStore: CandidateStore, @unchecked Sendable {
                 reading: reading,
                 source: .lexicon,
                 score: rankScore - Double(aliasPenalty) * 1000.0 - Double(separatorPenalty) * 250.0
-            ))
-        }
-        return results
-    }
-
-    private func lookupComposeBigram(prev: String, prefix: String, upperBound: String) -> [Candidate] {
-        guard !prefix.isEmpty, let stmt = composeBigramStmt else { return [] }
-        defer { sqlite3_reset(stmt) }
-
-        sqlite3_bind_text(stmt, 1, prev, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-        sqlite3_bind_text(stmt, 2, prefix, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-        sqlite3_bind_text(stmt, 3, upperBound, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-
-        var results: [Candidate] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            let surface = String(cString: sqlite3_column_text(stmt, 0))
-            let reading = String(cString: sqlite3_column_text(stmt, 1))
-            let rankScore = sqlite3_column_double(stmt, 2)
-            let aliasPenalty = Int(sqlite3_column_int(stmt, 3))
-            let separatorPenalty = Int(sqlite3_column_int(stmt, 4))
-
-            results.append(Candidate(
-                surface: surface,
-                reading: reading,
-                source: .lexicon,
-                score: rankScore + 500.0 - Double(aliasPenalty) * 1000.0 - Double(separatorPenalty) * 250.0
             ))
         }
         return results
@@ -421,11 +282,6 @@ public final class SQLiteCandidateStore: CandidateStore, @unchecked Sendable {
 
         if createComposeIndex,
            !exec("CREATE INDEX idx_reading_compose ON reading_compose_index (compose_reading)", in: lookupDB) {
-            sqlite3_close(lookupDB)
-            return nil
-        }
-
-        if !exec("CREATE INDEX IF NOT EXISTS idx_bigram ON bigram_context (prev_surface)", in: lookupDB) {
             sqlite3_close(lookupDB)
             return nil
         }

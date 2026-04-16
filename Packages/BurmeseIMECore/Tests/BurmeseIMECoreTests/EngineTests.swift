@@ -215,6 +215,101 @@ final class EngineTests: XCTestCase {
         XCTAssertEqual(engine.commit(state: state), "123")
     }
 
+    // MARK: - Prefix Stability
+
+    func testUpdate_longerBufferPreservesPreviouslyRenderedPrefix() {
+        // Screenshot bug: after the user typed `kwyantaw` and saw the top
+        // candidate ကျွန်တော်, typing more characters ("kwyantawkahtamin")
+        // re-parsed the whole buffer and changed the rendering of the
+        // already-typed portion to ကွျန်တော်. Once a prefix has been
+        // rendered and seen by the user, it must stay stable as they
+        // extend the buffer forward.
+        let engine = BurmeseEngine()
+        let short = engine.update(buffer: "kwyantaw", context: [])
+        guard let shortTop = short.candidates.first?.surface else {
+            XCTFail("no candidate for 'kwyantaw'")
+            return
+        }
+        let longer = engine.update(buffer: "kwyantawkahtamin", context: [])
+        guard let longerTop = longer.candidates.first?.surface else {
+            XCTFail("no candidate for longer buffer")
+            return
+        }
+        XCTAssertTrue(
+            longerTop.hasPrefix(shortTop),
+            "prefix drift: longer-buffer top '\(longerTop)' should start with '\(shortTop)'"
+        )
+    }
+
+    // MARK: - Progressive Typing Correctness
+
+    func testProgressiveTyping_mingalarpar_producesCorrectOutput() {
+        // Bug: typing "min+galarpar" letter by letter, the anchor mechanism
+        // commits "min+gala" (8 chars) as မင်္ဂလ, then "r" is parsed as
+        // standalone onset ရ instead of vowel suffix "ar" → ာ on the
+        // previous syllable. Expected: မင်္ဂလာပါ (with tall aa on pa).
+        let engine = BurmeseEngine()
+        let keystrokes = Array("min+galarpar")
+        var buffer = ""
+        for ch in keystrokes {
+            buffer.append(ch)
+            _ = engine.update(buffer: buffer, context: [])
+        }
+        let finalState = engine.update(buffer: "min+galarpar", context: [])
+        let top = finalState.candidates.first?.surface ?? ""
+        // Strip ZWSP/ZWNJ for comparison
+        let stripped = String(top.unicodeScalars.filter {
+            $0.value != 0x200B && $0.value != 0x200C
+        })
+        XCTAssertEqual(stripped, "မင်္ဂလာပါ",
+            "Progressive typing 'min+galarpar' should produce မင်္ဂလာပါ, got \(top)")
+    }
+
+    func testProgressiveTyping_kwyantawkahtamin_producesCorrectSuffix() {
+        // Bug: typing "kwyantawkahtamin" letter by letter, the anchor locks
+        // in wrong syllable boundaries. "kah" gets committed as ကဟ (ka+ha)
+        // when it should later become ka + hta (ကထ). "mi" gets locked as
+        // မီ when it should become min (မင်).
+        // The suffix "kahtamin" must parse as ကထမင် regardless of the
+        // ya-pin/ya-yit choice in the prefix (LM-dependent).
+        let engine = BurmeseEngine()
+        let keystrokes = Array("kwyantawkahtamin")
+        var buffer = ""
+        for ch in keystrokes {
+            buffer.append(ch)
+            _ = engine.update(buffer: buffer, context: [])
+        }
+        let finalState = engine.update(buffer: "kwyantawkahtamin", context: [])
+        let top = finalState.candidates.first?.surface ?? ""
+        let stripped = String(top.unicodeScalars.filter {
+            $0.value != 0x200B && $0.value != 0x200C
+        })
+        XCTAssertTrue(stripped.hasSuffix("ကထမင်"),
+            "Progressive typing suffix should be ကထမင်, got \(top)")
+    }
+
+    // MARK: - Long Input Multi-Character Onset
+
+    func testProgressiveTyping_longInput_thaNotSplitAsTaHa() {
+        // Bug: in long progressive inputs, "tha" (which should produce သ)
+        // was split as ta+ha (တ+ဟ) because the anchor boundary cut the
+        // multi-character onset "th" across the frozen prefix and the tail.
+        let engine = BurmeseEngine()
+        let input = "kwyantawkahtamin:masar:rathar"
+        var buffer = ""
+        for ch in Array(input) {
+            buffer.append(ch)
+            _ = engine.update(buffer: buffer, context: [])
+        }
+        let state = engine.update(buffer: input, context: [])
+        let top = state.candidates.first?.surface ?? ""
+        let stripped = String(top.unicodeScalars.filter {
+            $0.value != 0x200B && $0.value != 0x200C
+        })
+        XCTAssertFalse(stripped.contains("တဟ"),
+            "Found တဟ (ta+ha) split, expected သ (tha). Got: \(stripped)")
+    }
+
     // MARK: - Composition State Properties
 
     func testCompositionState_selectedIndex_startsAtZero() {

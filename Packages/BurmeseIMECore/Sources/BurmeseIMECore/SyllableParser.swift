@@ -38,6 +38,13 @@ public final class SyllableParser: Sendable {
         let canonicalRoman: String
         let myanmar: String
         let aliasCost: Int
+        let isStandalone: Bool
+
+        var isPureMedial: Bool {
+            !myanmar.isEmpty && myanmar.unicodeScalars.allSatisfy {
+                (0x103B...0x103E).contains($0.value)
+            }
+        }
     }
 
     private typealias OnsetMatch = (end: Int, entry: OnsetEntry)
@@ -169,7 +176,8 @@ public final class SyllableParser: Sendable {
                 vowelLookup[variant.key, default: []].append(VowelMatchEntry(
                     canonicalRoman: entry.roman,
                     myanmar: entry.myanmar,
-                    aliasCost: variant.aliasCost
+                    aliasCost: variant.aliasCost,
+                    isStandalone: entry.isStandalone
                 ))
             }
         }
@@ -213,7 +221,7 @@ public final class SyllableParser: Sendable {
                 output: adjustLeadingVowel(state.output),
                 reading: state.reading,
                 aliasCost: state.aliasCost,
-                legalityScore: state.isLegal ? 100 : 0,
+                legalityScore: state.isLegal ? state.legalityScore : 0,
                 score: state.score,
                 structureCost: state.structureCost
             )
@@ -330,7 +338,7 @@ public final class SyllableParser: Sendable {
                     }
                 }
 
-                for (vowelEnd, vowelEntry) in standaloneVowels {
+                for (vowelEnd, vowelEntry) in standaloneVowels where !vowelEntry.isPureMedial {
                     let legality = Grammar.validateSyllable(
                         onset: nil,
                         medials: [],

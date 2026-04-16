@@ -127,6 +127,14 @@ public enum Grammar {
         "ote", "ate", "ain", "ite", "ai",
     ]
 
+    // MARK: - Connector Vowels
+
+    /// Vowel keys that function as inter-syllable connectors rather than
+    /// true vowel sounds. Having an onset paired with one of these is
+    /// usually a mis-parse — the onset character should instead be part
+    /// of the previous syllable's vowel/final.
+    private static let connectorVowels: Set<String> = ["+", "*", "'"]
+
     // MARK: - Stacking (Virama / Kinzi)
 
     /// Consonants commonly seen as the subscript in a virama stack (္ + consonant).
@@ -217,6 +225,17 @@ public enum Grammar {
         // Bonus for common/canonical forms
         if medials.isEmpty {
             score += 10
+        }
+
+        // Connector vowels (virama, asat, separator) are inter-syllable
+        // glue — they should not receive a scoring boost from having an
+        // onset, because an onset paired with a connector consumes a
+        // consonant that typically belongs to the adjacent syllable. For
+        // example, in "min+ga" the virama must be standalone so that
+        // "in" stays as the vowel of "m"; if the virama were parsed as
+        // "n" + virama, the "in" vowel would be split into "i" + "n".
+        if connectorVowels.contains(vowelRoman) && onset != nil {
+            score -= 10
         }
 
         return score

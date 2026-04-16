@@ -10,3 +10,9 @@
 *.xcscmblueprint
 **/*.xcodeproj/project.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
 **/DerivedData
+
+venv
+.venv
+
+# Large data files (compiled into SQLite at build time)
+*.tsv

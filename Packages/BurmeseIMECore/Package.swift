@@ -12,7 +12,8 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "BurmeseIMECore"
+            name: "BurmeseIMECore",
+            exclude: ["LanguageModel/FORMAT.md"]
         ),
         .executableTarget(
             name: "LexiconBuilder",

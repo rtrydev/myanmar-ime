@@ -20,6 +20,8 @@
 		AA44444444444444444444B5 /* BurmeseIMEIcon.icns in Resources (app) */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333B6 /* BurmeseIMEIcon.icns */; };
 		AA44444444444444444444B6 /* BurmeseLexicon.sqlite in Resources (app) */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333B8 /* BurmeseLexicon.sqlite */; };
 		AA44444444444444444444B7 /* BurmeseLexicon.sqlite in Resources */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333B8 /* BurmeseLexicon.sqlite */; };
+		BE44444444444444444444B8 /* BurmeseLM.bin in Resources (app) */ = {isa = PBXBuildFile; fileRef = BE33333333333333333333B9 /* BurmeseLM.bin */; };
+		BE44444444444444444444B9 /* BurmeseLM.bin in Resources */ = {isa = PBXBuildFile; fileRef = BE33333333333333333333B9 /* BurmeseLM.bin */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -38,6 +40,7 @@
 		AA33333333333333333333B5 /* InfoPlist.strings */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = InfoPlist.strings; path = "en.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
 		AA33333333333333333333B6 /* BurmeseIMEIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = BurmeseIMEIcon.icns; sourceTree = "<group>"; };
 		AA33333333333333333333B8 /* BurmeseLexicon.sqlite */ = {isa = PBXFileReference; lastKnownFileType = file; name = BurmeseLexicon.sqlite; path = ../Data/BurmeseLexicon.sqlite; sourceTree = "<group>"; };
+		BE33333333333333333333B9 /* BurmeseLM.bin */ = {isa = PBXFileReference; lastKnownFileType = file; name = BurmeseLM.bin; path = ../Data/BurmeseLM.bin; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -99,6 +102,7 @@
 				AA33333333333333333333AE /* BurmeseInputController.swift */,
 				AA33333333333333333333B4 /* BurmeseIMEIcon.tiff */,
 				AA33333333333333333333B8 /* BurmeseLexicon.sqlite */,
+				BE33333333333333333333B9 /* BurmeseLM.bin */,
 				AA33333333333333333333B0 /* BurmeseIMEExtension-Info.plist */,
 				AA33333333333333333333B2 /* BurmeseIMEExtension.entitlements */,
 			);
@@ -195,6 +199,7 @@
 			files = (
 				AA44444444444444444444B2 /* BurmeseIMEIcon.tiff in Resources */,
 				AA44444444444444444444B7 /* BurmeseLexicon.sqlite in Resources */,
+				BE44444444444444444444B9 /* BurmeseLM.bin in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -206,6 +211,7 @@
 				AA44444444444444444444B4 /* InfoPlist.strings in Resources (app) */,
 				AA44444444444444444444B5 /* BurmeseIMEIcon.icns in Resources (app) */,
 				AA44444444444444444444B6 /* BurmeseLexicon.sqlite in Resources (app) */,
+				BE44444444444444444444B8 /* BurmeseLM.bin in Resources (app) */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

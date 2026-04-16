@@ -209,6 +209,26 @@ runTest("maxPageSize") {
     assertTrue(state.candidates.count <= BurmeseEngine.candidatePageSize, "maxPageSize")
 }
 
+runTest("longerBufferPreservesPreviouslyRenderedPrefix") {
+    // Screenshot bug: typing more characters re-parsed the already-typed
+    // portion and changed the rendered prefix. The top candidate for the
+    // longer buffer must still begin with the top candidate seen for the
+    // shorter buffer.
+    let stabilityEngine = BurmeseEngine()
+    let short = stabilityEngine.update(buffer: "kwyantaw", context: [])
+    let longer = stabilityEngine.update(buffer: "kwyantawkahtamin", context: [])
+    if let shortTop = short.candidates.first?.surface,
+       let longerTop = longer.candidates.first?.surface {
+        assertTrue(
+            longerTop.hasPrefix(shortTop),
+            "longerBufferPreservesPreviouslyRenderedPrefix",
+            detail: "prefix drift: '\(escapeUnicode(longerTop))' should start with '\(escapeUnicode(shortTop))'"
+        )
+    } else {
+        assertTrue(false, "longerBufferPreservesPreviouslyRenderedPrefix", detail: "missing candidates")
+    }
+}
+
 runTest("preservesTrailingDigits") {
     // Digits are composing characters but are not parseable after a complete
     // syllable — the engine should hold them as a literal tail rather than
@@ -313,6 +333,44 @@ runTest("standaloneTallAa_splitsAsLiteralTail") {
                detail: "Expected ာ (U+102C), got: \(escapeUnicode(committed))")
 }
 
+runTest("progressiveTyping_mingalarpar_producesCorrectOutput") {
+    // Bug: anchor commits "min+gala" as မင်္ဂလ, then "r" becomes standalone
+    // onset ရ instead of vowel suffix "ar" → ာ. Expected: မင်္ဂလာပါ.
+    let progressiveEngine = BurmeseEngine()
+    let keystrokes = Array("min+galarpar")
+    var buffer = ""
+    for ch in keystrokes {
+        buffer.append(ch)
+        _ = progressiveEngine.update(buffer: buffer, context: [])
+    }
+    let finalState = progressiveEngine.update(buffer: "min+galarpar", context: [])
+    let top = finalState.candidates.first?.surface ?? ""
+    let stripped = top.unicodeScalars
+        .filter { $0.value != 0x200B && $0.value != 0x200C }
+        .map { String($0) }.joined()
+    assertEqual(stripped, "မင်္ဂလာပါ", "progressiveTyping_mingalarpar")
+}
+
+runTest("progressiveTyping_kwyantawkahtamin_producesCorrectSuffix") {
+    // Bug: anchor locks wrong syllable boundaries. "kah" committed as ကဟ
+    // instead of later becoming ka + hta (ကထ). The suffix must parse as
+    // ကထမင် regardless of ya-pin/ya-yit prefix (LM-dependent).
+    let progressiveEngine = BurmeseEngine()
+    let keystrokes = Array("kwyantawkahtamin")
+    var buffer = ""
+    for ch in keystrokes {
+        buffer.append(ch)
+        _ = progressiveEngine.update(buffer: buffer, context: [])
+    }
+    let finalState = progressiveEngine.update(buffer: "kwyantawkahtamin", context: [])
+    let top = finalState.candidates.first?.surface ?? ""
+    let stripped = top.unicodeScalars
+        .filter { $0.value != 0x200B && $0.value != 0x200C }
+        .map { String($0) }.joined()
+    assertTrue(stripped.hasSuffix("ကထမင်"), "progressiveTyping_kwyantawkahtamin_suffix",
+        detail: "Expected suffix ကထမင်, got \(escapeUnicode(stripped))")
+}
+
 runTest("pureUnconvertibleBuffer_commitsRaw") {
     let state = engine.update(buffer: "123", context: [])
     assertTrue(state.isActive, "pureUnconvertibleBuffer_active")
@@ -372,10 +430,13 @@ runTest("canonical_kya_isYaYit") { assertEqual(parse("kya"),  "ကြ",         
 
 
 // ===================================================================
-// KNOWN-BAD LEGACY DIVERGENCE TESTS
+// MIXED-SCRIPT REJECTION TESTS
 // ===================================================================
+// Unparseable Latin must either stay raw or produce pure Myanmar output —
+// never mixed. Previous browser engines leaked Latin fragments into the
+// commit; we explicitly regress against that.
 
-print("=== Known-Bad Legacy Divergence Tests ===")
+print("=== Mixed-Script Rejection Tests ===")
 
 func checkNoMixedScript(_ input: String, _ name: String) {
     let result = parse(input)
@@ -634,7 +695,6 @@ struct SQLiteFixtureRow {
 
 func makeInMemoryLexicon(
     entries: [SQLiteFixtureRow],
-    bigrams: [(prev: String, entryID: Int64, score: Double)] = [],
     name: String
 ) -> SQLiteCandidateStore? {
     let dbURL = FileManager.default.temporaryDirectory
@@ -655,11 +715,6 @@ func makeInMemoryLexicon(
             entry_id INTEGER NOT NULL REFERENCES entries(id),
             rank_score REAL NOT NULL
         );
-        CREATE TABLE bigram_context (
-            prev_surface TEXT NOT NULL,
-            next_entry_id INTEGER NOT NULL REFERENCES entries(id),
-            score REAL NOT NULL
-        );
         """
     guard sqlite3_exec(db, schema, nil, nil, nil) == SQLITE_OK else { return nil }
 
@@ -669,13 +724,6 @@ func makeInMemoryLexicon(
             VALUES (\(row.id), '\(row.surface)', '\(row.reading)', \(row.score));
             INSERT INTO reading_index (canonical_reading, entry_id, rank_score)
             VALUES ('\(row.reading)', \(row.id), \(row.score));
-            """
-        guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else { return nil }
-    }
-    for bg in bigrams {
-        let sql = """
-            INSERT INTO bigram_context (prev_surface, next_entry_id, score)
-            VALUES ('\(bg.prev)', \(bg.entryID), \(bg.score));
             """
         guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else { return nil }
     }
@@ -725,43 +773,6 @@ runTest("sqliteScore_separatorPenaltyAppliedOnComposeMatch") {
         return
     }
     doubleEqual(hit.score, 1000.0 - 1000.0 - 250.0, "sqliteScore_separatorPenaltyAppliedOnComposeMatch")
-}
-
-runTest("sqliteScore_bigramBonusApplied") {
-    guard let store = makeInMemoryLexicon(
-        entries: [.init(id: 1, surface: "ကျား", reading: "kyar:", score: 500.0)],
-        bigrams: [(prev: "ကြီး", entryID: 1, score: 500.0)],
-        name: "bigramBonus"
-    ) else {
-        failedTests.append(("sqliteScore_bigramBonus", "Failed to open"))
-        totalTests += 1
-        return
-    }
-    let results = store.lookup(prefix: "kyar:", previousSurface: "ကြီး")
-    guard let hit = results.first else {
-        failedTests.append(("sqliteScore_bigramBonus", "No hit"))
-        totalTests += 1
-        return
-    }
-    doubleEqual(hit.score, 500.0 + 500.0, "sqliteScore_bigramBonusApplied")
-}
-
-runTest("sqliteDedup_bigramHitWinsOverPlainPrefixHit") {
-    guard let store = makeInMemoryLexicon(
-        entries: [.init(id: 1, surface: "ကျား", reading: "kyar:", score: 400.0)],
-        bigrams: [(prev: "ကြီး", entryID: 1, score: 400.0)],
-        name: "dedup"
-    ) else {
-        failedTests.append(("sqliteDedup_bigramWins", "Failed to open"))
-        totalTests += 1
-        return
-    }
-    let results = store.lookup(prefix: "kyar:", previousSurface: "ကြီး")
-    let matches = results.filter { $0.surface == "ကျား" }
-    assertEqual(matches.count, 1, "sqliteDedup_bigramWins_count")
-    if let hit = matches.first {
-        doubleEqual(hit.score, 400.0 + 500.0, "sqliteDedup_bigramHitSurvives")
-    }
 }
 
 #endif
@@ -844,9 +855,551 @@ if FileManager.default.fileExists(atPath: bundledLexiconPath),
             "realLexicon_par_exposesPaaParticle",
             detail: "surfaces=\(surfaces)")
     }
+
+    // Prefix-stability regression (screenshot bug). Needs the real LM
+    // because the drift is LM-driven — with NullLM all parses tie and
+    // parser tiebreakers give stable output.
+    let bundledLMPath = repoRootURL()
+        .appendingPathComponent("native/macos/Data/BurmeseLM.bin")
+        .path
+    if FileManager.default.fileExists(atPath: bundledLMPath),
+       let lm = try? TrigramLanguageModel(path: bundledLMPath) {
+        let stabilityEngine = BurmeseEngine(candidateStore: store, languageModel: lm)
+        runTest("prefixStability_kwyantaw_keepsPrefixWhenExtended") {
+            let short = stabilityEngine.update(buffer: "kwyantaw", context: [])
+            let longer = stabilityEngine.update(buffer: "kwyantawkahtamin", context: [])
+            guard let shortTop = short.candidates.first?.surface,
+                  let longerTop = longer.candidates.first?.surface else {
+                failedTests.append(("prefixStability_kwyantaw", "missing candidates"))
+                totalTests += 1
+                return
+            }
+            // Strip ZWSPs for comparison: lexicon candidates embed U+200B
+            // word-boundary markers that grammar candidates lack.
+            let shortStripped = String(shortTop.unicodeScalars.filter { $0.value != 0x200B })
+            let longerStripped = String(longerTop.unicodeScalars.filter { $0.value != 0x200B })
+            assertTrue(
+                longerStripped.hasPrefix(shortStripped),
+                "prefixStability_kwyantaw_keepsPrefixWhenExtended",
+                detail: "drift: longer='\(escapeUnicode(longerTop))' short='\(escapeUnicode(shortTop))'"
+            )
+        }
+
+        // No keystroke in a progressive typing sequence may leave the
+        // candidate panel empty while a convertible buffer is still being
+        // composed — "window disappeared" bug from the screenshot where
+        // `kwyantawk` showed candidates but `kwyantawka` did not.
+        runTest("prefixStability_progressiveTyping_neverEmptyCandidates") {
+            let progressiveEngine = BurmeseEngine(candidateStore: store, languageModel: lm)
+            let keystrokes = [
+                "k", "kw", "kwy", "kwya", "kwyan", "kwyant", "kwyanta",
+                "kwyantaw", "kwyantawk", "kwyantawka", "kwyantawkah",
+                "kwyantawkaht", "kwyantawkahta", "kwyantawkahtam",
+                "kwyantawkahtami", "kwyantawkahtamin",
+            ]
+            var missing: [String] = []
+            for stroke in keystrokes {
+                let state = progressiveEngine.update(buffer: stroke, context: [])
+                if state.candidates.isEmpty { missing.append(stroke) }
+            }
+            assertTrue(missing.isEmpty,
+                "prefixStability_progressiveTyping_neverEmptyCandidates",
+                detail: "empty panels at: \(missing)")
+        }
+
+        // After a long progressive sequence that naturally resolves to
+        // the correct word, extending further must not silently rewrite
+        // the rendered prefix into a different decomposition.
+        runTest("prefixStability_longInputKeepsCorrectPrefix") {
+            let progressiveEngine = BurmeseEngine(candidateStore: store, languageModel: lm)
+            let keystrokes = [
+                "k", "kw", "kwy", "kwya", "kwyan", "kwyant", "kwyanta",
+                "kwyantaw", "kwyantawk", "kwyantawka", "kwyantawkah",
+                "kwyantawkaht", "kwyantawkahta", "kwyantawkahtam",
+                "kwyantawkahtami", "kwyantawkahtamin",
+            ]
+            var finalTop = ""
+            for stroke in keystrokes {
+                let state = progressiveEngine.update(buffer: stroke, context: [])
+                finalTop = state.candidates.first?.surface ?? finalTop
+            }
+            let stripped = finalTop.unicodeScalars
+                .filter { $0.value != 0x200B }
+                .map { String($0) }
+                .joined()
+            assertTrue(stripped.hasPrefix("ကျွန်တော်"),
+                "prefixStability_longInputKeepsCorrectPrefix",
+                detail: "final top='\(escapeUnicode(finalTop))'")
+        }
+
+        // Bug: progressive typing with real LM — anchor synthesis from
+        // intermediate checkpoints overrides the correct full-buffer parse.
+        // At step 11 "kwyantawkah" the anchor records ကအ (k+ah), but
+        // step 12 "kwyantawkaht" correctly re-parses to ကထ (ka+hta).
+        // When step 13 "kwyantawkahta" arrives, the stale step-11 anchor
+        // synthesizes ကအ+တ instead of using the correct parse ကထ.
+        // The suffix must be ကထမင် (or ကထမင်း with colon).
+        runTest("realLM_progressiveTyping_kwyantawkahtamin_correctSuffix") {
+            let progressiveEngine = BurmeseEngine(candidateStore: store, languageModel: lm)
+            let keystrokes = Array("kwyantawkahtamin")
+            var buffer = ""
+            for ch in keystrokes {
+                buffer.append(ch)
+                _ = progressiveEngine.update(buffer: buffer, context: [])
+            }
+            let finalState = progressiveEngine.update(buffer: "kwyantawkahtamin", context: [])
+            let top = finalState.candidates.first?.surface ?? ""
+            let stripped = String(top.unicodeScalars.filter {
+                $0.value != 0x200B && $0.value != 0x200C
+            })
+            assertTrue(stripped.hasSuffix("ကထမင်"),
+                "realLM_progressiveTyping_kwyantawkahtamin_correctSuffix",
+                detail: "Expected suffix ကထမင်, got \(escapeUnicode(stripped))")
+        }
+
+        runTest("realLM_progressiveTyping_kwyantawkahtamin_colon_correctSuffix") {
+            let progressiveEngine = BurmeseEngine(candidateStore: store, languageModel: lm)
+            let keystrokes = Array("kwyantawkahtamin:")
+            var buffer = ""
+            for ch in keystrokes {
+                buffer.append(ch)
+                _ = progressiveEngine.update(buffer: buffer, context: [])
+            }
+            let finalState = progressiveEngine.update(buffer: "kwyantawkahtamin:", context: [])
+            let top = finalState.candidates.first?.surface ?? ""
+            let stripped = String(top.unicodeScalars.filter {
+                $0.value != 0x200B && $0.value != 0x200C
+            })
+            assertTrue(stripped.hasSuffix("ကထမင်း"),
+                "realLM_progressiveTyping_kwyantawkahtamin_colon_correctSuffix",
+                detail: "Expected suffix ကထမင်း, got \(escapeUnicode(stripped))")
+        }
+
+        // Bug: long inputs like "kwyantawkahtamin:masar:rathar" produce
+        // wrong decomposition for "tha" — it becomes တ+ဟ (ta + ha) instead
+        // of သ (tha) when the sliding window splits at an unfortunate boundary.
+        // Short inputs like "thar" work correctly.
+        runTest("realLM_progressiveTyping_longInput_thaNotSplitAsTaHa") {
+            let progressiveEngine = BurmeseEngine(candidateStore: store, languageModel: lm)
+            let input = "kwyantawkahtamin:masar:rathar"
+            let keystrokes = Array(input)
+            var buffer = ""
+            for ch in keystrokes {
+                buffer.append(ch)
+                _ = progressiveEngine.update(buffer: buffer, context: [])
+            }
+            let finalState = progressiveEngine.update(buffer: input, context: [])
+            let top = finalState.candidates.first?.surface ?? ""
+            let stripped = String(top.unicodeScalars.filter {
+                $0.value != 0x200B && $0.value != 0x200C
+            })
+            // "tha" should produce သ, not တ+ဟ
+            // The suffix "rathar" should end with ရသာ (ra + tha + ar)
+            // not ရတဟာ (ra + ta + ha + ar)
+            assertFalse(stripped.contains("တဟ"),
+                "realLM_progressiveTyping_longInput_thaNotSplitAsTaHa",
+                detail: "Found တဟ (ta+ha) split, expected သ (tha). Full: \(escapeUnicode(stripped))")
+        }
+
+        // Verify "thar" produces correct output in other long contexts too
+        runTest("realLM_progressiveTyping_longInput_thar_variousContexts") {
+            // Test several long inputs ending with "thar" to ensure the
+            // multi-character onset is never split by the anchor boundary.
+            let inputs = [
+                "kwyantawkahtamin:thar",
+                "kwyantawkahtamin:masar:thar",
+            ]
+            for input in inputs {
+                let progressiveEngine = BurmeseEngine(candidateStore: store, languageModel: lm)
+                var buffer = ""
+                for ch in Array(input) {
+                    buffer.append(ch)
+                    _ = progressiveEngine.update(buffer: buffer, context: [])
+                }
+                let state = progressiveEngine.update(buffer: input, context: [])
+                let top = state.candidates.first?.surface ?? ""
+                let stripped = String(top.unicodeScalars.filter {
+                    $0.value != 0x200B && $0.value != 0x200C
+                })
+                // Must end with သာ (thar), not တဟာ (ta + ha + ar)
+                assertTrue(stripped.hasSuffix("သာ"),
+                    "realLM_longInput_thar_\(input.count)chars",
+                    detail: "Input '\(input)' should end with သာ, got \(escapeUnicode(stripped))")
+            }
+        }
+
+        // End-to-end sentence: user types several words letter by letter,
+        // commits each, and continues. Exercises the full loop the user
+        // sees — anchor reset between words, LM context carry-over,
+        // panel continuity mid-word, and the final rendered text. Any
+        // empty panel during a word or any mis-rendered word surfaces
+        // here.
+        runTest("progressiveTyping_fullSentenceSimulation") {
+            let progressiveEngine = BurmeseEngine(candidateStore: store, languageModel: lm)
+            // Pick common Burmese words. Derive the user-typed form via
+            // ReverseRomanizer so the test exercises exactly the input
+            // path a real user would produce for these surfaces.
+            let targetSurfaces = [
+                "မင်္ဂလာပါ",
+                "ကျွန်တော်",
+                "ထမင်း",
+                "စား",
+                "ပါ",
+            ]
+            var context: [String] = []
+            var emptyPanels: [String] = []
+            var misrenderings: [(String, String, String)] = []
+            for surface in targetSurfaces {
+                // User-typed form: canonical romanization minus the
+                // disambiguation markers they would not type on a plain
+                // keyboard (digits, separators, apostrophes).
+                let typed = ReverseRomanizer.romanize(surface)
+                    .filter { !"23+'".contains($0) }
+                // Reset composition at word start (mirrors commit → space → next word).
+                _ = progressiveEngine.update(buffer: "", context: context)
+                for i in 1...typed.count {
+                    let buffer = String(typed.prefix(i))
+                    let state = progressiveEngine.update(buffer: buffer, context: context)
+                    if state.candidates.isEmpty {
+                        emptyPanels.append("word='\(surface)' stroke='\(buffer)'")
+                    }
+                }
+                let finalState = progressiveEngine.update(buffer: typed, context: context)
+                // Check top-3 for the target surface. The IME shows a
+                // panel and the user picks; as long as the target word
+                // is prominent the real UX is fine.
+                let top3 = Array(finalState.candidates.prefix(3)).map(\.surface)
+                let stripped3 = top3.map { s in
+                    s.unicodeScalars.filter { $0.value != 0x200B }
+                        .map { String($0) }.joined()
+                }
+                if !stripped3.contains(surface) {
+                    misrenderings.append((typed, surface, "top3=\(stripped3)"))
+                }
+                // Simulate commit of the user's intended word.
+                context.append(surface)
+            }
+            assertTrue(emptyPanels.isEmpty,
+                "progressiveTyping_fullSentenceSimulation_noEmptyPanel",
+                detail: "empty at: \(emptyPanels)")
+            totalTests += 1
+            if misrenderings.isEmpty {
+                passedTests += 1
+            } else {
+                let rendered = misrenderings.map { "'\($0.0)'→expected '\($0.1)': \($0.2)" }
+                    .joined(separator: " | ")
+                failedTests.append((
+                    "progressiveTyping_fullSentenceSimulation_top3ContainsTarget",
+                    rendered
+                ))
+            }
+        }
+
+        // Letter-by-letter exercise of the exact screenshot sequence.
+        // Once ကျွန်တော် is established as the prefix (after the first
+        // word "kwyantaw"), typing "kahtamin:" must extend it — never
+        // rewrite it. Emits a per-keystroke trace when the prefix drifts
+        // so the failure point is obvious.
+        runTest("progressiveTyping_kwyantawkahtamin_traceNoDrift") {
+            let progressiveEngine = BurmeseEngine(candidateStore: store, languageModel: lm)
+            let letters = Array("kwyantawkahtamin:")
+            let expectedPrefixStripped = "ကျွန်တော်"
+            var buffer = ""
+            var trace: [(String, String)] = []
+            var driftAt: String? = nil
+            var emptyAt: [String] = []
+            var prefixEstablished = false
+            for ch in letters {
+                buffer.append(ch)
+                let state = progressiveEngine.update(buffer: buffer, context: [])
+                let top = state.candidates.first?.surface ?? ""
+                let stripped = top.unicodeScalars
+                    .filter { $0.value != 0x200B }
+                    .map { String($0) }
+                    .joined()
+                trace.append((buffer, stripped))
+                if state.candidates.isEmpty { emptyAt.append(buffer) }
+                // Mark the prefix as "established" the first time it
+                // appears; from that point onward every later top must
+                // still begin with it.
+                if stripped.hasPrefix(expectedPrefixStripped) {
+                    prefixEstablished = true
+                } else if prefixEstablished && driftAt == nil {
+                    driftAt = buffer
+                }
+            }
+            let traceStr = trace.map { "\($0.0)→\(escapeUnicode($0.1))" }.joined(separator: " | ")
+            assertTrue(emptyAt.isEmpty,
+                "progressiveTyping_kwyantawkahtamin_neverEmpty",
+                detail: "empty at \(emptyAt); trace: \(traceStr)")
+            assertTrue(prefixEstablished,
+                "progressiveTyping_kwyantawkahtamin_prefixReached",
+                detail: "never saw '\(expectedPrefixStripped)' as prefix; trace: \(traceStr)")
+            assertTrue(driftAt == nil,
+                "progressiveTyping_kwyantawkahtamin_noDriftAfterEstablished",
+                detail: "drift at '\(driftAt ?? "")'; trace: \(traceStr)")
+        }
+
+        // Screenshot scenario: user types keystroke-by-keystroke. Early
+        // short buffers (k, kw, kwy) pick weak initial candidates before
+        // enough evidence exists to disambiguate medials. Once the full
+        // word "kwyantaw" is typed, the top must be ကျွန်တော် — a
+        // genuinely better full-buffer parse must overwrite the stale
+        // anchor from shorter intermediate buffers.
+        runTest("prefixStability_progressiveTyping_reachesCorrectWord") {
+            let progressiveEngine = BurmeseEngine(candidateStore: store, languageModel: lm)
+            var finalTop = ""
+            for prefix in ["k", "kw", "kwy", "kwya", "kwyan", "kwyant", "kwyanta", "kwyantaw"] {
+                let state = progressiveEngine.update(buffer: prefix, context: [])
+                finalTop = state.candidates.first?.surface ?? ""
+            }
+            let normalized = finalTop.unicodeScalars
+                .filter { $0.value != 0x200B }
+                .map { String($0) }
+                .joined()
+            assertEqual(normalized, "ကျွန်တော်",
+                "prefixStability_progressiveTyping_reachesCorrectWord")
+        }
+
+        // Concrete per-input expectations for canonical vs medial-fallback
+        // disambiguation. The parser has two knobs that interact: 'h' can
+        // be a ha-htoe medial prefix ("hk" = က+ှ) OR a bare consonant (ဟ
+        // ha). When the 'h' occurs AFTER a fully-formed syllable (e.g. "ka"
+        // already consumed), treating it as a medial produces a dangling
+        // ှ — that's the bug. It should be parsed as the bare consonant ဟ
+        // instead, and only coalesce into a proper onset (e.g. ထ "ht")
+        // when the next keystroke makes that onset complete.
+        //
+        // Typed letter-by-letter so the failure point is visible.
+        runTest("progressiveTyping_canonicalVsMedial_expectations") {
+            let progressiveEngine = BurmeseEngine(candidateStore: store, languageModel: lm)
+            // Each case: (typed input, expected top scalars). ZWSPs
+            // stripped before comparison so anchor boundaries don't
+            // interfere.
+            // Top candidate checks (first candidate must match exactly).
+            let topCases: [(input: String, expected: [UInt32])] = [
+                ("hsa",  [0x1006]),                 // ဆ — canonical match beats medial fallback
+                ("kah",  [0x1000, 0x1021]),          // ကအ
+                ("kaht", [0x1000, 0x1011]),          // ကထ
+            ]
+            // Presence checks (candidate must appear somewhere in the list).
+            let containsCases: [(input: String, expected: [UInt32])] = [
+                ("hka",  [0x1000, 0x103E]),          // ကှ — may be behind lexicon prefix hits
+            ]
+            var failures: [String] = []
+            for (word, expectedScalars) in topCases {
+                _ = progressiveEngine.update(buffer: "", context: [])
+                var top = ""
+                for i in 1...word.count {
+                    let buf = String(word.prefix(i))
+                    let state = progressiveEngine.update(buffer: buf, context: [])
+                    top = state.candidates.first?.surface ?? ""
+                }
+                let actualScalars = top.unicodeScalars
+                    .filter { $0.value != 0x200B && $0.value != 0x200C }
+                    .map { $0.value }
+                if actualScalars != expectedScalars {
+                    let hex = actualScalars.map { String(format: "%04X", $0) }
+                        .joined(separator: " ")
+                    let exp = expectedScalars.map { String(format: "%04X", $0) }
+                        .joined(separator: " ")
+                    failures.append("'\(word)' top→[\(hex)], expected [\(exp)]")
+                }
+            }
+            for (word, expectedScalars) in containsCases {
+                _ = progressiveEngine.update(buffer: "", context: [])
+                var candidates: [String] = []
+                for i in 1...word.count {
+                    let buf = String(word.prefix(i))
+                    let state = progressiveEngine.update(buffer: buf, context: [])
+                    candidates = state.candidates.map(\.surface)
+                }
+                let found = candidates.contains { surface in
+                    let scalars = surface.unicodeScalars
+                        .filter { $0.value != 0x200B && $0.value != 0x200C }
+                        .map { $0.value }
+                    return scalars == expectedScalars
+                }
+                if !found {
+                    let exp = expectedScalars.map { String(format: "%04X", $0) }
+                        .joined(separator: " ")
+                    failures.append("'\(word)' missing [\(exp)] in candidates")
+                }
+            }
+            assertTrue(failures.isEmpty,
+                "progressiveTyping_canonicalVsMedial_expectations",
+                detail: failures.joined(separator: " | "))
+        }
+    }
 } else {
     runTest("realLexicon_skipped_noBundledDB") {
         assertTrue(true, "realLexicon_skipped_noBundledDB")
+    }
+}
+
+// ===================================================================
+// Language Model (trigram binary reader)
+// ===================================================================
+
+print("=== Language Model Tests ===")
+
+// Fixture builder mirrors the Python side; see FORMAT.md.
+func buildLMFixture(
+    vocab: [String],
+    bos: Int, eos: Int, unk: Int,
+    unigrams: [(UInt32, Float, Float)],
+    bigrams: [(UInt32, UInt32, Float, Float)],
+    trigrams: [(UInt32, UInt32, UInt32, Float)]
+) -> Data {
+    func appendU32(_ data: inout Data, _ value: UInt32) {
+        var v = value.littleEndian
+        withUnsafeBytes(of: &v) { data.append(contentsOf: $0) }
+    }
+    func appendF32(_ data: inout Data, _ value: Float) {
+        var v = value.bitPattern.littleEndian
+        withUnsafeBytes(of: &v) { data.append(contentsOf: $0) }
+    }
+
+    var out = Data()
+    out.append(contentsOf: Array("BURMLM01".utf8))
+    appendU32(&out, 1)
+    appendU32(&out, 3)
+    appendU32(&out, UInt32(vocab.count))
+    appendU32(&out, UInt32(unigrams.count))
+    appendU32(&out, UInt32(bigrams.count))
+    appendU32(&out, UInt32(trigrams.count))
+    appendU32(&out, UInt32(bos))
+    appendU32(&out, UInt32(eos))
+    appendU32(&out, UInt32(unk))
+    appendU32(&out, 0)
+
+    var offsets: [(UInt32, UInt32)] = []
+    var blob = Data()
+    for s in vocab {
+        let b = Array(s.utf8)
+        offsets.append((UInt32(blob.count), UInt32(b.count)))
+        blob.append(contentsOf: b)
+    }
+    out.append(blob)
+    for (off, len) in offsets { appendU32(&out, off); appendU32(&out, len) }
+    let sortedIds = (0..<vocab.count)
+        .sorted { vocab[$0].utf8.lexicographicallyPrecedes(vocab[$1].utf8) }
+        .map { UInt32($0) }
+    for id in sortedIds { appendU32(&out, id) }
+    for (id, lp, bo) in unigrams.sorted(by: { $0.0 < $1.0 }) {
+        appendU32(&out, id); appendF32(&out, lp); appendF32(&out, bo); appendU32(&out, 0)
+    }
+    for (w1, w2, lp, bo) in bigrams.sorted(by: { ($0.0, $0.1) < ($1.0, $1.1) }) {
+        appendU32(&out, w1); appendU32(&out, w2); appendF32(&out, lp); appendF32(&out, bo)
+    }
+    for (w1, w2, w3, lp) in trigrams.sorted(by: { ($0.0, $0.1, $0.2) < ($1.0, $1.1, $1.2) }) {
+        appendU32(&out, w1); appendU32(&out, w2); appendU32(&out, w3); appendF32(&out, lp)
+    }
+    return out
+}
+
+runTest("lm_null_returnsConstant") {
+    let lm = NullLanguageModel(constantLogProb: -7.5)
+    doubleEqual(lm.logProb(surface: "သာ", context: []), -7.5, "lm_null_empty")
+    doubleEqual(lm.logProb(surface: "သာ", context: ["a", "b"]), -7.5, "lm_null_trigramctx")
+}
+
+runTest("lm_reader_unigramLookup") {
+    let data = buildLMFixture(
+        vocab: ["က", "ကို", "<s>", "</s>", "<unk>"],
+        bos: 2, eos: 3, unk: 4,
+        unigrams: [(0, -1.0, 0.0), (1, -2.0, 0.0), (4, -5.0, 0.0)],
+        bigrams: [], trigrams: []
+    )
+    let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("lm_uni_\(UUID().uuidString).bin")
+    try? data.write(to: url)
+    defer { try? FileManager.default.removeItem(at: url) }
+    do {
+        let lm = try TrigramLanguageModel(path: url.path)
+        doubleEqual(lm.logProb(surface: "က", context: []), -1.0, "lm_reader_unigram_k")
+        doubleEqual(lm.logProb(surface: "ကို", context: []), -2.0, "lm_reader_unigram_ko")
+        doubleEqual(lm.logProb(surface: "unknown", context: []), -5.0, "lm_reader_oov_routesToUnk")
+        assertEqual(lm.wordId(for: "က"), UInt32(0), "lm_reader_surfaceToId")
+    } catch {
+        failedTests.append(("lm_reader_unigramLookup", "Load failed: \(error)"))
+    }
+}
+
+runTest("lm_reader_bigramBacksOffToUnigram") {
+    let data = buildLMFixture(
+        vocab: ["က", "ကို", "<s>", "</s>", "<unk>"],
+        bos: 2, eos: 3, unk: 4,
+        unigrams: [(0, -1.0, -0.3), (1, -2.0, 0.0), (2, -0.5, -0.2), (4, -5.0, 0.0)],
+        bigrams: [(0, 1, -1.5, 0.0)],
+        trigrams: []
+    )
+    let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("lm_bi_\(UUID().uuidString).bin")
+    try? data.write(to: url)
+    defer { try? FileManager.default.removeItem(at: url) }
+    do {
+        let lm = try TrigramLanguageModel(path: url.path)
+        doubleEqual(lm.logProb(surface: "ကို", context: ["က"]), -1.5, "lm_reader_bigramDirect")
+        doubleEqual(
+            lm.logProb(surface: "nope", context: ["<s>"]),
+            -5.0 + -0.2,
+            "lm_reader_bigramBackoff"
+        )
+    } catch {
+        failedTests.append(("lm_reader_bigramBacksOffToUnigram", "Load failed: \(error)"))
+    }
+}
+
+runTest("lm_reader_trigramHitBeatsBackoff") {
+    let data = buildLMFixture(
+        vocab: ["က", "ကို", "<s>", "</s>", "<unk>"],
+        bos: 2, eos: 3, unk: 4,
+        unigrams: [(0, -1.0, 0.0), (1, -2.0, -0.1), (3, -1.2, 0.0), (4, -5.0, 0.0)],
+        bigrams: [(0, 1, -1.5, -0.2), (1, 3, -2.3, 0.0)],
+        trigrams: [(0, 1, 3, -0.9)]
+    )
+    let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("lm_tri_\(UUID().uuidString).bin")
+    try? data.write(to: url)
+    defer { try? FileManager.default.removeItem(at: url) }
+    do {
+        let lm = try TrigramLanguageModel(path: url.path)
+        doubleEqual(
+            lm.logProb(surface: "</s>", context: ["က", "ကို"]),
+            -0.9,
+            "lm_reader_trigramDirect"
+        )
+    } catch {
+        failedTests.append(("lm_reader_trigramHitBeatsBackoff", "Load failed: \(error)"))
+    }
+}
+
+runTest("lm_reader_scoreSurface_decomposesMultiWord") {
+    let data = buildLMFixture(
+        vocab: ["ကျွန်", "တော်", "<s>", "</s>", "<unk>"],
+        bos: 2, eos: 3, unk: 4,
+        unigrams: [(0, -2.0, 0.0), (1, -2.5, 0.0), (4, -12.0, 0.0)],
+        bigrams: [],
+        trigrams: []
+    )
+    let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("lm_score_\(UUID().uuidString).bin")
+    try? data.write(to: url)
+    defer { try? FileManager.default.removeItem(at: url) }
+    do {
+        let lm = try TrigramLanguageModel(path: url.path)
+        let good = lm.scoreSurface("ကျွန်တော်", context: [])
+        let bad = lm.scoreSurface("ကျွန်ဈော်", context: [])
+        doubleEqual(good, -4.5, "lm_scoreSurface_knownWordsSum")
+        if !(bad < good) {
+            failedTests.append((
+                "lm_reader_scoreSurface_decomposesMultiWord",
+                "Expected unknown-piece surface to score lower; good=\(good) bad=\(bad)"
+            ))
+        }
+    } catch {
+        failedTests.append(("lm_reader_scoreSurface_decomposesMultiWord", "Load failed: \(error)"))
     }
 }
 

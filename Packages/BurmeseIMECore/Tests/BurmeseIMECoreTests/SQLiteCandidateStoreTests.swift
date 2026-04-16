@@ -76,11 +76,6 @@ final class SQLiteCandidateStoreTests: XCTestCase {
                 entry_id INTEGER NOT NULL REFERENCES entries(id),
                 rank_score REAL NOT NULL
             );
-            CREATE TABLE bigram_context (
-                prev_surface TEXT NOT NULL,
-                next_entry_id INTEGER NOT NULL REFERENCES entries(id),
-                score REAL NOT NULL
-            );
             INSERT INTO entries (id, surface, canonical_reading, unigram_score) VALUES
                 (1, 'မင်္ဂလာပါ', 'min+galarpar2', 1000.0),
                 (2, 'ဦး', 'u2:', 900.0);

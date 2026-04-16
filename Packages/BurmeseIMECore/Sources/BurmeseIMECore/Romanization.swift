@@ -328,18 +328,25 @@ public enum Romanization {
         String(canonical.filter { !numericAliasMarkers.contains($0) })
     }
 
+    /// Tiny tie-breaker for the digit-stripped alias of a canonical
+    /// reading. Digit input was removed from compose mode, so users can
+    /// only produce the digitless form — but at the parser level, when
+    /// the same surface input matches both a canonical rule (e.g. "kya"
+    /// → ကြ via ya-yit) and the digit-stripped alias of another (e.g.
+    /// "kya" via "ky2a" → ကျ ya-pin), we still want the canonical to
+    /// win when no other signal differentiates them. The earlier 1000
+    /// blew past the LM signal and dropped legitimate picks; 1 is small
+    /// enough that any nat-scale LM evidence dominates, while still
+    /// breaking parser-only ties (which is what the rule-shape tests
+    /// rely on).
     static func aliasPenalty(for canonical: String) -> Int {
-        canonical.reduce(into: 0) { penalty, character in
-            if numericAliasMarkers.contains(character) {
-                penalty += 100
-            }
-        }
+        canonical.contains(where: { numericAliasMarkers.contains($0) }) ? 1 : 0
     }
 
     package static func aliasPenaltyCount(for canonical: String) -> Int {
-        canonical.reduce(into: 0) { penalty, character in
+        canonical.reduce(into: 0) { count, character in
             if numericAliasMarkers.contains(character) {
-                penalty += 1
+                count += 1
             }
         }
     }

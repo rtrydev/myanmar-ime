@@ -129,8 +129,10 @@ SQLite database:
   lookup index
 - `reading_alias_index(alias_reading, canonical_reading, entry_id, rank_score, alias_penalty)`
   — digitless compose lookup index
-- `bigram_context(prev_surface, next_entry_id, score)` — contextual
-  phrase ranking
+
+Contextual phrase ranking is supplied at runtime by the trigram language
+model (`LanguageModel/FORMAT.md`, `TrigramLanguageModel`), not by the
+SQLite schema.
 
 ### Native macOS Integration
 - Built on **InputMethodKit** (`IMKInputController`).
@@ -157,14 +159,20 @@ myanmar-ime/
 │   │   │   ├── Unicode.swift             # Myanmar block constants and char classification
 │   │   │   ├── Types.swift               # Public API types
 │   │   │   ├── CandidateStore.swift      # Protocol: lookup(prefix:previousSurface:)
-│   │   │   └── SQLiteCandidateStore.swift  # SQLite-backed lexicon store
+│   │   │   ├── SQLiteCandidateStore.swift  # SQLite-backed lexicon store
+│   │   │   └── LanguageModel/
+│   │   │       ├── FORMAT.md             # Binary format spec for BurmeseLM.bin
+│   │   │       ├── LanguageModel.swift   # Protocol for language model scoring
+│   │   │       └── TrigramLanguageModel.swift  # Kneser-Ney trigram LM loader
 │   │   ├── LexiconBuilder/main.swift     # TSV → SQLite compilation pipeline
 │   │   └── TestRunner/main.swift         # CLI test driver (runs without XCTest)
 │   ├── Tests/BurmeseIMECoreTests/        # XCTest suite (Xcode toolchain)
 │   └── Data/
-│       ├── BurmeseLexiconSource.tsv      # Word list source
-│       └── BurmeseLexicon.sqlite         # Prebuilt lexicon database
+│       └── BurmeseLexiconSource.tsv      # Word list source
 └── native/macos/                         # Xcode app + IMK extension
+    └── Data/
+        ├── BurmeseLexicon.sqlite         # Prebuilt lexicon database
+        └── BurmeseLM.bin                 # Trigram language model binary
 ```
 
 ### Conversion pipeline
@@ -328,7 +336,8 @@ Tests live in two parallel targets that share the same cases:
 | `Tests/BurmeseIMECoreTests/GrammarTests.swift` | Medial legality per consonant, valid/invalid syllable combinations |
 | `Tests/BurmeseIMECoreTests/RomanizationTests.swift` | Consonants, vowel sorting, normalization, alias helpers |
 | `Tests/BurmeseIMECoreTests/ReverseRomanizerTests.swift` | Myanmar → roman, round-trip stability |
-| `Tests/BurmeseIMECoreTests/LegacyFixtureTests.swift` | Known-good conversions, cluster shortcuts, aspirated sonorants, leading vowels |
+| `Tests/BurmeseIMECoreTests/LanguageModelTests.swift` | Binary-format round-trip, unigram/bigram/trigram lookup, backoff semantics |
+| `Tests/BurmeseIMECoreTests/LexiconRankingTests.swift` | Candidate merge ordering, alias penalties, fixture + real-lexicon spot checks |
 | `Tests/BurmeseIMECoreTests/SQLiteCandidateStoreTests.swift` | Alias-aware lexicon prefix lookup against the bundled database |
 
 **Key invariants:**
@@ -345,7 +354,7 @@ Tests live in two parallel targets that share the same cases:
 The bundled lexicon (`BurmeseLexiconSource.tsv`) provides:
 
 - Log-scale unigram frequency scores normalized to the 0–1000 range
-- Bigram context scores for phrase-level candidate ranking
+  (corpus-derived; see `Tools/corpus_builder/`)
 - Optional explicit reading overrides for irregular or high-priority
   entries
 

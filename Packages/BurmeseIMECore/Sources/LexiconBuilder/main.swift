@@ -14,7 +14,6 @@ import SQLite3
 ///   reading_index(canonical_reading, entry_id, rank_score)
 ///   reading_alias_index(alias_reading, canonical_reading, entry_id, rank_score, alias_penalty)
 ///   reading_compose_index(compose_reading, canonical_reading, entry_id, rank_score, alias_penalty, separator_penalty)
-///   bigram_context(prev_surface, next_entry_id, score)
 
 guard CommandLine.arguments.count >= 3 else {
     fputs("Usage: LexiconBuilder <input.tsv> <output.sqlite>\n", stderr)
@@ -129,13 +128,8 @@ exec("""
         separator_penalty INTEGER NOT NULL
     )
     """)
-exec("""
-    CREATE TABLE bigram_context (
-        prev_surface TEXT NOT NULL,
-        next_entry_id INTEGER NOT NULL REFERENCES entries(id),
-        score REAL NOT NULL
-    )
-    """)
+// Bigram context is supplied at runtime by the language model
+// (see LanguageModel/FORMAT.md); no table is written here.
 
 // Insert entries
 exec("BEGIN TRANSACTION")
@@ -254,7 +248,6 @@ exec("COMMIT")
 exec("CREATE INDEX idx_reading ON reading_index (canonical_reading)")
 exec("CREATE INDEX idx_reading_alias ON reading_alias_index (alias_reading)")
 exec("CREATE INDEX idx_reading_compose ON reading_compose_index (compose_reading)")
-exec("CREATE INDEX idx_bigram ON bigram_context (prev_surface)")
 exec("CREATE INDEX idx_entry_reading ON entries (canonical_reading)")
 
 sqlite3_close(db)

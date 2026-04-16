@@ -18,17 +18,9 @@ final class LexiconRankingTests: XCTestCase {
 
     private struct FixedCandidateStore: CandidateStore {
         var byPrefix: [String: [Candidate]] = [:]
-        var byBigram: [String: [String: [Candidate]]] = [:]
 
         func lookup(prefix: String, previousSurface: String?) -> [Candidate] {
-            var results: [Candidate] = []
-            if let prev = previousSurface, let bigramHits = byBigram[prev]?[prefix] {
-                results += bigramHits
-            }
-            if let hits = byPrefix[prefix] {
-                results += hits
-            }
-            return results
+            byPrefix[prefix] ?? []
         }
     }
 
@@ -210,8 +202,7 @@ final class LexiconRankingTests: XCTestCase {
     }
 
     private func makeInMemoryStore(
-        entries: [LexiconRow],
-        bigrams: [(prev: String, entryID: Int64, score: Double)] = []
+        entries: [LexiconRow]
     ) throws -> (url: URL, store: SQLiteCandidateStore) {
         #if canImport(SQLite3)
         let dbURL = FileManager.default.temporaryDirectory
@@ -234,11 +225,6 @@ final class LexiconRankingTests: XCTestCase {
                 entry_id INTEGER NOT NULL REFERENCES entries(id),
                 rank_score REAL NOT NULL
             );
-            CREATE TABLE bigram_context (
-                prev_surface TEXT NOT NULL,
-                next_entry_id INTEGER NOT NULL REFERENCES entries(id),
-                score REAL NOT NULL
-            );
             """
         guard sqlite3_exec(db, schema, nil, nil, nil) == SQLITE_OK else {
             throw NSError(domain: "LexiconRankingTests", code: 2)
@@ -253,16 +239,6 @@ final class LexiconRankingTests: XCTestCase {
                 """
             guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
                 throw NSError(domain: "LexiconRankingTests", code: 3)
-            }
-        }
-
-        for bigram in bigrams {
-            let sql = """
-                INSERT INTO bigram_context (prev_surface, next_entry_id, score)
-                VALUES ('\(bigram.prev)', \(bigram.entryID), \(bigram.score));
-                """
-            guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
-                throw NSError(domain: "LexiconRankingTests", code: 4)
             }
         }
 
@@ -307,47 +283,6 @@ final class LexiconRankingTests: XCTestCase {
             return
         }
         XCTAssertEqual(hit.score, 1000.0 - 1000.0 - 250.0, accuracy: 0.001)
-    }
-
-    func testScore_bigramBonusApplied() throws {
-        let (url, store) = try makeInMemoryStore(
-            entries: [
-                LexiconRow(id: 1, surface: "ကျား", canonicalReading: "kyar:", unigramScore: 500.0)
-            ],
-            bigrams: [(prev: "ကြီး", entryID: 1, score: 500.0)]
-        )
-        defer { try? FileManager.default.removeItem(at: url) }
-
-        let withContext = store.lookup(prefix: "kyar:", previousSurface: "ကြီး")
-        guard let bigramHit = withContext.first else {
-            XCTFail("Expected at least one candidate with bigram context")
-            return
-        }
-        // Bigram: rank_score (500) + 500 − aliasPenalty(0)·1000 = 1000.
-        // (Dedup keeps the first — the bigram row — because it's queried first.)
-        XCTAssertEqual(bigramHit.score, 500.0 + 500.0, accuracy: 0.001,
-            "Bigram bonus +500 must be applied")
-    }
-
-    func testDedup_bigramHitWinsOverPlainPrefixHit() throws {
-        // Same entry matched by both bigram and plain prefix queries. The
-        // deduplicator keeps whichever is first; SQLiteCandidateStore runs
-        // the bigram query first, so the higher-scoring bigram candidate
-        // must survive dedup.
-        let (url, store) = try makeInMemoryStore(
-            entries: [
-                LexiconRow(id: 1, surface: "ကျား", canonicalReading: "kyar:", unigramScore: 400.0)
-            ],
-            bigrams: [(prev: "ကြီး", entryID: 1, score: 400.0)]
-        )
-        defer { try? FileManager.default.removeItem(at: url) }
-
-        let results = store.lookup(prefix: "kyar:", previousSurface: "ကြီး")
-        let matches = results.filter { $0.surface == "ကျား" }
-        XCTAssertEqual(matches.count, 1, "Duplicate entries must be deduped")
-        // Must be the bigram-bonused score, not the plain prefix score.
-        XCTAssertEqual(matches.first?.score, 400.0 + 500.0, accuracy: 0.001,
-            "Dedup must retain the higher-scoring bigram candidate, not the plain prefix hit")
     }
 
     // MARK: - D. Real-lexicon sanity

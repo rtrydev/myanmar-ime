@@ -11,9 +11,8 @@ Packages/BurmeseIMECore/   Swift Package — pure conversion engine, no UI
   Sources/TestRunner/      CLI test driver (replaces XCTest when unavailable)
   Sources/LexiconBuilder/  TSV → SQLite lexicon compiler
   Tests/                   XCTest suite (requires Xcode toolchain)
-  Data/                    Lexicon source + prebuilt SQLite
+  Data/                    Lexicon source TSV
 native/macos/              Xcode app + IMKInputController extension
-LegacyFixtures/myangler.js Reference JS implementation (parity fixture)
 ```
 
 The core package has **no macOS-only dependencies** — it builds and runs
@@ -114,12 +113,13 @@ Because no romanization rule spans more than `maxOnsetLen + maxVowelLen`
 chars, the window boundary is always outside any possible rule match, so
 freezing the prefix is safe.
 
-### Legacy parity
+### Statistical scoring
 
-`LegacyFixtures/myangler.js` is the original browser engine, kept as a
-reference fixture. `Tests/.../LegacyFixtureTests.swift` asserts parity on
-known-good cases and documents intentional divergences (e.g. illegal
-combinations stay raw in preedit instead of leaking into output).
+Candidate ranking is anchored by a word-level Kneser-Ney trigram LM
+(`LanguageModel/FORMAT.md`) loaded via `TrigramLanguageModel`. `BurmeseEngine`
+combines: orthographic legality (hard filter) → alias cost → LM log-prob →
+parser tie-breaker. The LM `.bin` and the SQLite lexicon are produced in
+one pass by `Tools/corpus_builder/` so their vocabularies stay aligned.
 
 ## Working in this repo
 
