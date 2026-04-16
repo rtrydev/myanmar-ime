@@ -230,25 +230,32 @@ runTest("longerBufferPreservesPreviouslyRenderedPrefix") {
 }
 
 runTest("preservesTrailingDigits") {
-    // Digits are composing characters but are not parseable after a complete
-    // syllable — the engine should hold them as a literal tail rather than
-    // silently dropping them through the parser's no-match branch.
+    // Digits in the tail are converted to Burmese in the primary candidate.
     let state = engine.update(buffer: "min:123", context: [])
     let committed = engine.commit(state: state)
-    assertTrue(committed.hasSuffix("123"), "preservesTrailingDigits_suffix",
-               detail: "Expected '123' suffix, got: \(escapeUnicode(committed))")
+    assertTrue(committed.hasSuffix("၁၂၃"), "preservesTrailingDigits_suffix",
+               detail: "Expected '၁၂၃' suffix, got: \(escapeUnicode(committed))")
     assertTrue(committed.hasPrefix("မင်း"), "preservesTrailingDigits_prefix",
                detail: "Expected မင်း prefix, got: \(escapeUnicode(committed))")
+    // Arabic-digit variant is also available.
+    let hasArabic = state.candidates.contains { $0.surface.hasSuffix("123") }
+    assertTrue(hasArabic, "preservesTrailingDigits_arabicVariant")
 }
 
 runTest("candidatesIncludeTrailingDigits") {
     let state = engine.update(buffer: "thar123", context: [])
     assertTrue(!state.candidates.isEmpty, "candidatesIncludeTrailingDigits_nonEmpty")
-    var allHaveTail = true
-    for candidate in state.candidates where !candidate.surface.hasSuffix("123") {
-        allHaveTail = false
+    // Every candidate should end with either Burmese or Arabic digits.
+    let allHaveTail = state.candidates.allSatisfy {
+        $0.surface.hasSuffix("၁၂၃") || $0.surface.hasSuffix("123")
     }
     assertTrue(allHaveTail, "candidatesIncludeTrailingDigits_allHaveTail")
+    // Primary candidate should have Burmese digits.
+    assertTrue(state.candidates.first!.surface.hasSuffix("၁၂၃"),
+               "candidatesIncludeTrailingDigits_primaryBurmese")
+    // Arabic-digit variant should also be present.
+    let hasArabic = state.candidates.contains { $0.surface.hasSuffix("123") }
+    assertTrue(hasArabic, "candidatesIncludeTrailingDigits_arabicVariant")
 }
 
 runTest("preservesNonComposingTail") {
@@ -261,16 +268,21 @@ runTest("preservesNonComposingTail") {
 runTest("preservesMixedDigitAndPunctuationTail") {
     let state = engine.update(buffer: "min:123!", context: [])
     let committed = engine.commit(state: state)
-    assertTrue(committed.hasSuffix("123!"), "preservesMixedTail",
-               detail: "Expected '123!' suffix, got: \(escapeUnicode(committed))")
+    assertTrue(committed.hasSuffix("၁၂၃!"), "preservesMixedTail_burmese",
+               detail: "Expected '၁၂၃!' suffix, got: \(escapeUnicode(committed))")
+    // Arabic-digit variant should also be present.
+    let hasArabic = state.candidates.contains { $0.surface.hasSuffix("123!") }
+    assertTrue(hasArabic, "preservesMixedTail_arabicVariant")
 }
 
 runTest("thar2_commitsDigitLiteral") {
     // Digits are never consumed as vowel-variant tokens. "thar2" commits as
-    // သာ followed by the literal "2".
+    // သာ followed by Burmese "၂" (primary) with Arabic "2" as alternative.
     let state = engine.update(buffer: "thar2", context: [])
     let committed = engine.commit(state: state)
-    assertEqual(committed, "သာ2", "thar2_commitsDigitLiteral")
+    assertEqual(committed, "သာ၂", "thar2_commitsDigitLiteral")
+    let hasArabic = state.candidates.contains { $0.surface == "သာ2" }
+    assertTrue(hasArabic, "thar2_arabicVariant")
 }
 
 runTest("candidates_aaShapeMatchesDescender") {
@@ -325,8 +337,8 @@ runTest("standaloneTallAa_splitsAsLiteralTail") {
     // candidate only when an appropriate onset is present.
     let state = engine.update(buffer: "ar2", context: [])
     let committed = engine.commit(state: state)
-    assertTrue(committed.hasSuffix("2"), "ar2_literalTail",
-               detail: "Expected '2' suffix, got: \(escapeUnicode(committed))")
+    assertTrue(committed.hasSuffix("၂"), "ar2_literalTail",
+               detail: "Expected '၂' suffix, got: \(escapeUnicode(committed))")
     assertFalse(committed.contains("\u{102B}"), "ar2_noTallAa",
                 detail: "Expected no ါ (U+102B), got: \(escapeUnicode(committed))")
     assertTrue(committed.contains("\u{102C}"), "ar2_hasShortAa",
@@ -371,11 +383,45 @@ runTest("progressiveTyping_kwyantawkahtamin_producesCorrectSuffix") {
         detail: "Expected suffix ကထမင်, got \(escapeUnicode(stripped))")
 }
 
-runTest("pureUnconvertibleBuffer_commitsRaw") {
+runTest("leadingDigits_parsedWithBurmeseText") {
+    // "123kwyantaw" → leading digits should convert to ၁၂၃ and
+    // the composable portion should still parse as Burmese.
+    let state = engine.update(buffer: "123kwyantaw", context: [])
+    assertTrue(!state.candidates.isEmpty, "leadingDigits_hasCandidates")
+    let primary = state.candidates[0].surface
+    assertTrue(primary.hasPrefix("၁၂၃"), "leadingDigits_burmesePrefix",
+               detail: "Expected ၁၂၃ prefix, got: \(escapeUnicode(primary))")
+    // The composable part "kwyantaw" must not appear as raw latin.
+    assertFalse(primary.contains("kwyantaw"), "leadingDigits_noRawLatin",
+                detail: "Should not contain raw latin: \(escapeUnicode(primary))")
+    // Arabic-digit variant should also be present.
+    let hasArabic = state.candidates.contains { $0.surface.hasPrefix("123") }
+    assertTrue(hasArabic, "leadingDigits_arabicVariant")
+}
+
+runTest("leadingDigits_withTrailingDigits") {
+    // "123thar456" → ၁၂₃ + သာ + ၄၅၆ (primary), 123 + သာ + 456 (secondary)
+    let state = engine.update(buffer: "123thar456", context: [])
+    assertTrue(!state.candidates.isEmpty, "leadingTrailingDigits_hasCandidates")
+    let primary = state.candidates[0].surface
+    assertTrue(primary.hasPrefix("၁၂၃"), "leadingTrailingDigits_burmesePrefix",
+               detail: "Expected ၁၂₃ prefix, got: \(escapeUnicode(primary))")
+    assertTrue(primary.hasSuffix("၄၅၆"), "leadingTrailingDigits_burmeseSuffix",
+               detail: "Expected ၄₅₆ suffix, got: \(escapeUnicode(primary))")
+    let hasArabic = state.candidates.contains {
+        $0.surface.hasPrefix("123") && $0.surface.hasSuffix("456")
+    }
+    assertTrue(hasArabic, "leadingTrailingDigits_arabicVariant")
+}
+
+runTest("pureDigitBuffer_producesBurmeseAndArabicCandidates") {
     let state = engine.update(buffer: "123", context: [])
-    assertTrue(state.isActive, "pureUnconvertibleBuffer_active")
-    assertTrue(state.candidates.isEmpty, "pureUnconvertibleBuffer_noCandidates")
-    assertEqual(engine.commit(state: state), "123", "pureUnconvertibleBuffer_commit")
+    assertTrue(state.isActive, "pureDigitBuffer_active")
+    assertTrue(!state.candidates.isEmpty, "pureDigitBuffer_hasCandidates")
+    assertEqual(state.candidates[0].surface, "၁၂၃", "pureDigitBuffer_primaryBurmese")
+    assertTrue(state.candidates.count >= 2, "pureDigitBuffer_hasTwoCandidates")
+    assertEqual(state.candidates[1].surface, "123", "pureDigitBuffer_secondaryArabic")
+    assertEqual(engine.commit(state: state), "၁၂၃", "pureDigitBuffer_commitsBurmese")
 }
 
 // ===================================================================

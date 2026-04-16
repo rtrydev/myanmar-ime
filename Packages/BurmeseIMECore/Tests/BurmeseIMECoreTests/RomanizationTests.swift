@@ -88,9 +88,14 @@ final class RomanizationTests: XCTestCase {
     // MARK: - Composing Characters
 
     func testComposingCharacters_containsExpected() {
-        let expected: [Character] = Array("abcdefghijklmnopqrstuvwxyz0123456789+*':.")
+        let expected: [Character] = Array("abcdefghijklmnopqrstuvwxyz+*':.")
         for ch in expected {
             XCTAssertTrue(Romanization.composingCharacters.contains(ch), "Missing composing character: \(ch)")
+        }
+        // Digits are intentionally NOT composing — they emit as literal text
+        // and get converted to Burmese digits by the engine.
+        for ch: Character in Array("0123456789") {
+            XCTAssertFalse(Romanization.composingCharacters.contains(ch), "Digit should not compose: \(ch)")
         }
     }
 

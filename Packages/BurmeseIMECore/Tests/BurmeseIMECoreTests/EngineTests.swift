@@ -133,9 +133,10 @@ final class EngineTests: XCTestCase {
 
     func testCommit_digitIsLiteral() {
         // Digits are never consumed as vowel-variant disambiguators; "thar2"
-        // commits as သာ followed by the literal "2".
+        // commits as သာ followed by Burmese "၂" (primary), with Arabic "2" as alternative.
         let state = engine.update(buffer: "thar2", context: [])
-        XCTAssertEqual(engine.commit(state: state), "သာ2")
+        XCTAssertEqual(engine.commit(state: state), "သာ၂")
+        XCTAssertTrue(state.candidates.contains { $0.surface == "သာ2" })
     }
 
     func testCandidates_consonantFormRanksAheadOfMedialFallback() {
@@ -171,8 +172,9 @@ final class EngineTests: XCTestCase {
     func testCommit_preservesTrailingDigits() {
         let state = engine.update(buffer: "min:123", context: [])
         let committed = engine.commit(state: state)
-        XCTAssertTrue(committed.hasSuffix("123"), "Expected '123' to be preserved, got '\(committed)'")
+        XCTAssertTrue(committed.hasSuffix("၁၂၃"), "Expected '၁၂၃' to be primary, got '\(committed)'")
         XCTAssertTrue(committed.hasPrefix("မင်း"), "Expected မင်း prefix, got '\(committed)'")
+        XCTAssertTrue(state.candidates.contains { $0.surface.hasSuffix("123") }, "Arabic variant missing")
     }
 
     func testUpdate_candidatesIncludeTrailingDigits() {
@@ -180,10 +182,12 @@ final class EngineTests: XCTestCase {
         XCTAssertFalse(state.candidates.isEmpty)
         for candidate in state.candidates {
             XCTAssertTrue(
-                candidate.surface.hasSuffix("123"),
-                "Candidate '\(candidate.surface)' should end with literal tail '123'"
+                candidate.surface.hasSuffix("၁၂၃") || candidate.surface.hasSuffix("123"),
+                "Candidate '\(candidate.surface)' should end with Burmese or Arabic '123'"
             )
         }
+        XCTAssertTrue(state.candidates.first!.surface.hasSuffix("၁၂၃"), "Primary should have Burmese digits")
+        XCTAssertTrue(state.candidates.contains { $0.surface.hasSuffix("123") }, "Arabic variant missing")
     }
 
     func testCommit_preservesNonComposingTail() {
@@ -197,22 +201,47 @@ final class EngineTests: XCTestCase {
     func testCommit_preservesMixedDigitAndPunctuationTail() {
         let state = engine.update(buffer: "min:123!", context: [])
         let committed = engine.commit(state: state)
-        XCTAssertTrue(committed.hasSuffix("123!"), "Expected '123!' preserved, got '\(committed)'")
+        XCTAssertTrue(committed.hasSuffix("၁၂၃!"), "Expected '၁၂၃!' primary, got '\(committed)'")
+        XCTAssertTrue(state.candidates.contains { $0.surface.hasSuffix("123!") }, "Arabic variant missing")
     }
 
     func testCommit_standaloneTallAa_splitsAsLiteralTail() {
         let state = engine.update(buffer: "ar2", context: [])
         let committed = engine.commit(state: state)
-        XCTAssertTrue(committed.hasSuffix("2"), "Expected '2' suffix, got '\(committed)'")
+        XCTAssertTrue(committed.hasSuffix("၂"), "Expected '၂' suffix, got '\(committed)'")
         XCTAssertFalse(committed.contains("\u{102B}"), "Should not contain ါ, got '\(committed)'")
         XCTAssertTrue(committed.contains("\u{102C}"), "Should contain ာ, got '\(committed)'")
     }
 
-    func testUpdate_pureUnconvertibleBuffer_yieldsRawCommit() {
+    func testUpdate_pureDigitBuffer_producesBurmeseAndArabicCandidates() {
         let state = engine.update(buffer: "123", context: [])
         XCTAssertTrue(state.isActive)
-        XCTAssertTrue(state.candidates.isEmpty)
-        XCTAssertEqual(engine.commit(state: state), "123")
+        XCTAssertFalse(state.candidates.isEmpty)
+        XCTAssertEqual(state.candidates[0].surface, "၁၂၃")
+        XCTAssertTrue(state.candidates.count >= 2)
+        XCTAssertEqual(state.candidates[1].surface, "123")
+        XCTAssertEqual(engine.commit(state: state), "၁၂₃")
+    }
+
+    func testUpdate_leadingDigits_parsedWithBurmeseText() {
+        let state = engine.update(buffer: "123kwyantaw", context: [])
+        XCTAssertFalse(state.candidates.isEmpty)
+        let primary = state.candidates[0].surface
+        XCTAssertTrue(primary.hasPrefix("၁၂၃"), "Expected ၁₂₃ prefix, got \(primary)")
+        XCTAssertFalse(primary.contains("kwyantaw"), "Raw latin should not appear in primary")
+        XCTAssertTrue(state.candidates.contains { $0.surface.hasPrefix("123") }, "Arabic variant missing")
+    }
+
+    func testUpdate_leadingDigits_withTrailingDigits() {
+        let state = engine.update(buffer: "123thar456", context: [])
+        XCTAssertFalse(state.candidates.isEmpty)
+        let primary = state.candidates[0].surface
+        XCTAssertTrue(primary.hasPrefix("၁₂₃"), "Expected ₁₂₃ prefix, got \(primary)")
+        XCTAssertTrue(primary.hasSuffix("၄₅₆"), "Expected ₄₅₆ suffix, got \(primary)")
+        XCTAssertTrue(
+            state.candidates.contains { $0.surface.hasPrefix("123") && $0.surface.hasSuffix("456") },
+            "Arabic variant missing"
+        )
     }
 
     // MARK: - Prefix Stability

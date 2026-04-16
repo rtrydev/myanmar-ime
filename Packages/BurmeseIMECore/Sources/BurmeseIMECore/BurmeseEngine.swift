@@ -199,14 +199,44 @@ public final class BurmeseEngine: @unchecked Sendable {
             return CompositionState(committedContext: context)
         }
         let displayBuffer = buffer.lowercased()
+        // Strip leading ASCII digits — they convert directly to Myanmar
+        // digits and are prepended to candidate surfaces after the
+        // composable portion is parsed.
+        let (digitPrefix, postDigitBuffer) = Self.splitLeadingDigits(displayBuffer)
         // Candidates are generated only from the leading run of composing
         // characters. Anything after the first non-composing character
         // (punctuation, whitespace, etc.) is held aside and emitted verbatim
         // on commit — this lets the user freely mix Burmese-convertible text
         // with literal content without the IME swallowing either.
-        let (composable, literalTail) = Self.splitComposablePrefix(displayBuffer)
+        let (composable, literalTail) = Self.splitComposablePrefix(postDigitBuffer)
         let initialNormalized = Romanization.normalize(composable)
         guard !initialNormalized.isEmpty else {
+            // No composable text: if digits or literal text are present,
+            // offer Burmese and Arabic digit candidates directly.
+            let fullLiteral = digitPrefix + literalTail
+            if Self.containsDigit(fullLiteral) {
+                let burmese = Self.arabicToBurmeseDigits(fullLiteral)
+                var candidates = [Candidate(
+                    surface: burmese,
+                    reading: fullLiteral,
+                    source: .grammar,
+                    score: 0
+                )]
+                if burmese != fullLiteral {
+                    candidates.append(Candidate(
+                        surface: fullLiteral,
+                        reading: fullLiteral,
+                        source: .grammar,
+                        score: 0
+                    ))
+                }
+                return CompositionState(
+                    rawBuffer: displayBuffer,
+                    selectedCandidateIndex: 0,
+                    candidates: candidates,
+                    committedContext: context
+                )
+            }
             return CompositionState(
                 rawBuffer: displayBuffer,
                 selectedCandidateIndex: 0,
@@ -647,21 +677,54 @@ public final class BurmeseEngine: @unchecked Sendable {
             cacheLock.unlock()
         }
 
-        let mergedWithTail: [Candidate] = effectiveTail.isEmpty
-            ? merged
-            : merged.map { candidate in
+        // Attach digit prefix and literal tail to each candidate surface.
+        // When either contains digits, produce two variants per candidate:
+        // primary with all digits as Burmese, secondary with Arabic.
+        let hasDigitAffixes = Self.containsDigit(digitPrefix) || Self.containsDigit(effectiveTail)
+        let mergedWithAffixes: [Candidate]
+        if digitPrefix.isEmpty && effectiveTail.isEmpty {
+            mergedWithAffixes = merged
+        } else if hasDigitAffixes {
+            let burmesePrefix = Self.arabicToBurmeseDigits(digitPrefix)
+            let burmeseTail = Self.arabicToBurmeseDigits(effectiveTail)
+            var expanded: [Candidate] = []
+            var seen: Set<String> = []
+            for candidate in merged {
+                let primary = burmesePrefix + candidate.surface + burmeseTail
+                if seen.insert(primary).inserted {
+                    expanded.append(Candidate(
+                        surface: primary,
+                        reading: candidate.reading,
+                        source: candidate.source,
+                        score: candidate.score
+                    ))
+                }
+                let secondary = digitPrefix + candidate.surface + effectiveTail
+                if secondary != primary, seen.insert(secondary).inserted {
+                    expanded.append(Candidate(
+                        surface: secondary,
+                        reading: candidate.reading,
+                        source: candidate.source,
+                        score: candidate.score
+                    ))
+                }
+            }
+            mergedWithAffixes = expanded
+        } else {
+            mergedWithAffixes = merged.map { candidate in
                 Candidate(
-                    surface: candidate.surface + effectiveTail,
+                    surface: digitPrefix + candidate.surface + effectiveTail,
                     reading: candidate.reading,
                     source: candidate.source,
                     score: candidate.score
                 )
             }
+        }
 
         return CompositionState(
             rawBuffer: displayBuffer,
             selectedCandidateIndex: 0,
-            candidates: mergedWithTail,
+            candidates: mergedWithAffixes,
             committedContext: context
         )
     }
@@ -858,6 +921,33 @@ public final class BurmeseEngine: @unchecked Sendable {
             }
         }
         return String(String.UnicodeScalarView(result))
+    }
+
+    /// Returns true when the string contains at least one ASCII digit.
+    private static func containsDigit(_ s: String) -> Bool {
+        s.unicodeScalars.contains { $0.value >= 0x30 && $0.value <= 0x39 }
+    }
+
+    /// Replace ASCII digits (0-9) with Myanmar digits (U+1040–U+1049),
+    /// leaving all other characters unchanged.
+    private static func arabicToBurmeseDigits(_ s: String) -> String {
+        String(s.unicodeScalars.map { scalar in
+            if scalar.value >= 0x30 && scalar.value <= 0x39 {
+                return Character(Unicode.Scalar(0x1040 + (scalar.value - 0x30))!)
+            }
+            return Character(scalar)
+        })
+    }
+
+    /// Split a leading run of ASCII digits from the rest of the buffer.
+    private static func splitLeadingDigits(_ buffer: String) -> (digits: String, remainder: String) {
+        if let firstNonDigit = buffer.firstIndex(where: {
+            guard let scalar = $0.unicodeScalars.first, $0.unicodeScalars.count == 1 else { return true }
+            return scalar.value < 0x30 || scalar.value > 0x39
+        }) {
+            return (String(buffer[..<firstNonDigit]), String(buffer[firstNonDigit...]))
+        }
+        return (buffer, "")
     }
 
     private static func isAcceptableParse(_ parse: SyllableParse) -> Bool {
