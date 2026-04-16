@@ -16,3 +16,5 @@ venv
 
 # Large data files (compiled into SQLite at build time)
 *.tsv
+
+tasks

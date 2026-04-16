@@ -13,7 +13,8 @@ let package = Package(
     targets: [
         .target(
             name: "BurmeseIMECore",
-            exclude: ["LanguageModel/FORMAT.md"]
+            exclude: ["LanguageModel/FORMAT.md"],
+            resources: [.process("Data/NumberMeasureWords.tsv")]
         ),
         .executableTarget(
             name: "LexiconBuilder",

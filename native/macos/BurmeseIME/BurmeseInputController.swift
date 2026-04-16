@@ -153,6 +153,28 @@ class BurmeseInputController: IMKInputController {
         }()
         guard !chars.isEmpty else { return false }
 
+        // Punctuation auto-mapping, empty-buffer case. When enabled and the
+        // previously committed token is Myanmar, insert the Myanmar glyph
+        // directly without starting a fresh composition. If there's an active
+        // buffer, we fall through — the engine maps the trailing punctuation
+        // inside each candidate surface so the user can keep editing before
+        // committing. ASCII contexts (URLs, abbreviations like `e.g.`) also
+        // fall through so nothing is rewritten.
+        if chars.count == 1,
+           let only = chars.first,
+           Self.sharedSettings.burmesePunctuationEnabled,
+           let mappedPunct = PunctuationMapper.mapped(only),
+           !state.isActive,
+           PunctuationMapper.isMyanmar(state.committedContext.last ?? "") {
+            (sender as? IMKTextInput)?.insertText(
+                mappedPunct,
+                replacementRange: NSRange(location: NSNotFound, length: 0)
+            )
+            let newContext = Array((state.committedContext + [mappedPunct]).suffix(3))
+            state = CompositionState(committedContext: newContext)
+            return true
+        }
+
         // "Typeable" characters — ASCII letters, digits, and common punctuation —
         // extend the composition buffer rather than forcing a commit. This mirrors
         // the behaviour of system IMEs like Pinyin and Kotoeri: the user can

@@ -142,12 +142,10 @@ private struct PreferencesView: View {
         Section("Text output") {
             Toggle("Burmese punctuation auto-mapping",
                    isOn: vm.burmesePunctuationEnabledBinding)
-                .disabled(true)
-                .help("Available once punctuation mapping ships.")
+                .help("Replaces trailing ASCII . , ! ? ; with Myanmar ။ ၊ after Burmese text.")
             Toggle("Suggest measure words after numbers",
                    isOn: vm.numberMeasureWordsEnabledBinding)
-                .disabled(true)
-                .help("Available once measure-word suggestions ship.")
+                .help("Adds candidates like ၂၀၂၄ ခုနှစ် or ၁၀၀၀ ကျပ် beside plain digit output.")
             Text("Committed text is ZWSP-free.")
                 .font(.caption)
                 .foregroundStyle(.secondary)

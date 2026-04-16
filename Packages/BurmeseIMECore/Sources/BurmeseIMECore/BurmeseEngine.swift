@@ -136,6 +136,9 @@ public final class BurmeseEngine: @unchecked Sendable {
     private var anchorCommitThreshold: Int {
         settings?.anchorCommitThreshold ?? Self.anchorCommitThresholdDefault
     }
+    private var burmesePunctuationEnabled: Bool {
+        settings?.burmesePunctuationEnabled ?? false
+    }
 
     public init(
         candidateStore: any CandidateStore = EmptyCandidateStore(),
@@ -220,6 +223,39 @@ public final class BurmeseEngine: @unchecked Sendable {
             return CompositionState(committedContext: context)
         }
         let displayBuffer = buffer.lowercased()
+        // If punct mapping is on and the buffer contains a mapped-punct
+        // char that is NOT just at the very tail, everything up to and
+        // including the *last* such punct becomes a frozen rendering
+        // (each composable run resolved via single-best parse, punct
+        // chars replaced with their Myanmar equivalents). We then recurse
+        // on the active suffix so the current word still gets N-best
+        // candidates, and prepend the frozen prefix to every surface.
+        if burmesePunctuationEnabled,
+           let split = splitAtLastEmbeddedMappedPunct(displayBuffer) {
+            var state = update(buffer: split.activeBuffer, context: context)
+            state.rawBuffer = displayBuffer
+            if state.candidates.isEmpty {
+                // Active portion produced nothing parseable; surface the
+                // frozen prefix + raw active so the user still sees the
+                // settled portion and doesn't lose their composition.
+                state.candidates = [Candidate(
+                    surface: split.renderedPrefix + split.activeBuffer,
+                    reading: displayBuffer,
+                    source: .grammar,
+                    score: 0
+                )]
+            } else {
+                state.candidates = state.candidates.map { cand in
+                    Candidate(
+                        surface: split.renderedPrefix + cand.surface,
+                        reading: cand.reading,
+                        source: cand.source,
+                        score: cand.score
+                    )
+                }
+            }
+            return state
+        }
         // Strip leading ASCII digits — they convert directly to Myanmar
         // digits and are prepended to candidate surfaces after the
         // composable portion is parsed.
@@ -229,24 +265,61 @@ public final class BurmeseEngine: @unchecked Sendable {
         // (punctuation, whitespace, etc.) is held aside and emitted verbatim
         // on commit — this lets the user freely mix Burmese-convertible text
         // with literal content without the IME swallowing either.
-        let (composable, literalTail) = Self.splitComposablePrefix(postDigitBuffer)
+        let (rawComposable, rawLiteralTail) = Self.splitComposablePrefix(postDigitBuffer)
+        // `.` is in `Romanization.composingCharacters` for abbreviation
+        // handling, so trailing punctuation lands in the composable portion
+        // rather than the literal tail. When punctuation mapping is on,
+        // peel those trailing mapped chars off so the parser doesn't try
+        // to consume them — they rejoin the tail below and get substituted
+        // with their Myanmar equivalent when the surface is assembled.
+        let composable: String
+        let literalTail: String
+        if burmesePunctuationEnabled {
+            let (kept, peeled) = Self.stripTrailingMappablePunctuation(rawComposable)
+            composable = kept
+            literalTail = peeled + rawLiteralTail
+        } else {
+            composable = rawComposable
+            literalTail = rawLiteralTail
+        }
         let initialNormalized = Romanization.normalize(composable)
         guard !initialNormalized.isEmpty else {
             // No composable text: if digits or literal text are present,
             // offer Burmese and Arabic digit candidates directly.
-            let fullLiteral = digitPrefix + literalTail
+            let rawFullLiteral = digitPrefix + literalTail
+            let mappedTail = burmesePunctuationEnabled
+                ? Self.mapPunctuation(literalTail)
+                : literalTail
+            let fullLiteral = digitPrefix + mappedTail
             if Self.containsDigit(fullLiteral) {
                 let burmese = Self.arabicToBurmeseDigits(fullLiteral)
                 var candidates = [Candidate(
                     surface: burmese,
-                    reading: fullLiteral,
+                    reading: rawFullLiteral,
                     source: .grammar,
                     score: 0
                 )]
-                if burmese != fullLiteral {
+                // Measure-word expansions apply only when the buffer is pure
+                // ASCII digits (no tail content at all). Cap to 2 suffixes per
+                // buffer so the plain-digit candidate stays the default pick.
+                if settings?.numberMeasureWordsEnabled == true,
+                   literalTail.isEmpty,
+                   !digitPrefix.isEmpty {
+                    for entry in NumberMeasureWords.shared.candidates(
+                        forDigits: digitPrefix, limit: 2
+                    ) {
+                        candidates.append(Candidate(
+                            surface: "\(burmese) \(entry.measureWord)",
+                            reading: rawFullLiteral,
+                            source: .grammar,
+                            score: 0
+                        ))
+                    }
+                }
+                if burmese != rawFullLiteral {
                     candidates.append(Candidate(
-                        surface: fullLiteral,
-                        reading: fullLiteral,
+                        surface: rawFullLiteral,
+                        reading: rawFullLiteral,
                         source: .grammar,
                         score: 0
                     ))
@@ -294,7 +367,15 @@ public final class BurmeseEngine: @unchecked Sendable {
             )
         }
 
-        let effectiveTail = droppedTail + literalTail
+        let rawEffectiveTail = droppedTail + literalTail
+        // Punctuation auto-mapping substitutes Myanmar ။/၊ inside the tail
+        // so the trailing char appears as part of each candidate surface
+        // instead of forcing an early commit. Mapping touches only the
+        // exact five ASCII punctuation chars — letters the parser dropped
+        // into `droppedTail` pass through unchanged.
+        let effectiveTail = burmesePunctuationEnabled
+            ? Self.mapPunctuation(rawEffectiveTail)
+            : rawEffectiveTail
 
         // Prefix-stability anchor: when the new buffer extends a
         // previously-rendered one *and* that anchor is mature enough
@@ -947,6 +1028,114 @@ public final class BurmeseEngine: @unchecked Sendable {
     /// Returns true when the string contains at least one ASCII digit.
     private static func containsDigit(_ s: String) -> Bool {
         s.unicodeScalars.contains { $0.value >= 0x30 && $0.value <= 0x39 }
+    }
+
+    /// Replace mapped ASCII punctuation (`.`, `,`, `!`, `?`, `;`) with their
+    /// Myanmar equivalents. Non-mapped characters pass through untouched.
+    private static func mapPunctuation(_ s: String) -> String {
+        guard !s.isEmpty else { return s }
+        var out = ""
+        out.reserveCapacity(s.count)
+        for c in s {
+            if let replacement = PunctuationMapper.mapped(c) {
+                out += replacement
+            } else {
+                out.append(c)
+            }
+        }
+        return out
+    }
+
+    private struct EmbeddedPunctSplit {
+        let renderedPrefix: String
+        let activeBuffer: String
+    }
+
+    /// Locate the last mapped-punct character that is followed by more
+    /// content, and split `buffer` there. Purely trailing mapped-punct
+    /// returns `nil` — that case is already covered by the main
+    /// pipeline's `stripTrailingMappablePunctuation` path.
+    private func splitAtLastEmbeddedMappedPunct(_ buffer: String) -> EmbeddedPunctSplit? {
+        var boundary: String.Index? = nil
+        for idx in buffer.indices.reversed() {
+            guard PunctuationMapper.isMappable(buffer[idx]) else { continue }
+            let after = buffer.index(after: idx)
+            if after != buffer.endIndex {
+                boundary = after
+                break
+            }
+        }
+        guard let boundary else { return nil }
+        return EmbeddedPunctSplit(
+            renderedPrefix: renderFrozenPunctSegments(String(buffer[..<boundary])),
+            activeBuffer: String(buffer[boundary...])
+        )
+    }
+
+    /// Render a buffer slice as Myanmar, splitting on mapped-punct chars
+    /// and running single-best parsing on each composable run between
+    /// them. Used only for the frozen prefix — lexicon + N-best are
+    /// reserved for the active tail.
+    private func renderFrozenPunctSegments(_ s: String) -> String {
+        var out = ""
+        var current = ""
+        for c in s {
+            if let mapped = PunctuationMapper.mapped(c) {
+                if !current.isEmpty {
+                    out += renderFrozenSegment(current)
+                    current = ""
+                }
+                out += mapped
+            } else {
+                current.append(c)
+            }
+        }
+        if !current.isEmpty {
+            out += renderFrozenSegment(current)
+        }
+        return out
+    }
+
+    /// Single-best render of a punct-free segment. Digits convert to
+    /// Myanmar digits up front; the remaining composable run is parsed
+    /// with right-shrink to skip chars the parser can't consume.
+    /// Anything beyond the composable run passes through as-is (the
+    /// caller has already stripped mapped-punct from the input).
+    private func renderFrozenSegment(_ segment: String) -> String {
+        let (digits, rest) = Self.splitLeadingDigits(segment)
+        let digitPart = Self.arabicToBurmeseDigits(digits)
+        let (composable, literal) = Self.splitComposablePrefix(rest)
+        let normalized = Romanization.normalize(composable)
+        guard !normalized.isEmpty else {
+            return digitPart + composable + literal
+        }
+        var probe = normalized
+        var dropped = ""
+        while !probe.isEmpty {
+            let parses = parser.parseCandidates(probe, maxResults: 1)
+            if parses.contains(where: { Self.isAcceptableParse($0) }) { break }
+            dropped = String(probe.removeLast()) + dropped
+        }
+        guard !probe.isEmpty else {
+            return digitPart + composable + literal
+        }
+        let output = parser.parseCandidates(probe, maxResults: 1).first?.output ?? probe
+        return digitPart + output + dropped + literal
+    }
+
+    /// Strip trailing mapped-punctuation characters (`.`, `,`, `!`, `?`, `;`)
+    /// from the end of `s`. Returns the kept prefix and the peeled suffix
+    /// in original order. Used to rescue trailing `.` from the composable
+    /// buffer (it's in `Romanization.composingCharacters`) so it can be
+    /// routed through the literal-tail mapping path.
+    private static func stripTrailingMappablePunctuation(_ s: String) -> (kept: String, stripped: String) {
+        var kept = s
+        var stripped = ""
+        while let last = kept.last, PunctuationMapper.isMappable(last) {
+            stripped = String(last) + stripped
+            kept.removeLast()
+        }
+        return (kept, stripped)
     }
 
     /// Replace ASCII digits (0-9) with Myanmar digits (U+1040–U+1049),

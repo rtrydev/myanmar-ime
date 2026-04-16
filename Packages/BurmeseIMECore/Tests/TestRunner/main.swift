@@ -1559,6 +1559,245 @@ runTest("settings_clusterAliasesToggleRequiresEngineRebuild") {
 }
 
 // ===================================================================
+// PUNCTUATION MAPPER
+// ===================================================================
+
+print("=== Punctuation Mapper Tests ===")
+
+runTest("punctuation_sentenceTerminators_mapToU104B") {
+    assertEqual(PunctuationMapper.mapped("."), "\u{104B}", "punct_dot_mapsTo_104B")
+    assertEqual(PunctuationMapper.mapped("!"), "\u{104B}", "punct_bang_mapsTo_104B")
+    assertEqual(PunctuationMapper.mapped("?"), "\u{104B}", "punct_question_mapsTo_104B")
+}
+
+runTest("punctuation_phraseSeparators_mapToU104A") {
+    assertEqual(PunctuationMapper.mapped(","), "\u{104A}", "punct_comma_mapsTo_104A")
+    assertEqual(PunctuationMapper.mapped(";"), "\u{104A}", "punct_semicolon_mapsTo_104A")
+}
+
+runTest("punctuation_unmappedCharsReturnNil") {
+    assertTrue(PunctuationMapper.mapped(":") == nil, "punct_colon_unmapped")
+    assertTrue(PunctuationMapper.mapped("a") == nil, "punct_letter_unmapped")
+    assertTrue(PunctuationMapper.mapped("1") == nil, "punct_digit_unmapped")
+}
+
+runTest("punctuation_isMyanmar_detection") {
+    assertTrue(PunctuationMapper.isMyanmar("ဟယ်လို"), "punct_isMyanmar_burmese")
+    assertTrue(PunctuationMapper.isMyanmar("\u{1040}"), "punct_isMyanmar_digit")
+    assertFalse(PunctuationMapper.isMyanmar(""), "punct_isMyanmar_empty")
+    assertFalse(PunctuationMapper.isMyanmar("hello"), "punct_isMyanmar_ascii")
+    assertFalse(PunctuationMapper.isMyanmar("e.g."), "punct_isMyanmar_abbreviation")
+}
+
+// ===================================================================
+// NUMBER MEASURE WORDS
+// ===================================================================
+
+print("=== Number Measure Words Tests ===")
+
+runTest("measureWords_patternMatching") {
+    assertTrue(NumberMeasureWords.Pattern.year4digit.matches("2024"), "pattern_year_2024")
+    assertFalse(NumberMeasureWords.Pattern.year4digit.matches("24"),   "pattern_year_rejects2digit")
+    assertTrue(NumberMeasureWords.Pattern.currencyGe100.matches("100"), "pattern_currency_100")
+    assertFalse(NumberMeasureWords.Pattern.currencyGe100.matches("99"), "pattern_currency_rejects99")
+    assertTrue(NumberMeasureWords.Pattern.any.matches("0"), "pattern_any_zero")
+}
+
+runTest("measureWords_yearProducesYearSuffix") {
+    let picks = NumberMeasureWords.shared
+        .candidates(forDigits: "2024", limit: 5)
+        .map(\.measureWord)
+    assertTrue(picks.contains("ခုနှစ်"), "measureWords_2024_hasYearSuffix", detail: "\(picks)")
+}
+
+runTest("measureWords_smallNumberExcludesYearAndCurrency") {
+    let picks = NumberMeasureWords.shared
+        .candidates(forDigits: "5", limit: 5)
+        .map(\.measureWord)
+    assertFalse(picks.contains("ခုနှစ်"), "measureWords_5_noYearSuffix")
+    assertFalse(picks.contains("ကျပ်"),   "measureWords_5_noCurrencySuffix")
+    assertTrue(picks.contains("ခု"),       "measureWords_5_hasAnyPattern", detail: "\(picks)")
+}
+
+runTest("measureWords_largeNumberIncludesCurrency") {
+    let picks = NumberMeasureWords.shared
+        .candidates(forDigits: "1000", limit: 5)
+        .map(\.measureWord)
+    assertTrue(picks.contains("ကျပ်"), "measureWords_1000_hasCurrencySuffix", detail: "\(picks)")
+}
+
+runTest("measureWords_honorsLimit") {
+    let picks = NumberMeasureWords.shared.candidates(forDigits: "2024", limit: 2)
+    assertTrue(picks.count <= 2, "measureWords_limit_capsAtTwo", detail: "count=\(picks.count)")
+}
+
+runTest("measureWords_rejectsNonDigitInput") {
+    assertTrue(NumberMeasureWords.shared.candidates(forDigits: "",     limit: 2).isEmpty, "measureWords_empty")
+    assertTrue(NumberMeasureWords.shared.candidates(forDigits: "12a",  limit: 2).isEmpty, "measureWords_mixed")
+}
+
+runTest("measureWords_missingResourceGracefulFallback") {
+    let loader = NumberMeasureWords(
+        bundle: .main,
+        resourceName: "NumberMeasureWords-does-not-exist",
+        resourceExtension: "tsv"
+    )
+    assertTrue(loader.candidates(forDigits: "2024", limit: 5).isEmpty,
+               "measureWords_missingResource_empty")
+}
+
+// ===================================================================
+// ENGINE MEASURE-WORD EXPANSION
+// ===================================================================
+
+print("=== Engine Measure-Word Expansion Tests ===")
+
+runTest("engine_measureWords_yearWhenEnabled") {
+    let (settings, suite) = makeFreshSettings()
+    defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+    settings.numberMeasureWordsEnabled = true
+    let eng = BurmeseEngine(settings: settings)
+    let state = eng.update(buffer: "2024", context: [])
+    let surfaces = state.candidates.map(\.surface)
+    assertTrue(surfaces.contains("၂၀၂၄"),
+               "engine_measureWords_2024_baselineBurmese",
+               detail: "\(surfaces)")
+    assertTrue(surfaces.contains("၂၀၂၄ ခုနှစ်"),
+               "engine_measureWords_2024_yearExpansion",
+               detail: "\(surfaces)")
+}
+
+runTest("engine_measureWords_disabledStaysPassthrough") {
+    let (settings, suite) = makeFreshSettings()
+    defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+    settings.numberMeasureWordsEnabled = false
+    let eng = BurmeseEngine(settings: settings)
+    let state = eng.update(buffer: "2024", context: [])
+    let surfaces = Set(state.candidates.map(\.surface))
+    assertEqual(surfaces, Set(["၂၀၂၄", "2024"]), "engine_measureWords_disabled_baselineOnly")
+}
+
+runTest("engine_measureWords_currencyForLargeNumber") {
+    let (settings, suite) = makeFreshSettings()
+    defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+    settings.numberMeasureWordsEnabled = true
+    let eng = BurmeseEngine(settings: settings)
+    let state = eng.update(buffer: "1000", context: [])
+    let surfaces = state.candidates.map(\.surface)
+    assertTrue(surfaces.contains("၁၀၀၀ ကျပ်"),
+               "engine_measureWords_1000_currencyExpansion",
+               detail: "\(surfaces)")
+}
+
+// ===================================================================
+// ENGINE PUNCTUATION TAIL MAPPING
+// ===================================================================
+
+print("=== Engine Punctuation Tail Tests ===")
+
+runTest("engine_punct_trailingDotMappedInCandidate") {
+    let (settings, suite) = makeFreshSettings()
+    defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+    settings.burmesePunctuationEnabled = true
+    let eng = BurmeseEngine(settings: settings)
+    let state = eng.update(buffer: "thar.", context: [])
+    let surfaces = state.candidates.map(\.surface)
+    assertTrue(surfaces.contains("သာ\u{104B}"),
+               "engine_punct_dot_mappedSurface",
+               detail: "\(surfaces)")
+    assertFalse(surfaces.contains(where: { $0.hasSuffix(".") }),
+                "engine_punct_dot_noRawDotLeak",
+                detail: "\(surfaces)")
+}
+
+runTest("engine_punct_trailingCommaMapsToU104A") {
+    let (settings, suite) = makeFreshSettings()
+    defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+    settings.burmesePunctuationEnabled = true
+    let eng = BurmeseEngine(settings: settings)
+    let state = eng.update(buffer: "thar,", context: [])
+    let surfaces = state.candidates.map(\.surface)
+    assertTrue(surfaces.contains("သာ\u{104A}"),
+               "engine_punct_comma_mappedSurface",
+               detail: "\(surfaces)")
+}
+
+runTest("engine_punct_disabledLeavesDotLiteral") {
+    let (settings, suite) = makeFreshSettings()
+    defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+    settings.burmesePunctuationEnabled = false
+    let eng = BurmeseEngine(settings: settings)
+    let state = eng.update(buffer: "thar.", context: [])
+    let surfaces = state.candidates.map(\.surface)
+    assertTrue(surfaces.contains(where: { $0.hasSuffix(".") }),
+               "engine_punct_disabled_literalDotPresent",
+               detail: "\(surfaces)")
+    assertFalse(surfaces.contains(where: { $0.hasSuffix("\u{104B}") }),
+                "engine_punct_disabled_noMyanmarPunct",
+                detail: "\(surfaces)")
+}
+
+runTest("engine_punct_rawBufferUnchanged") {
+    let (settings, suite) = makeFreshSettings()
+    defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+    settings.burmesePunctuationEnabled = true
+    let eng = BurmeseEngine(settings: settings)
+    let state = eng.update(buffer: "thar.", context: [])
+    assertEqual(state.rawBuffer, "thar.", "engine_punct_rawBufferPreserved")
+}
+
+runTest("engine_punct_digitsTrailingDotMapped") {
+    let (settings, suite) = makeFreshSettings()
+    defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+    settings.burmesePunctuationEnabled = true
+    let eng = BurmeseEngine(settings: settings)
+    let state = eng.update(buffer: "123.", context: [])
+    let surfaces = state.candidates.map(\.surface)
+    assertTrue(surfaces.contains("၁၂၃\u{104B}"),
+               "engine_punct_digitsDot_mappedSurface",
+               detail: "\(surfaces)")
+}
+
+runTest("engine_punct_composableAfterPunct_getsParsed") {
+    let (settings, suite) = makeFreshSettings()
+    defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+    settings.burmesePunctuationEnabled = true
+    let eng = BurmeseEngine(settings: settings)
+    let state = eng.update(buffer: "thar,myat", context: [])
+    let surfaces = state.candidates.map(\.surface)
+    assertTrue(surfaces.contains("သာ\u{104A}မြတ်"),
+               "engine_punct_composableAfterComma_bothParsed",
+               detail: "\(surfaces)")
+    assertFalse(surfaces.contains(where: { $0.contains("myat") }),
+                "engine_punct_composableAfterComma_noRawRomanLeak",
+                detail: "\(surfaces)")
+}
+
+runTest("engine_punct_composableAfterDot_getsParsed") {
+    let (settings, suite) = makeFreshSettings()
+    defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+    settings.burmesePunctuationEnabled = true
+    let eng = BurmeseEngine(settings: settings)
+    let state = eng.update(buffer: "thar.myat", context: [])
+    let surfaces = state.candidates.map(\.surface)
+    assertTrue(surfaces.contains("သာ\u{104B}မြတ်"),
+               "engine_punct_composableAfterDot_bothParsed",
+               detail: "\(surfaces)")
+}
+
+runTest("engine_punct_composableBetweenTwoPuncts_getsParsed") {
+    let (settings, suite) = makeFreshSettings()
+    defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+    settings.burmesePunctuationEnabled = true
+    let eng = BurmeseEngine(settings: settings)
+    let state = eng.update(buffer: "thar,myat.", context: [])
+    let surfaces = state.candidates.map(\.surface)
+    assertTrue(surfaces.contains("သာ\u{104A}မြတ်\u{104B}"),
+               "engine_punct_threeSegments_allRendered",
+               detail: "\(surfaces)")
+}
+
+// ===================================================================
 // RESULTS
 // ===================================================================
 
