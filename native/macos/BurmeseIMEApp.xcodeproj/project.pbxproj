@@ -36,6 +36,8 @@
 		AA44444444444444444444D1 /* BurmeseIMEPreferences.swift in Sources (prefs) */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333D1 /* BurmeseIMEPreferences.swift */; };
 		AA44444444444444444444AB /* ContentView.swift in Sources (prefs) */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333AD /* ContentView.swift */; };
 		AA44444444444444444444C0 /* IMESettingsViewModel.swift in Sources (prefs) */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333C0 /* IMESettingsViewModel.swift */; };
+		AA44444444444444444444C1 /* SyntaxReferenceView.swift in Sources (prefs) */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333C1 /* SyntaxReferenceView.swift */; };
+		AA44444444444444444444C2 /* MyanmarToInputView.swift in Sources (prefs) */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333C2 /* MyanmarToInputView.swift */; };
 		AA44444444444444444444AE /* BurmeseIMECore in Frameworks (prefs) */ = {isa = PBXBuildFile; productRef = AA77777777777777777777AC /* BurmeseIMECore */; };
 		AA44444444444444444444B3 /* BurmeseIMEIcon.tiff in Resources (prefs) */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333B7 /* BurmeseIMEIcon.tiff */; };
 		AA44444444444444444444B6 /* BurmeseIMEIcon.icns in Resources (prefs) */ = {isa = PBXBuildFile; fileRef = AA33333333333333333333B6 /* BurmeseIMEIcon.icns */; };
@@ -75,6 +77,8 @@
 		AA33333333333333333333D1 /* BurmeseIMEPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BurmeseIMEPreferences.swift; sourceTree = "<group>"; };
 		AA33333333333333333333AD /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		AA33333333333333333333C0 /* IMESettingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IMESettingsViewModel.swift; sourceTree = "<group>"; };
+		AA33333333333333333333C1 /* SyntaxReferenceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyntaxReferenceView.swift; sourceTree = "<group>"; };
+		AA33333333333333333333C2 /* MyanmarToInputView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyanmarToInputView.swift; sourceTree = "<group>"; };
 		AA33333333333333333333B0 /* BurmeseIMEPreferences-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "BurmeseIMEPreferences-Info.plist"; sourceTree = "<group>"; };
 		AA33333333333333333333B2 /* BurmeseIMEPreferences.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BurmeseIMEPreferences.entitlements; sourceTree = "<group>"; };
 		AA33333333333333333333B7 /* BurmeseIMEIcon.tiff (prefs) */ = {isa = PBXFileReference; lastKnownFileType = image.tiff; path = BurmeseIMEIcon.tiff; sourceTree = "<group>"; };
@@ -144,6 +148,8 @@
 				AA33333333333333333333D1 /* BurmeseIMEPreferences.swift */,
 				AA33333333333333333333AD /* ContentView.swift */,
 				AA33333333333333333333C0 /* IMESettingsViewModel.swift */,
+				AA33333333333333333333C1 /* SyntaxReferenceView.swift */,
+				AA33333333333333333333C2 /* MyanmarToInputView.swift */,
 				AA33333333333333333333B0 /* BurmeseIMEPreferences-Info.plist */,
 				AA33333333333333333333B2 /* BurmeseIMEPreferences.entitlements */,
 				AA33333333333333333333B6 /* BurmeseIMEIcon.icns (prefs) */,
@@ -299,6 +305,8 @@
 				AA44444444444444444444D1 /* BurmeseIMEPreferences.swift in Sources (prefs) */,
 				AA44444444444444444444AB /* ContentView.swift in Sources (prefs) */,
 				AA44444444444444444444C0 /* IMESettingsViewModel.swift in Sources (prefs) */,
+				AA44444444444444444444C1 /* SyntaxReferenceView.swift in Sources (prefs) */,
+				AA44444444444444444444C2 /* MyanmarToInputView.swift in Sources (prefs) */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

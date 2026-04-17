@@ -1163,6 +1163,20 @@ public final class BurmeseEngine: @unchecked Sendable {
         let activeBuffer: String
     }
 
+    /// Vowel suffixes that end in `.` (e.g. `u.`, `i.`, `an.`). When the
+    /// buffer already has one of these at a candidate split position, the
+    /// `.` is acting as a creaky-tone / vowel modifier in the romanization
+    /// and must not be folded into the Myanmar full stop.
+    private static let vowelSuffixesWithTrailingDot: [String] = {
+        Romanization.vowels.compactMap { entry in
+            entry.roman.hasSuffix(".") ? entry.roman : nil
+        }
+    }()
+
+    private static func dotActsAsVowelModifier(prefixEndingAtDot prefix: Substring) -> Bool {
+        vowelSuffixesWithTrailingDot.contains(where: { prefix.hasSuffix($0) })
+    }
+
     /// Locate the last mapped-punct character that is followed by more
     /// content, and split `buffer` there. Purely trailing mapped-punct
     /// returns `nil` — that case is already covered by the main
@@ -1173,10 +1187,22 @@ public final class BurmeseEngine: @unchecked Sendable {
             guard PunctuationMapper.isMappable(buffer[idx]) else { continue }
             let after = buffer.index(after: idx)
             guard after != buffer.endIndex else { continue }
-            if buffer[after...].contains(where: { !PunctuationMapper.isMappable($0) }) {
-                boundary = after
-                break
+            guard buffer[after...].contains(where: { !PunctuationMapper.isMappable($0) }) else {
+                continue
             }
+            // `.` is overloaded: it terminates a sentence when it follows
+            // arbitrary content (`thar.myat`), but it is also the creaky-
+            // tone marker on vowels like `u.`, `i.`, `an.`, `aung.`. If
+            // the current position closes one of those vowel suffixes, the
+            // `.` is acting as a modifier and must not split the buffer —
+            // otherwise `rarthiu.tu.` would freeze `rarthiu.` as a punct
+            // segment and render ရာသီဦ။တု instead of ရာသီဦးတု။.
+            if buffer[idx] == ".",
+               Self.dotActsAsVowelModifier(prefixEndingAtDot: buffer[...idx]) {
+                continue
+            }
+            boundary = after
+            break
         }
         guard let boundary else { return nil }
         return EmbeddedPunctSplit(
@@ -1194,6 +1220,14 @@ public final class BurmeseEngine: @unchecked Sendable {
         var current = ""
         for c in s {
             if let mapped = PunctuationMapper.mapped(c) {
+                // When `.` closes a creaky-tone vowel suffix (`u.`, `i.`,
+                // `an.`, …) it stays attached to the current composable
+                // run instead of flushing as a Myanmar full stop.
+                if c == ".",
+                   Self.dotActsAsVowelModifier(prefixEndingAtDot: Substring(current + ".")) {
+                    current.append(".")
+                    continue
+                }
                 if !current.isEmpty {
                     out += renderFrozenSegment(current)
                     current = ""

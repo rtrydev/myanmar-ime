@@ -87,6 +87,26 @@ double-click). Postinstall relocates the IME to
 `~/Library/Input Methods/` and launches the Preferences app; enable the
 input source in System Settings → Keyboard → Text Input.
 
+#### Building from the CLI with `xcodebuild`
+
+`xcode-select -p` on this machine points at
+`/Library/Developer/CommandLineTools`, so a bare `xcodebuild` invocation
+fails with *tool 'xcodebuild' requires Xcode*. Override the developer
+dir inline instead of running `sudo xcode-select -s`:
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+    xcodebuild -project native/macos/BurmeseIMEApp.xcodeproj \
+               -scheme BurmeseIMEPreferences \
+               -configuration Debug build
+```
+
+Swap `-scheme` for `BurmeseIME` or `BurmeseIMEInstaller` as needed.
+Output is noisy — pipe through `tail -5` to confirm
+`** BUILD SUCCEEDED **`, or `grep -E "error:|warning:"` to surface
+issues. Products land in
+`~/Library/Developer/Xcode/DerivedData/BurmeseIMEApp-*/Build/Products/Debug/`.
+
 Neither target is sandboxed. Earlier iterations sandboxed both and shared
 state through an App Group, but free Apple Development signing can't
 register App Groups centrally so macOS re-prompted "would like to access

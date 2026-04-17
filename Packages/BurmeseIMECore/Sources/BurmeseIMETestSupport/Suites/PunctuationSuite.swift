@@ -205,5 +205,61 @@ public enum PunctuationSuite {
             ctx.assertTrue(surfaces.contains("\u{101E}\u{102E}\u{1025}"),
                            "thiuDotStandalone", detail: "surfaces=\(surfaces)")
         },
+
+        TestCase("engine_embeddedDot_asVowelModifier_notSplitAsPunctuation") { ctx in
+            // `rarthiu.tu.` should parse as rar + thi + u. + tu. with a
+            // trailing punctuation `.` → ။. The first `.` is part of the
+            // `u.` creaky-tone vowel modifier and must not be split out
+            // as a Myanmar full stop, which would freeze `rarthiu.` as
+            // `ရာသီ<something>။` and leave the user with a broken render.
+            let (settings, suiteName) = makeSettings()
+            defer { cleanup(suiteName) }
+            settings.burmesePunctuationEnabled = true
+            let engine = BurmeseEngine(settings: settings)
+            let state = engine.update(buffer: "rarthiu.tu.", context: [])
+            let surfaces = state.candidates.map(\.surface)
+            // No candidate should contain a Myanmar full stop followed by
+            // a consonant — that would mean the embedded `.` was misread
+            // as punctuation rather than a vowel modifier.
+            ctx.assertFalse(
+                surfaces.contains(where: { surface in
+                    guard let punctIdx = surface.firstIndex(of: "\u{104B}") else { return false }
+                    let after = surface.index(after: punctIdx)
+                    return after != surface.endIndex
+                }),
+                "noEmbeddedFullStop",
+                detail: "surfaces=\(surfaces)"
+            )
+        },
+
+        TestCase("engine_embeddedDot_mixedRealAndModifier_splitsOnlyRealPunct") { ctx in
+            // `thar.rarthiu.tu.` — first `.` follows `r`, which is not a
+            // vowel-modifier position (no `r.` vowel), so it is punctuation;
+            // second `.` follows `u`, closing `u.` (creaky), so it is a
+            // modifier; trailing `.` is absorbed as the creaky-tone of
+            // `tu.` (matching `engine_trailingDot_creakyTone_whenEnabled`).
+            // Expected surface prefix: သာ။ (thar + full stop). The only
+            // ။ in the output should be that single terminator.
+            let (settings, suiteName) = makeSettings()
+            defer { cleanup(suiteName) }
+            settings.burmesePunctuationEnabled = true
+            let engine = BurmeseEngine(settings: settings)
+            let state = engine.update(buffer: "thar.rarthiu.tu.", context: [])
+            let surfaces = state.candidates.map(\.surface)
+            ctx.assertTrue(
+                surfaces.contains(where: { $0.hasPrefix("\u{101E}\u{102C}\u{104B}") }),
+                "realPunctMapped",
+                detail: "surfaces=\(surfaces)"
+            )
+            // The second `.` must not become ။ — no surface should have
+            // more than one ။ glyph (just the single real terminator).
+            ctx.assertFalse(
+                surfaces.contains(where: {
+                    $0.filter({ $0 == "\u{104B}" }).count > 1
+                }),
+                "noDoubleFullStop",
+                detail: "surfaces=\(surfaces)"
+            )
+        },
     ])
 }

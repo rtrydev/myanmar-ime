@@ -6,18 +6,54 @@ import BurmeseIMECore
 /// ~/Library/Input Methods/BurmeseIME.app. This window explains how to
 /// enable it, exposes preferences, and surfaces diagnostics.
 struct ContentView: View {
+    @StateObject private var vm = IMESettingsViewModel()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HeaderView()
+                .padding(.horizontal, 24)
+                .padding(.top, 24)
+                .padding(.bottom, 16)
+            TabView {
+                SetupTab()
+                    .tabItem { Label("Setup", systemImage: "arrow.down.circle") }
+                PreferencesTab(vm: vm)
+                    .tabItem { Label("Preferences", systemImage: "gearshape") }
+                SyntaxReferenceView(vm: vm)
+                    .tabItem { Label("Syntax", systemImage: "character.book.closed") }
+                MyanmarToInputView()
+                    .tabItem { Label("Convert", systemImage: "arrow.left.arrow.right") }
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 16)
+        }
+        .frame(minWidth: 620, minHeight: 680)
+    }
+}
+
+private struct SetupTab: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                HeaderView()
-                Divider()
                 InstallationGuideView()
-                Divider()
-                PreferencesView()
             }
             .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(minWidth: 520, minHeight: 520)
+    }
+}
+
+private struct PreferencesTab: View {
+    @ObservedObject var vm: IMESettingsViewModel
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                PreferencesView(vm: vm)
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 }
 
@@ -82,7 +118,7 @@ private struct InstallationGuideView: View {
 }
 
 private struct PreferencesView: View {
-    @StateObject private var vm = IMESettingsViewModel()
+    @ObservedObject var vm: IMESettingsViewModel
     @State private var showingResetConfirm = false
 
     var body: some View {
