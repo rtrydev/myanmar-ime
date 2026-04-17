@@ -4,7 +4,8 @@ A native macOS Input Method Editor (IME) for typing Burmese/Myanmar script
 using a standard Latin (QWERTY) keyboard. Built in Swift on top of the
 **Hybrid Burmese** romanization scheme — a grammar-aware engine that
 enforces orthographic legality and ranks candidates through grammar
-alternatives, lexicon frequency, and user history.
+alternatives, a trigram language model, bundled lexicon frequency, and a
+learned per-user history.
 
 ---
 
@@ -13,8 +14,7 @@ alternatives, lexicon frequency, and user history.
 Myanmar IME is a fully native macOS input method. The engine is built
 around formal Burmese orthographic rules: if a consonant cannot legally
 take a vowel or medial pattern, the combination never reaches the output,
-and digit-marked spelling ambiguities are resolved through the candidate
-window instead of forcing users to type `2` or `3`.
+and spelling ambiguities are resolved through the candidate window.
 
 The core (`BurmeseIMECore`) is a pure Swift package with no macOS-only
 dependencies — it builds and runs anywhere Swift runs. All platform glue
@@ -54,17 +54,25 @@ input into a `frozenPrefix` + `activeTail`:
 
 ### Candidate Ranking Pipeline
 Candidates are ranked by:
-1. **Grammar legality** — Orthographically legal forms score highest.
-2. **Alias cost** — Canonical spellings rank above shortcut aliases.
-3. **Parser score** — Best Viterbi path score over the buffer.
-4. **Lexicon frequency** — Log-scale unigram and bigram scores from the
-   bundled corpus.
-5. **User history** — Selection count + recency boost (planned).
+1. **Grammar legality** — Orthographically legal forms score highest
+   (hard filter).
+2. **Language model log-prob** — Kneser-Ney trigram score from the
+   bundled `BurmeseLM.bin`, including frozen-prefix + active-tail
+   concatenation when the sliding window is active.
+3. **Alias cost** — Canonical spellings rank above shortcut aliases
+   (used as a tiebreaker within an LM tier).
+4. **Parser score** — Best Viterbi path score over the buffer.
+5. **Lexicon frequency** — Bundled unigram priors from the SQLite store.
+6. **User history** — Previously committed picks for the same alias key
+   are promoted to the top of the panel. Can be disabled per user.
 
-### Digitless Candidate Disambiguation
-Compose mode accepts digitless input only. Instead of typing `ky2ar:` or
-`thar2`, users type the base reading (`kyar`, `thar`) and choose among
-grammar and lexicon candidates such as `ကြား` / `ကျား` or `သာ` / `သါ`.
+Candidates trailing the LM leader by more than a configurable margin
+are pruned to keep the panel focused on plausible interpretations.
+
+### Candidate Disambiguation
+Users type a base reading (`kyar`, `thar`) and choose among grammar and
+lexicon candidates such as `ကြား` / `ကျား` or `သာ` / `သါ` from the
+candidate panel.
 
 ### Hybrid Burmese Romanization
 The romanization scheme maps 33 base consonants × medial combinations ×
@@ -134,6 +142,28 @@ Contextual phrase ranking is supplied at runtime by the trigram language
 model (`LanguageModel/FORMAT.md`, `TrigramLanguageModel`), not by the
 SQLite schema.
 
+### Learned Typing History
+Every commit is written through `SQLiteUserHistoryStore` keyed on the
+alias-normalized reading. On subsequent keystrokes with the same reading,
+past picks are promoted to the top of the candidate panel. Learning can
+be toggled off, and individual entries can be inspected and deleted from
+the Preferences app. The database lives at
+`~/Library/Application Support/BurmeseIME/UserHistory.sqlite`.
+
+### Burmese Digits and Measure-Word Suggestions
+Leading ASCII digits convert directly to Myanmar digits (U+1040–U+1049),
+with the Arabic form offered as an alternate candidate. When measure-
+word suggestions are enabled, pure-digit buffers produce contextual
+pairings — `၂၀၂၄ ခုနှစ်` (year), `၁၀၀ ကျပ်` (currency), `၁၅ ရက်` (day),
+etc. The suggestion table lives at
+`Packages/BurmeseIMECore/Sources/BurmeseIMECore/Data/NumberMeasureWords.tsv`
+and is hot-reloadable without a Swift rebuild.
+
+### Burmese Punctuation Auto-Mapping
+Optional feature that substitutes ASCII `. , ! ? ;` with their Myanmar
+equivalents (`။` / `၊`) when the surrounding context is Myanmar. Off by
+default; enable from Preferences → Text output.
+
 ### Native macOS Integration
 - Built on **InputMethodKit** (`IMKInputController`).
 - Uses the native **IMKCandidates** panel
@@ -143,6 +173,11 @@ SQLite schema.
 - Configurable candidate page size (3 / 5 / 9 / 12), with arrow-key and
   Tab/Shift-Tab navigation. Tab is translated to Down-arrow; Shift-Tab
   to Up-arrow so users familiar with CJK IMEs get expected behaviour.
+- Companion **Preferences** app (`/Applications/BurmeseIMEPreferences.app`)
+  surfaces every setting live — cluster-alias shortcuts, LM prune
+  margin, anchor commit threshold, punctuation mapping, measure words,
+  learning toggle, history browser, and diagnostic paths. Changes
+  propagate to the running IME via the shared `UserDefaults` suite.
 
 ---
 
@@ -153,32 +188,43 @@ myanmar-ime/
 ├── Packages/BurmeseIMECore/              # Swift Package (core library)
 │   ├── Sources/
 │   │   ├── BurmeseIMECore/
-│   │   │   ├── BurmeseEngine.swift       # Orchestration: update(buffer:) → CompositionState
-│   │   │   ├── SyllableParser.swift      # N-best Viterbi DP parser
-│   │   │   ├── Grammar.swift             # Orthographic legality tables
-│   │   │   ├── Romanization.swift        # Consonant/medial/vowel mappings + cluster aliases
-│   │   │   ├── ReverseRomanizer.swift    # Myanmar → romanization (tests + lexicon building)
-│   │   │   ├── Unicode.swift             # Myanmar block constants and char classification
-│   │   │   ├── Types.swift               # Public API types
-│   │   │   ├── CandidateStore.swift      # Protocol: lookup(prefix:previousSurface:)
-│   │   │   ├── SQLiteCandidateStore.swift  # SQLite-backed lexicon store
+│   │   │   ├── BurmeseEngine.swift            # Orchestration: update(buffer:) → CompositionState
+│   │   │   ├── SyllableParser.swift           # N-best Viterbi DP parser
+│   │   │   ├── Grammar.swift                  # Orthographic legality tables
+│   │   │   ├── Romanization.swift             # Consonant/medial/vowel mappings + cluster aliases
+│   │   │   ├── ReverseRomanizer.swift         # Myanmar → romanization (tests + lexicon building)
+│   │   │   ├── Unicode.swift                  # Myanmar block constants and char classification
+│   │   │   ├── Types.swift                    # Public API types
+│   │   │   ├── CandidateStore.swift           # Protocol: lookup(prefix:previousSurface:)
+│   │   │   ├── SQLiteCandidateStore.swift     # SQLite-backed lexicon store
+│   │   │   ├── UserHistoryStore.swift         # Protocol + default paths for learned history
+│   │   │   ├── SQLiteUserHistoryStore.swift   # SQLite-backed user-history store
+│   │   │   ├── IMESettings.swift              # UserDefaults-suite settings shared across processes
+│   │   │   ├── IMEResources.swift             # Bundle-aware resource locator
+│   │   │   ├── PunctuationMapper.swift        # ASCII → Myanmar punctuation mapping
+│   │   │   ├── NumberMeasureWords.swift       # Measure-word suggestion table loader
+│   │   │   ├── Data/
+│   │   │   │   └── NumberMeasureWords.tsv     # Bundled measure-word table
 │   │   │   └── LanguageModel/
-│   │   │       ├── FORMAT.md             # Binary format spec for BurmeseLM.bin
-│   │   │       ├── LanguageModel.swift   # Protocol for language model scoring
-│   │   │       └── TrigramLanguageModel.swift  # Kneser-Ney trigram LM loader
+│   │   │       ├── FORMAT.md                  # Binary format spec for BurmeseLM.bin
+│   │   │       ├── LanguageModel.swift        # Protocol for language model scoring
+│   │   │       └── TrigramLanguageModel.swift # Kneser-Ney trigram LM loader
+│   │   ├── BurmeseIMETestSupport/        # Shared test framework + suites
+│   │   ├── BurmeseBench/                 # Benchmark executable + regression check
 │   │   └── LexiconBuilder/main.swift     # TSV → SQLite compilation pipeline
-│   ├── Sources/BurmeseIMETestSupport/   # Shared test framework + suites
-│   ├── Sources/BurmeseBench/            # Benchmark executable + regression check
 │   ├── Tests/
-│   │   ├── BurmeseIMECoreTests/          # XCTest drivers (thin, one class per suite)
+│   │   ├── BurmeseIMECoreTests/          # XCTest drivers (one file iterating every suite)
 │   │   ├── TestRunner/main.swift         # CLI runner (works without XCTest)
 │   │   └── Benchmarks/baseline.json      # Committed perf baseline for --check
+│   ├── Tools/corpus_builder/             # Offline data pipeline (see its own README)
 │   └── Data/
 │       └── BurmeseLexiconSource.tsv      # Word list source
 └── native/macos/
     ├── BurmeseIME/                       # Headless IMK bundle → ~/Library/Input Methods/
     ├── BurmeseIMEPreferences/            # SwiftUI settings app → /Applications/
     ├── installer/                        # build.sh + postinstall for the unsigned .pkg
+    ├── BurmeseIME.xcworkspace            # Xcode workspace with all schemes
+    ├── BurmeseIMEApp.xcodeproj           # Project holding both apps + installer target
     └── Data/
         ├── BurmeseLexicon.sqlite         # Prebuilt lexicon database
         └── BurmeseLM.bin                 # Trigram language model binary
@@ -223,12 +269,33 @@ struct Candidate {
 }
 
 final class BurmeseEngine {
+    init(
+        candidateStore: any CandidateStore = EmptyCandidateStore(),
+        historyStore: any UserHistoryStore = EmptyUserHistoryStore(),
+        languageModel: any LanguageModel = NullLanguageModel(),
+        settings: IMESettings? = nil
+    )
+
     func update(buffer: String, context: [String]) -> CompositionState
     func commit(state: CompositionState) -> String
+    func recordSelection(state: CompositionState)
+    func cancel(state: CompositionState) -> String
 }
 
 protocol CandidateStore {
     func lookup(prefix: String, previousSurface: String?) -> [Candidate]
+}
+
+protocol UserHistoryStore {
+    func lookup(prefix: String, previousSurface: String?) -> [Candidate]
+    func record(reading: String, surface: String)
+    func remove(reading: String, surface: String)
+    func listAll() -> [HistoryEntry]
+    func clearAll()
+}
+
+protocol LanguageModel {
+    func scoreSurface(_ surface: String, context: [String]) -> Double
 }
 ```
 
@@ -360,7 +427,8 @@ Every case is defined once in `Sources/BurmeseIMETestSupport/Suites/` and
 exposed via `BurmeseTestSuites.all`. Two runners iterate that shared list:
 
 - `swift run TestRunner` — CLI driver (works without XCTest)
-- `swift test` — XCTest drivers (thin, one `XCTestCase` per suite)
+- `swift test` / Xcode Test navigator — `BurmeseSuiteXCTests.swift`
+  drives every suite through a single thin XCTest wrapper
 
 Suites under `Sources/BurmeseIMETestSupport/Suites/`:
 
@@ -435,8 +503,14 @@ expands.
       cross-process reconciliation
 - [x] `BurmeseIMEInstaller` — aggregate Xcode target + unsigned `.pkg`
       one-click installer
-- [ ] User history store — `UserHistory.sqlite` with selection count +
-      recency boost
+- [x] Trigram language model — Kneser-Ney scored re-ranking over
+      grammar and lexicon candidates
+- [x] User history store — `UserHistory.sqlite` writes on every commit
+      with alias-normalized keys; entries surfaced + manageable from the
+      Preferences app
+- [x] Burmese digits, punctuation auto-mapping, measure-word suggestions
+- [x] Corpus data pipeline — `Tools/corpus_builder/` builds aligned
+      lexicon + LM from a public corpus
 
 ---
 
