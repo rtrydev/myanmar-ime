@@ -46,22 +46,24 @@ public enum GrammarSuite {
             ctx.assertTrue(score < 100, detail: "Expected score < 100, got \(score)")
         },
 
-        TestCase("validateSyllable_medialHaPlusLongI_rejected") { ctx in
+        TestCase("validateSyllable_medialHaPlusLongI_rareButLegal") { ctx in
             let score = Grammar.validateSyllable(
                 onset: Myanmar.ka,
                 medials: [Myanmar.medialHa],
                 vowelRoman: "i:"
             )
-            ctx.assertEqual(score, 0)
+            ctx.assertGreaterThan(score, 0)
+            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
         },
 
-        TestCase("validateSyllable_medialHaPlusLongU_rejected") { ctx in
+        TestCase("validateSyllable_medialHaPlusLongU_rareButLegal") { ctx in
             let score = Grammar.validateSyllable(
                 onset: Myanmar.ka,
                 medials: [Myanmar.medialHa],
                 vowelRoman: "u:"
             )
-            ctx.assertEqual(score, 0)
+            ctx.assertGreaterThan(score, 0)
+            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
         },
 
         TestCase("validateSyllable_medialHaPlusShortI_legal") { ctx in
@@ -82,19 +84,21 @@ public enum GrammarSuite {
             ctx.assertGreaterThan(score, 0)
         },
 
-        TestCase("validateSyllable_tripleMedialWithComplexVowel_rejected") { ctx in
+        TestCase("validateSyllable_tripleMedialWithComplexVowel_rareButLegal") { ctx in
             let score = Grammar.validateSyllable(
                 onset: Myanmar.ka,
                 medials: [Myanmar.medialYa, Myanmar.medialWa, Myanmar.medialHa],
                 vowelRoman: "aung"
             )
-            ctx.assertEqual(score, 0)
+            ctx.assertGreaterThan(score, 0)
+            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
         },
 
-        TestCase("validateSyllable_palaRetroflexWithDiphthong_rejected") { ctx in
+        TestCase("validateSyllable_palaRetroflexWithDiphthong_rareButLegal") { ctx in
             let score = Grammar.validateSyllable(
                 onset: Myanmar.tta, medials: [], vowelRoman: "ote")
-            ctx.assertEqual(score, 0)
+            ctx.assertGreaterThan(score, 0)
+            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
         },
 
         TestCase("validateSyllable_palaRetroflexWithSimpleVowel_legal") { ctx in

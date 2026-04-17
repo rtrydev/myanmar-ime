@@ -144,5 +144,66 @@ public enum PunctuationSuite {
             ctx.assertTrue(surfaces.contains("သာ\u{104A}မြတ်\u{104B}"),
                            "threeSegmentRender", detail: "surfaces=\(surfaces)")
         },
+
+        TestCase("engine_trailingDot_creakyTone_whenEnabled") { ctx in
+            let (settings, suiteName) = makeSettings()
+            defer { cleanup(suiteName) }
+            settings.burmesePunctuationEnabled = true
+            let engine = BurmeseEngine(settings: settings)
+            let state = engine.update(buffer: "tu.", context: [])
+            let surfaces = state.candidates.map(\.surface)
+            ctx.assertTrue(surfaces.contains("\u{1010}\u{102F}"),
+                           "creakyTone", detail: "surfaces=\(surfaces)")
+            ctx.assertFalse(surfaces.contains(where: { $0.hasSuffix("\u{104B}") }),
+                            "noTrailingPunct", detail: "surfaces=\(surfaces)")
+        },
+
+        TestCase("engine_doubleTrailingDot_modifierPlusPunct_whenEnabled") { ctx in
+            let (settings, suiteName) = makeSettings()
+            defer { cleanup(suiteName) }
+            settings.burmesePunctuationEnabled = true
+            let engine = BurmeseEngine(settings: settings)
+            let state = engine.update(buffer: "tu..", context: [])
+            let surfaces = state.candidates.map(\.surface)
+            ctx.assertTrue(surfaces.contains("\u{1010}\u{102F}\u{104B}"),
+                           "creakyPlusPunct", detail: "surfaces=\(surfaces)")
+        },
+
+        TestCase("engine_trailingDot_onNonModifierOnset_stillMapsToPunct_whenEnabled") { ctx in
+            let (settings, suiteName) = makeSettings()
+            defer { cleanup(suiteName) }
+            settings.burmesePunctuationEnabled = true
+            let engine = BurmeseEngine(settings: settings)
+            let state = engine.update(buffer: "thar.", context: [])
+            let surfaces = state.candidates.map(\.surface)
+            ctx.assertTrue(surfaces.contains("သာ\u{104B}"),
+                           "mappedDot", detail: "surfaces=\(surfaces)")
+            ctx.assertFalse(surfaces.contains(where: { $0.hasSuffix(".") }),
+                            "noAsciiLeak", detail: "surfaces=\(surfaces)")
+        },
+
+        TestCase("engine_mixedTrailingDotBang_bothMapToPunct_whenEnabled") { ctx in
+            let (settings, suiteName) = makeSettings()
+            defer { cleanup(suiteName) }
+            settings.burmesePunctuationEnabled = true
+            let engine = BurmeseEngine(settings: settings)
+            let state = engine.update(buffer: "thar.!", context: [])
+            let surfaces = state.candidates.map(\.surface)
+            ctx.assertTrue(surfaces.contains("သာ\u{104B}\u{104B}"),
+                           "dotBangMapped", detail: "surfaces=\(surfaces)")
+            ctx.assertFalse(surfaces.contains(where: { $0.contains(".") }),
+                            "noRawDot", detail: "surfaces=\(surfaces)")
+        },
+
+        TestCase("engine_thiuDot_producesStandaloneBu_whenEnabled") { ctx in
+            let (settings, suiteName) = makeSettings()
+            defer { cleanup(suiteName) }
+            settings.burmesePunctuationEnabled = true
+            let engine = BurmeseEngine(settings: settings)
+            let state = engine.update(buffer: "thiu.", context: [])
+            let surfaces = state.candidates.map(\.surface)
+            ctx.assertTrue(surfaces.contains("\u{101E}\u{102E}\u{1025}"),
+                           "thiuDotStandalone", detail: "surfaces=\(surfaces)")
+        },
     ])
 }

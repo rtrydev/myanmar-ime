@@ -201,26 +201,23 @@ public enum Grammar {
         // aa sign to match the onset's descender requirement during
         // candidate post-processing, so the parser can emit either shape.
 
-        // Reject medial ha-htoe + long-i/long-u combinations (not used in
-        // modern orthography).
+        // Rare combinations — not standard in modern orthography but
+        // legitimate in archaic text, loanwords, or personal names. Stay
+        // legal so the user can still pick them; low score drops them
+        // below canonical alternatives in the candidate panel.
+        var rarityPenalty = 0
         if medials.contains(Myanmar.medialHa) && forbiddenVowelsWithMedialHa.contains(vowelRoman) {
-            return 0
+            rarityPenalty += 80
         }
-
-        // Reject triple-medial onsets paired with anything other than the
-        // inherent vowel or aa.
         if medials.count >= 3 && !tripleMedialPermittedVowels.contains(vowelRoman) {
-            return 0
+            rarityPenalty += 80
         }
-
-        // Reject Pali/retroflex onsets paired with native-Burmese
-        // diphthong finals.
         if palaRestrictedOnsets.contains(onset) && forbiddenVowelsOnPalaOnsets.contains(vowelRoman) {
-            return 0
+            rarityPenalty += 80
         }
 
         // Base score: legal
-        var score = 100
+        var score = 100 - rarityPenalty
 
         // Bonus for common/canonical forms
         if medials.isEmpty {

@@ -397,6 +397,22 @@ public enum EngineSuite {
             ctx.assertEqual(parseTop("min+galarpar"), "မင်္ဂလာပာ")
         },
 
+        TestCase("parse_thiuDot_producesStandaloneBu") { ctx in
+            ctx.assertEqual(parseTop("thiu."), "\u{101E}\u{102E}\u{1025}")
+        },
+
+        TestCase("parse_thiu_doesNotProduceDoubleDependentVowel") { ctx in
+            let top = parseTop("thiu")
+            ctx.assertFalse(top.contains("\u{102E}\u{102F}"),
+                            detail: "Found i+u dependents on same onset: \(top)")
+            ctx.assertFalse(top.contains("\u{102E}\u{1030}"),
+                            detail: "Found i+uu dependents on same onset: \(top)")
+        },
+
+        TestCase("parse_thu_stillProducesLongU") { ctx in
+            ctx.assertEqual(parseTop("thu"), "\u{101E}\u{1030}")
+        },
+
         // MARK: - Mixed-script rejection
 
         TestCase("mixedScript_foo_noLatinLeak") { ctx in

@@ -605,8 +605,25 @@ public final class SyllableParser: Sendable {
                     }
                 }
 
+                let previousEndedWithVowel: Bool
+                switch previous.matchRef {
+                case .onsetVowel, .vowelOnly: previousEndedWithVowel = true
+                default: previousEndedWithVowel = false
+                }
+
                 for (vowelEnd, vowelEntry) in standaloneVowels where !vowelEntry.isPureMedial {
                     let legality = vowelOnlyLegality[Int(vowelEntry.id)]
+                    // Stacking a dependent vowel sign onto a syllable that
+                    // already carries a vowel is orthographically unusual,
+                    // but legal — the glyph exists and users occasionally
+                    // want it. Add an aliasCost penalty at the final
+                    // transition so a standalone-vowel alternative (e.g.
+                    // ဥ via `u2.`) outranks it when both are available.
+                    let stackedFinal =
+                        !vowelEntry.isStandalone
+                        && previousEndedWithVowel
+                        && vowelEnd == n
+                    let aliasCostAdj = vowelEntry.aliasCost + (stackedFinal ? 2 : 0)
                     let newState = ParseState(
                         parentIdx: prevIdx,
                         matchRef: .vowelOnly(vowelId: vowelEntry.id),
@@ -615,10 +632,10 @@ public final class SyllableParser: Sendable {
                             consumed: vowelEnd - i,
                             ruleCount: 1,
                             legality: legality,
-                            aliasCost: vowelEntry.aliasCost
+                            aliasCost: aliasCostAdj
                         ),
                         legalityScore: previous.legalityScore + max(legality, 0),
-                        aliasCost: previous.aliasCost + vowelEntry.aliasCost,
+                        aliasCost: previous.aliasCost + aliasCostAdj,
                         syllableCount: previous.syllableCount + 1,
                         structureCost: previous.structureCost,
                         isLegal: previous.isLegal && legality > 0

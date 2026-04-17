@@ -1172,7 +1172,8 @@ public final class BurmeseEngine: @unchecked Sendable {
         for idx in buffer.indices.reversed() {
             guard PunctuationMapper.isMappable(buffer[idx]) else { continue }
             let after = buffer.index(after: idx)
-            if after != buffer.endIndex {
+            guard after != buffer.endIndex else { continue }
+            if buffer[after...].contains(where: { !PunctuationMapper.isMappable($0) }) {
                 boundary = after
                 break
             }
@@ -1246,6 +1247,10 @@ public final class BurmeseEngine: @unchecked Sendable {
         while let last = kept.last, PunctuationMapper.isMappable(last) {
             stripped = String(last) + stripped
             kept.removeLast()
+        }
+        if !kept.isEmpty, stripped.first == "." {
+            kept.append(".")
+            stripped.removeFirst()
         }
         return (kept, stripped)
     }
