@@ -27,6 +27,8 @@ public enum UserHistorySuite {
                               source: .history, score: score)]
         }
         func record(reading: String, surface: String) {}
+        func remove(reading: String, surface: String) {}
+        func listAll() -> [HistoryEntry] { [] }
         func clearAll() {}
     }
 
@@ -43,6 +45,32 @@ public enum UserHistorySuite {
         var recorded: [(String, String)] = []
         func lookup(prefix: String, previousSurface: String?) -> [Candidate] { [] }
         func record(reading: String, surface: String) { recorded.append((reading, surface)) }
+        func remove(reading: String, surface: String) {
+            recorded.removeAll { $0.0 == reading && $0.1 == surface }
+        }
+        func listAll() -> [HistoryEntry] { [] }
+        func clearAll() { recorded.removeAll() }
+    }
+
+    /// Returns a canned history candidate whenever the stored reading
+    /// starts with the query prefix, and captures every `record` call so
+    /// tests can assert what key the engine wrote.
+    private final class PrefixHistoryMock: UserHistoryStore, @unchecked Sendable {
+        let storedReading: String
+        let storedSurface: String
+        var recorded: [(String, String)] = []
+        init(reading: String, surface: String) {
+            self.storedReading = reading
+            self.storedSurface = surface
+        }
+        func lookup(prefix: String, previousSurface: String?) -> [Candidate] {
+            guard storedReading.hasPrefix(prefix) else { return [] }
+            return [Candidate(surface: storedSurface, reading: storedReading,
+                              source: .history, score: 10.0)]
+        }
+        func record(reading: String, surface: String) { recorded.append((reading, surface)) }
+        func remove(reading: String, surface: String) {}
+        func listAll() -> [HistoryEntry] { [] }
         func clearAll() { recorded.removeAll() }
     }
 
@@ -110,6 +138,105 @@ public enum UserHistorySuite {
             #else
             ctx.assertTrue(true, "skipped_releaseBuild")
             #endif
+        },
+
+        TestCase("lookup_requiresHalfOfStoredReading") { ctx in
+            guard let (store, dir) = makeStore() else {
+                ctx.fail("setup", detail: "cannot open temp history store")
+                return
+            }
+            defer { teardown(dir) }
+            store.record(reading: "kwyantaw", surface: "ကျွန်တော်")
+            ctx.assertTrue(store.lookup(prefix: "kw", previousSurface: nil).isEmpty,
+                           "hiddenBelowHalf")
+            ctx.assertTrue(store.lookup(prefix: "kwy", previousSurface: nil).isEmpty,
+                           "stillHiddenAtThreeOfEight")
+            ctx.assertFalse(store.lookup(prefix: "kwya", previousSurface: nil).isEmpty,
+                            "visibleAtHalf")
+            ctx.assertFalse(store.lookup(prefix: "kwyantaw", previousSurface: nil).isEmpty,
+                            "visibleAtFullMatch")
+        },
+
+        TestCase("engine_historySelection_recordsStoredReadingNotPrefix") { ctx in
+            let store = PrefixHistoryMock(reading: "kwyantaw", surface: "ကျွန်တော်")
+            let engine = BurmeseEngine(historyStore: store)
+            var state = engine.update(buffer: "kw", context: [])
+            guard let idx = state.candidates.firstIndex(where: { $0.source == .history }) else {
+                ctx.fail("setup", detail: "history candidate not present")
+                return
+            }
+            state.selectedCandidateIndex = idx
+            engine.recordSelection(state: state)
+            ctx.assertEqual(store.recorded.count, 1, "oneWrite")
+            ctx.assertEqual(store.recorded.first?.0, "kwyantaw",
+                            "readingIsStoredNotPrefix")
+            ctx.assertEqual(store.recorded.first?.1, "ကျွန်တော်", "surface")
+        },
+
+        TestCase("remove_deletesOnlyTargetedRow") { ctx in
+            guard let (store, dir) = makeStore() else {
+                ctx.fail("setup", detail: "cannot open temp history store")
+                return
+            }
+            defer { teardown(dir) }
+            store.record(reading: "kyar", surface: "ကြား")
+            store.record(reading: "kyar", surface: "ကျား")
+            store.remove(reading: "kyar", surface: "ကြား")
+            let results = store.lookup(prefix: "kyar", previousSurface: nil)
+            ctx.assertEqual(results.count, 1, "oneLeft")
+            ctx.assertEqual(results.first?.surface, "ကျား", "otherRemains")
+        },
+
+        TestCase("remove_missingRowIsNoOp") { ctx in
+            guard let (store, dir) = makeStore() else {
+                ctx.fail("setup", detail: "cannot open temp history store")
+                return
+            }
+            defer { teardown(dir) }
+            store.record(reading: "kyar", surface: "ကြား")
+            store.remove(reading: "doesnotexist", surface: "X")
+            let results = store.lookup(prefix: "kyar", previousSurface: nil)
+            ctx.assertEqual(results.count, 1, "intactAfterNoOp")
+        },
+
+        TestCase("listAll_returnsEntriesNewestFirst") { ctx in
+            #if DEBUG
+            guard let (store, dir) = makeStore() else {
+                ctx.fail("setup", detail: "cannot open temp history store")
+                return
+            }
+            defer { teardown(dir) }
+            store.record(reading: "old", surface: "A")
+            store.record(reading: "mid", surface: "B")
+            store.record(reading: "new", surface: "C")
+            let now = Date().timeIntervalSince1970
+            store.forceLastPickedAt(reading: "old", surface: "A", to: now - 3000)
+            store.forceLastPickedAt(reading: "mid", surface: "B", to: now - 1500)
+            store.forceLastPickedAt(reading: "new", surface: "C", to: now)
+            let entries = store.listAll()
+            ctx.assertEqual(entries.count, 3, "count")
+            ctx.assertEqual(entries[0].surface, "C", "newestFirst")
+            ctx.assertEqual(entries[1].surface, "B", "midSecond")
+            ctx.assertEqual(entries[2].surface, "A", "oldestLast")
+            #else
+            ctx.assertTrue(true, "skipped_releaseBuild")
+            #endif
+        },
+
+        TestCase("listAll_reflectsRemovals") { ctx in
+            guard let (store, dir) = makeStore() else {
+                ctx.fail("setup", detail: "cannot open temp history store")
+                return
+            }
+            defer { teardown(dir) }
+            store.record(reading: "kyar", surface: "ကြား")
+            store.record(reading: "kyar", surface: "ကျား")
+            ctx.assertEqual(store.listAll().count, 2, "beforeRemove")
+            store.remove(reading: "kyar", surface: "ကြား")
+            let after = store.listAll()
+            ctx.assertEqual(after.count, 1, "afterRemove")
+            ctx.assertEqual(after.first?.surface, "ကျား", "survivorSurface")
+            ctx.assertEqual(after.first?.reading, "kyar", "survivorReading")
         },
 
         TestCase("clearAll_removesRows") { ctx in

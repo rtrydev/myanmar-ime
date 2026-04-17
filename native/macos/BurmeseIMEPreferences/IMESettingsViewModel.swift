@@ -18,6 +18,7 @@ final class IMESettingsViewModel: ObservableObject {
     @Published var burmesePunctuationEnabled: Bool
     @Published var numberMeasureWordsEnabled: Bool
     @Published var learningEnabled: Bool
+    @Published var historyEntries: [HistoryEntry] = []
 
     private var observer: NSObjectProtocol?
 
@@ -117,5 +118,15 @@ final class IMESettingsViewModel: ObservableObject {
 
     func resetLearnedHistory() {
         UserHistoryStoreDefault.clearAll()
+        refreshHistory()
+    }
+
+    func refreshHistory() {
+        historyEntries = UserHistoryStoreDefault.listAll()
+    }
+
+    func removeHistoryEntry(reading: String, surface: String) {
+        UserHistoryStoreDefault.removeEntry(reading: reading, surface: surface)
+        refreshHistory()
     }
 }

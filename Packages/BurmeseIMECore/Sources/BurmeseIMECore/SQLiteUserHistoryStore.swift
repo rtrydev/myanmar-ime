@@ -28,6 +28,8 @@ public final class SQLiteUserHistoryStore: UserHistoryStore, @unchecked Sendable
     private var lookupStmt: OpaquePointer?
     private var upsertStmt: OpaquePointer?
     private var clearStmt: OpaquePointer?
+    private var deleteStmt: OpaquePointer?
+    private var listStmt: OpaquePointer?
 
     public init?(path: String) {
         let parent = (path as NSString).deletingLastPathComponent
@@ -49,6 +51,8 @@ public final class SQLiteUserHistoryStore: UserHistoryStore, @unchecked Sendable
             sqlite3_finalize(lookupStmt)
             sqlite3_finalize(upsertStmt)
             sqlite3_finalize(clearStmt)
+            sqlite3_finalize(deleteStmt)
+            sqlite3_finalize(listStmt)
             sqlite3_close(db)
             db = nil
             return nil
@@ -59,6 +63,8 @@ public final class SQLiteUserHistoryStore: UserHistoryStore, @unchecked Sendable
         sqlite3_finalize(lookupStmt)
         sqlite3_finalize(upsertStmt)
         sqlite3_finalize(clearStmt)
+        sqlite3_finalize(deleteStmt)
+        sqlite3_finalize(listStmt)
         sqlite3_close(db)
     }
 
@@ -74,6 +80,15 @@ public final class SQLiteUserHistoryStore: UserHistoryStore, @unchecked Sendable
         queue.async { [weak self] in
             self?.recordLocked(reading: reading, surface: surface)
         }
+    }
+
+    public func remove(reading: String, surface: String) {
+        guard !reading.isEmpty, !surface.isEmpty else { return }
+        queue.sync { removeLocked(reading: reading, surface: surface) }
+    }
+
+    public func listAll() -> [HistoryEntry] {
+        queue.sync { listAllLocked() }
     }
 
     public func clearAll() {
@@ -118,6 +133,13 @@ public final class SQLiteUserHistoryStore: UserHistoryStore, @unchecked Sendable
                     last_picked_at = excluded.last_picked_at
             """
         let clearSQL = "DELETE FROM selections"
+        let deleteSQL = "DELETE FROM selections WHERE reading = ?1 AND surface = ?2"
+        let listSQL = """
+            SELECT reading, surface, count, last_picked_at
+            FROM selections
+            ORDER BY last_picked_at DESC
+            LIMIT 2000
+            """
 
         guard sqlite3_prepare_v2(db, lookupSQL, -1, &lookupStmt, nil) == SQLITE_OK else {
             return false
@@ -126,6 +148,12 @@ public final class SQLiteUserHistoryStore: UserHistoryStore, @unchecked Sendable
             return false
         }
         guard sqlite3_prepare_v2(db, clearSQL, -1, &clearStmt, nil) == SQLITE_OK else {
+            return false
+        }
+        guard sqlite3_prepare_v2(db, deleteSQL, -1, &deleteStmt, nil) == SQLITE_OK else {
+            return false
+        }
+        guard sqlite3_prepare_v2(db, listSQL, -1, &listStmt, nil) == SQLITE_OK else {
             return false
         }
         return true
@@ -143,9 +171,15 @@ public final class SQLiteUserHistoryStore: UserHistoryStore, @unchecked Sendable
         sqlite3_bind_text(stmt, 2, upper, -1, transient)
 
         let now = Date().timeIntervalSince1970
+        let prefixLen = prefix.count
         var results: [Candidate] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
             let reading = String(cString: sqlite3_column_text(stmt, 0))
+            // Only surface history entries once the typed prefix covers at
+            // least half of the stored reading. Without this, a two-char
+            // prefix like "kw" would pop long entries like "kwyantaw" on
+            // every keystroke.
+            guard prefixLen * 2 >= reading.count else { continue }
             let surface = String(cString: sqlite3_column_text(stmt, 1))
             let count = Int(sqlite3_column_int64(stmt, 2))
             let lastPickedAt = sqlite3_column_double(stmt, 3)
@@ -176,6 +210,36 @@ public final class SQLiteUserHistoryStore: UserHistoryStore, @unchecked Sendable
         guard let stmt = clearStmt else { return }
         defer { sqlite3_reset(stmt) }
         _ = sqlite3_step(stmt)
+    }
+
+    private func removeLocked(reading: String, surface: String) {
+        guard let stmt = deleteStmt else { return }
+        defer { sqlite3_reset(stmt) }
+
+        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        sqlite3_bind_text(stmt, 1, reading, -1, transient)
+        sqlite3_bind_text(stmt, 2, surface, -1, transient)
+        _ = sqlite3_step(stmt)
+    }
+
+    private func listAllLocked() -> [HistoryEntry] {
+        guard let stmt = listStmt else { return [] }
+        defer { sqlite3_reset(stmt) }
+
+        var results: [HistoryEntry] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let reading = String(cString: sqlite3_column_text(stmt, 0))
+            let surface = String(cString: sqlite3_column_text(stmt, 1))
+            let count = Int(sqlite3_column_int64(stmt, 2))
+            let lastPickedAt = sqlite3_column_double(stmt, 3)
+            results.append(HistoryEntry(
+                reading: reading,
+                surface: surface,
+                count: count,
+                lastPickedAt: lastPickedAt
+            ))
+        }
+        return results
     }
 
     // MARK: - Scoring

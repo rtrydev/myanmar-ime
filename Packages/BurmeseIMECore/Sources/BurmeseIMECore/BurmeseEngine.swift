@@ -930,12 +930,21 @@ public final class BurmeseEngine: @unchecked Sendable {
               state.selectedCandidateIndex < state.candidates.count else {
             return
         }
-        cacheLock.lock()
-        let key = lastHistoryKey
-        cacheLock.unlock()
+        let candidate = state.candidates[state.selectedCandidateIndex]
+        // History-sourced picks must bump the existing row rather than
+        // creating a new shortcut keyed on whatever prefix was typed —
+        // otherwise picking a long history entry via a short prefix would
+        // pollute the table with partial-key duplicates.
+        let key: String
+        if candidate.source == .history, !candidate.reading.isEmpty {
+            key = candidate.reading
+        } else {
+            cacheLock.lock()
+            key = lastHistoryKey
+            cacheLock.unlock()
+        }
         guard !key.isEmpty else { return }
-        let surface = state.candidates[state.selectedCandidateIndex].surface
-        historyStore.record(reading: key, surface: surface)
+        historyStore.record(reading: key, surface: candidate.surface)
     }
 
     /// Cancel composition: return the raw buffer unchanged.

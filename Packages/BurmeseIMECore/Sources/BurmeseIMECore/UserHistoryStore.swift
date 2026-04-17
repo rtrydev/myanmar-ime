@@ -1,5 +1,20 @@
 import Foundation
 
+/// Raw row from the history table, surfaced for management UIs.
+public struct HistoryEntry: Sendable, Hashable {
+    public let reading: String
+    public let surface: String
+    public let count: Int
+    public let lastPickedAt: TimeInterval
+
+    public init(reading: String, surface: String, count: Int, lastPickedAt: TimeInterval) {
+        self.reading = reading
+        self.surface = surface
+        self.count = count
+        self.lastPickedAt = lastPickedAt
+    }
+}
+
 /// Persistent record of previously-committed candidate selections. The lookup
 /// method mirrors `CandidateStore` so the engine can merge history hits into
 /// ranking; `record` is the write-through called from the commit path.
@@ -13,6 +28,13 @@ public protocol UserHistoryStore: Sendable {
     /// Implementations may dispatch the write asynchronously.
     func record(reading: String, surface: String)
 
+    /// Delete a single `(reading, surface)` row. No-op if the row is missing.
+    func remove(reading: String, surface: String)
+
+    /// All stored entries ordered by `last_picked_at` descending (most recent
+    /// first). Intended for management UIs, not the ranking hot path.
+    func listAll() -> [HistoryEntry]
+
     /// Remove every stored selection.
     func clearAll()
 }
@@ -23,6 +45,8 @@ public struct EmptyUserHistoryStore: UserHistoryStore {
     public init() {}
     public func lookup(prefix: String, previousSurface: String?) -> [Candidate] { [] }
     public func record(reading: String, surface: String) {}
+    public func remove(reading: String, surface: String) {}
+    public func listAll() -> [HistoryEntry] { [] }
     public func clearAll() {}
 }
 
@@ -63,5 +87,27 @@ public enum UserHistoryStoreDefault {
             return
         }
         store.clearAll()
+    }
+
+    /// Open the default store and delete a single row. No-op if the database
+    /// is missing.
+    public static func removeEntry(reading: String, surface: String) {
+        let url = defaultURL()
+        guard FileManager.default.fileExists(atPath: url.path),
+              let store = SQLiteUserHistoryStore(path: url.path) else {
+            return
+        }
+        store.remove(reading: reading, surface: surface)
+    }
+
+    /// Open the default store and return all entries. Empty array if the
+    /// database is missing.
+    public static func listAll() -> [HistoryEntry] {
+        let url = defaultURL()
+        guard FileManager.default.fileExists(atPath: url.path),
+              let store = SQLiteUserHistoryStore(path: url.path) else {
+            return []
+        }
+        return store.listAll()
     }
 }

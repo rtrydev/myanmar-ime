@@ -94,9 +94,14 @@ private struct PreferencesView: View {
                 candidateRankingSection
                 textOutputSection
                 learningSection
+                historySection
                 diagnosticsSection
             }
             .formStyle(.grouped)
+        }
+        .onAppear { vm.refreshHistory() }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            vm.refreshHistory()
         }
     }
 
@@ -172,6 +177,31 @@ private struct PreferencesView: View {
         }
     }
 
+    private var historySection: some View {
+        Section("Typing history") {
+            Text("Remove individual entries the IME has learned. Removing one stops it from being ranked above other candidates for that input.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if vm.historyEntries.isEmpty {
+                Text("No learned entries yet.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(vm.historyEntries, id: \.self) { entry in
+                            HistoryRow(entry: entry) {
+                                vm.removeHistoryEntry(reading: entry.reading, surface: entry.surface)
+                            }
+                            Divider()
+                        }
+                    }
+                }
+                .frame(maxHeight: 220)
+            }
+        }
+    }
+
     private var diagnosticsSection: some View {
         Section("Diagnostics") {
             DiagnosticsView()
@@ -182,6 +212,38 @@ private struct PreferencesView: View {
         Button("Restore defaults") { vm.restoreDefaults(section) }
             .buttonStyle(.borderless)
             .font(.callout)
+    }
+}
+
+private struct HistoryRow: View {
+    let entry: HistoryEntry
+    let onRemove: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.surface)
+                    .font(.body)
+                Text(entry.reading)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospaced()
+            }
+            Spacer()
+            Text("×\(entry.count)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+            Button(role: .destructive) {
+                onRemove()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.borderless)
+            .help("Remove this entry from learned history")
+        }
+        .padding(.vertical, 4)
     }
 }
 

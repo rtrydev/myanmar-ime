@@ -1,7 +1,10 @@
 import SwiftUI
+import AppKit
 
 @main
 struct BurmeseIMEPreferencesApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
     var body: some Scene {
         WindowGroup("Burmese IME") {
             ContentView()
@@ -13,6 +16,12 @@ struct BurmeseIMEPreferencesApp: App {
         Settings {
             PreferencesSettingsScene()
         }
+    }
+}
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        true
     }
 }
 
