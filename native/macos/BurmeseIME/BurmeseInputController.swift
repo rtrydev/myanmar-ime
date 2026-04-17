@@ -290,11 +290,6 @@ class BurmeseInputController: IMKInputController {
             keyEquivalent: ""
         )
         item.target = self
-        if let icon = NSImage(systemSymbolName: "gearshape",
-                              accessibilityDescription: "Preferences") {
-            let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
-            item.image = icon.withSymbolConfiguration(config)
-        }
         menu.addItem(item)
         return menu
     }
