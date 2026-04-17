@@ -1798,6 +1798,165 @@ runTest("engine_punct_composableBetweenTwoPuncts_getsParsed") {
 }
 
 // ===================================================================
+// USER HISTORY TESTS
+// ===================================================================
+
+print("=== User History Tests ===")
+
+func makeFreshHistoryStore() -> (SQLiteUserHistoryStore, URL) {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("BurmeseIMEHistoryRunner-\(UUID().uuidString)", isDirectory: true)
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let path = dir.appendingPathComponent("UserHistory.sqlite").path
+    guard let store = SQLiteUserHistoryStore(path: path) else {
+        fatalError("Failed to open temp history store")
+    }
+    return (store, dir)
+}
+
+runTest("history_recordThenLookup") {
+    let (store, dir) = makeFreshHistoryStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    store.record(reading: "kyar", surface: "ကြား")
+    store.record(reading: "kyar", surface: "ကြား")
+    let results = store.lookup(prefix: "kyar", previousSurface: nil)
+    assertEqual(results.count, 1, "history_recordThenLookup_count")
+    assertEqual(results.first?.surface ?? "", "ကြား", "history_recordThenLookup_surface")
+    assertTrue((results.first?.score ?? 0) > 0, "history_recordThenLookup_scorePositive")
+}
+
+runTest("history_countDeterminesOrder") {
+    let (store, dir) = makeFreshHistoryStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    store.record(reading: "kyar", surface: "ကြား")
+    store.record(reading: "kyar", surface: "ကျား")
+    store.record(reading: "kyar", surface: "ကျား")
+    store.record(reading: "kyar", surface: "ကျား")
+    let results = store.lookup(prefix: "kyar", previousSurface: nil)
+    assertEqual(results.count, 2, "history_countDeterminesOrder_count")
+    assertEqual(results.first?.surface ?? "", "ကျား", "history_countDeterminesOrder_top")
+}
+
+runTest("history_prefixLookup") {
+    let (store, dir) = makeFreshHistoryStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    store.record(reading: "kyar:", surface: "ကြား")
+    let results = store.lookup(prefix: "kya", previousSurface: nil)
+    assertTrue(results.contains(where: { $0.surface == "ကြား" }),
+               "history_prefixLookup_findsExtendedReading")
+}
+
+runTest("history_recencyDecayHalvesAtThirtyDays") {
+    let (store, dir) = makeFreshHistoryStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    store.record(reading: "r", surface: "A")
+    store.record(reading: "r", surface: "B")
+    let sixtyDaysAgo = Date().timeIntervalSince1970 - 60 * 86_400
+    store.forceLastPickedAt(reading: "r", surface: "A", to: sixtyDaysAgo)
+    let results = store.lookup(prefix: "r", previousSurface: nil)
+    let a = results.first(where: { $0.surface == "A" })?.score ?? 0
+    let b = results.first(where: { $0.surface == "B" })?.score ?? 0
+    assertTrue(b > a, "history_recencyDecay_freshOutranksOld",
+               detail: "b=\(b) a=\(a)")
+}
+
+runTest("history_clearAllEmptiesTable") {
+    let (store, dir) = makeFreshHistoryStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    store.record(reading: "kyar", surface: "ကြား")
+    assertFalse(store.lookup(prefix: "kyar", previousSurface: nil).isEmpty,
+                "history_clearAll_preconditionRowExists")
+    store.clearAll()
+    assertTrue(store.lookup(prefix: "kyar", previousSurface: nil).isEmpty,
+               "history_clearAll_tableEmpty")
+}
+
+runTest("history_scoreFormula") {
+    let now: TimeInterval = 1_000_000_000
+    let s1 = SQLiteUserHistoryStore.historyScore(count: 1, lastPickedAt: now, now: now)
+    let s2 = SQLiteUserHistoryStore.historyScore(count: 3, lastPickedAt: now, now: now)
+    assertTrue(abs(s1 - log1p(1)) < 1e-9, "history_score_count1", detail: "\(s1)")
+    assertTrue(abs(s2 - log1p(3)) < 1e-9, "history_score_count3", detail: "\(s2)")
+    let decayed = SQLiteUserHistoryStore.historyScore(
+        count: 1, lastPickedAt: now - 30 * 86_400, now: now
+    )
+    assertTrue(abs(decayed - log1p(1) * 0.5) < 1e-9,
+               "history_score_thirtyDayHalf", detail: "\(decayed)")
+}
+
+struct TestMockHistoryStore: UserHistoryStore {
+    let surface: String
+    let reading: String
+    let score: Double
+    func lookup(prefix: String, previousSurface: String?) -> [Candidate] {
+        guard prefix == reading else { return [] }
+        return [Candidate(surface: surface, reading: reading, source: .history, score: score)]
+    }
+    func record(reading: String, surface: String) {}
+    func clearAll() {}
+}
+
+runTest("history_enginePromotesCandidateToTop") {
+    struct LexiconMock: CandidateStore {
+        func lookup(prefix: String, previousSurface: String?) -> [Candidate] {
+            guard prefix == "kyar" else { return [] }
+            return [Candidate(surface: "ကြား", reading: "kyar:", source: .lexicon, score: 950)]
+        }
+    }
+    let engine = BurmeseEngine(
+        candidateStore: LexiconMock(),
+        historyStore: TestMockHistoryStore(surface: "ကျား", reading: "kyar", score: 1.0)
+    )
+    let state = engine.update(buffer: "kyar", context: [])
+    assertEqual(state.candidates.first?.surface ?? "", "ကျား",
+                "history_enginePromotes_historySurfaceIsTop")
+}
+
+runTest("history_engineBypassedWhenLearningDisabled") {
+    let (settings, suite) = makeFreshSettings()
+    defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+    settings.learningEnabled = false
+    let engine = BurmeseEngine(
+        historyStore: TestMockHistoryStore(surface: "ကျား", reading: "kyar", score: 1.0),
+        settings: settings
+    )
+    let state = engine.update(buffer: "kyar", context: [])
+    // History should not inject anything when learning is off.
+    assertTrue(state.candidates.first?.surface != "ကျား",
+               "history_disabled_noInjection",
+               detail: state.candidates.first?.surface ?? "")
+}
+
+final class RecordingHistoryStore: UserHistoryStore, @unchecked Sendable {
+    var recorded: [(String, String)] = []
+    func lookup(prefix: String, previousSurface: String?) -> [Candidate] { [] }
+    func record(reading: String, surface: String) { recorded.append((reading, surface)) }
+    func clearAll() { recorded.removeAll() }
+}
+
+runTest("history_engineRecordsSelectionWhenEnabled") {
+    let store = RecordingHistoryStore()
+    let engine = BurmeseEngine(historyStore: store)
+    var state = engine.update(buffer: "kyar", context: [])
+    state.selectedCandidateIndex = 0
+    engine.recordSelection(state: state)
+    assertEqual(store.recorded.count, 1, "history_recordsSelection_count")
+    assertEqual(store.recorded.first?.0 ?? "", "kyar", "history_recordsSelection_reading")
+}
+
+runTest("history_engineSkipsRecordWhenLearningDisabled") {
+    let (settings, suite) = makeFreshSettings()
+    defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+    settings.learningEnabled = false
+    let store = RecordingHistoryStore()
+    let engine = BurmeseEngine(historyStore: store, settings: settings)
+    var state = engine.update(buffer: "kyar", context: [])
+    state.selectedCandidateIndex = 0
+    engine.recordSelection(state: state)
+    assertTrue(store.recorded.isEmpty, "history_disabledSkipsRecord")
+}
+
+// ===================================================================
 // RESULTS
 // ===================================================================
 

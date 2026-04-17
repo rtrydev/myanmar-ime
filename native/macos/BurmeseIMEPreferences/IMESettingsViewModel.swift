@@ -116,6 +116,6 @@ final class IMESettingsViewModel: ObservableObject {
     }
 
     func resetLearnedHistory() {
-        UserHistoryStore.clearAll()
+        UserHistoryStoreDefault.clearAll()
     }
 }

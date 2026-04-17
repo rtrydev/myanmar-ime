@@ -44,6 +44,7 @@ public final class BurmeseEngine: @unchecked Sendable {
 
     private let parser: SyllableParser
     private let candidateStore: any CandidateStore
+    private let historyStore: any UserHistoryStore
     private let languageModel: any LanguageModel
 
     /// Sliding-window threshold for the full N-best parse. When the
@@ -94,6 +95,12 @@ public final class BurmeseEngine: @unchecked Sendable {
     private var anchorHistory: [PrefixAnchor] = []
     private static let maxAnchorHistory = 32
 
+    /// Last alias-normalized lookup key produced by `update`. Captured under
+    /// `cacheLock` so `recordSelection` can write the same key the lexicon
+    /// and history stores would have seen on lookup — keeping write/read
+    /// symmetric without plumbing the key through `CompositionState`.
+    private var lastHistoryKey: String = ""
+
     /// Number of frozen-prefix branches kept and combined with each
     /// tail parse. Higher = more chances to recover from a parser-favored
     /// but LM-disfavored prefix; cost scales linearly in tail-merge work.
@@ -142,6 +149,7 @@ public final class BurmeseEngine: @unchecked Sendable {
 
     public init(
         candidateStore: any CandidateStore = EmptyCandidateStore(),
+        historyStore: any UserHistoryStore = EmptyUserHistoryStore(),
         languageModel: any LanguageModel = NullLanguageModel(),
         settings: IMESettings? = nil
     ) {
@@ -149,6 +157,7 @@ public final class BurmeseEngine: @unchecked Sendable {
         let parser = SyllableParser(useClusterAliases: useClusterAliases)
         self.parser = parser
         self.candidateStore = candidateStore
+        self.historyStore = historyStore
         self.languageModel = languageModel
         self.settings = settings
         // Active-tail size in Roman chars. Once the buffer exceeds this,
@@ -219,6 +228,7 @@ public final class BurmeseEngine: @unchecked Sendable {
         guard !buffer.isEmpty else {
             cacheLock.lock()
             anchorHistory.removeAll()
+            lastHistoryKey = ""
             cacheLock.unlock()
             return CompositionState(committedContext: context)
         }
@@ -603,6 +613,17 @@ public final class BurmeseEngine: @unchecked Sendable {
         let lexiconCandidates: [Candidate] = effectiveWindowed
             ? []
             : candidateStore.lookup(prefix: aliasPrefix, previousSurface: previousSurface)
+        // History lookup uses the same alias key as the lexicon so stored
+        // reads (written by `recordSelection`) line up exactly with reads.
+        // Skipped when the sliding window is active (the full buffer isn't
+        // what was originally committed under) or learning is disabled.
+        let historyEnabled = settings?.learningEnabled ?? true
+        let historyCandidates: [Candidate] = (effectiveWindowed || !historyEnabled)
+            ? []
+            : historyStore.lookup(prefix: aliasPrefix, previousSurface: previousSurface)
+        cacheLock.lock()
+        lastHistoryKey = aliasPrefix
+        cacheLock.unlock()
 
         var grammarSurfaceIndex: [String: Int] = [:]
         for (index, candidate) in grammarCandidates.enumerated() {
@@ -666,6 +687,21 @@ public final class BurmeseEngine: @unchecked Sendable {
 
         for grammarCandidate in remainingGrammar where merged.count < candidatePageSize {
             merged.append(grammarCandidate.candidate)
+        }
+
+        // History promotion: the user previously committed these surfaces
+        // under the same alias key, so float them to the top. Walk lowest
+        // score first so the highest-scoring history entry lands at index 0
+        // after successive front-inserts. Surfaces already in `merged` are
+        // moved; unseen surfaces are injected (the entry was legal when
+        // first committed, so it's safe to resurface).
+        for historyCandidate in historyCandidates.sorted(by: { $0.score < $1.score }) {
+            if let existing = merged.firstIndex(where: { $0.surface == historyCandidate.surface }) {
+                let keeper = merged.remove(at: existing)
+                merged.insert(keeper, at: 0)
+            } else {
+                merged.insert(historyCandidate, at: 0)
+            }
         }
 
         merged = Self.expandAaVariants(merged)
@@ -843,6 +879,25 @@ public final class BurmeseEngine: @unchecked Sendable {
         // Candidate surfaces already include the literal tail (appended in
         // update()), so committing the selection emits both parts together.
         return state.candidates[state.selectedCandidateIndex].surface
+    }
+
+    /// Record the user's selection in the history store so it can be
+    /// promoted on subsequent compositions. Writes the alias-normalized
+    /// lookup key captured by the most recent `update` call — matching what
+    /// `lookup` will see next time the same reading is typed. No-op when
+    /// learning is disabled or the state has no active selection.
+    public func recordSelection(state: CompositionState) {
+        guard settings?.learningEnabled ?? true else { return }
+        guard !state.candidates.isEmpty,
+              state.selectedCandidateIndex < state.candidates.count else {
+            return
+        }
+        cacheLock.lock()
+        let key = lastHistoryKey
+        cacheLock.unlock()
+        guard !key.isEmpty else { return }
+        let surface = state.candidates[state.selectedCandidateIndex].surface
+        historyStore.record(reading: key, surface: surface)
     }
 
     /// Cancel composition: return the raw buffer unchanged.

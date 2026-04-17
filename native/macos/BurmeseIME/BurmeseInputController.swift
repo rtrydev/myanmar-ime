@@ -23,6 +23,19 @@ class BurmeseInputController: IMKInputController {
         return EmptyCandidateStore()
     }()
 
+    /// Shared writable user-history store, persisted in Application Support.
+    /// Opens the default path eagerly so the first commit isn't delayed by
+    /// SQLite setup. Falls back to an empty store if the file can't be
+    /// opened (permissions, disk full, corruption) — learning silently
+    /// becomes a no-op rather than blocking input.
+    private static let sharedHistoryStore: any UserHistoryStore = {
+        UserHistoryStoreDefault.ensureContainer()
+        if let store = SQLiteUserHistoryStore(path: UserHistoryStoreDefault.defaultURL().path) {
+            return store
+        }
+        return EmptyUserHistoryStore()
+    }()
+
     private static let sharedLanguageModel: any LanguageModel = {
         if let lmURL = locateResourceURL(name: "BurmeseLM", ext: "bin"),
            let model = try? TrigramLanguageModel(path: lmURL.path) {
@@ -51,6 +64,7 @@ class BurmeseInputController: IMKInputController {
 
     private var engine = BurmeseEngine(
         candidateStore: BurmeseInputController.sharedCandidateStore,
+        historyStore: BurmeseInputController.sharedHistoryStore,
         languageModel: BurmeseInputController.sharedLanguageModel,
         settings: BurmeseInputController.sharedSettings
     )
@@ -74,6 +88,7 @@ class BurmeseInputController: IMKInputController {
         }
         engine = BurmeseEngine(
             candidateStore: Self.sharedCandidateStore,
+            historyStore: Self.sharedHistoryStore,
             languageModel: Self.sharedLanguageModel,
             settings: Self.sharedSettings
         )
@@ -319,6 +334,7 @@ class BurmeseInputController: IMKInputController {
     private func commitSelection(client sender: Any!) {
         guard state.isActive else { return }
         let output = engine.commit(state: state)
+        engine.recordSelection(state: state)
         (sender as? IMKTextInput)?.insertText(
             output,
             replacementRange: NSRange(location: NSNotFound, length: 0)
