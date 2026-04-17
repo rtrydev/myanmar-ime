@@ -1,0 +1,44 @@
+{
+  "scenarios": [
+      {
+    "scenario": "short",
+    "iterations": 1000,
+    "p50_us": 397.54,
+    "p95_us": 414.58,
+    "p99_us": 430.83,
+    "max_us": 467.92,
+    "allocations": 0
+  },
+          {
+    "scenario": "medium",
+    "iterations": 1000,
+    "p50_us": 7820.67,
+    "p95_us": 7942.38,
+    "p99_us": 8007.54,
+    "max_us": 8153.75,
+    "allocations": 0
+  },
+          {
+    "scenario": "long",
+    "iterations": 500,
+    "p50_us": 46231.75,
+    "p95_us": 47085.38,
+    "p99_us": 47456.50,
+    "max_us": 49691.29,
+    "allocations": 0
+  },
+          {
+    "scenario": "incremental",
+    "iterations": 481,
+    "p50_us": 12695.58,
+    "p95_us": 38845.46,
+    "p99_us": 40940.58,
+    "max_us": 41570.33,
+    "allocations": 0
+  }
+  ],
+  "meta": {
+    "commit": "45adf6f",
+    "date": "2026-04-17T10:00:39Z"
+  }
+}

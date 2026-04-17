@@ -167,9 +167,12 @@ myanmar-ime/
 │   │   │       ├── LanguageModel.swift   # Protocol for language model scoring
 │   │   │       └── TrigramLanguageModel.swift  # Kneser-Ney trigram LM loader
 │   │   └── LexiconBuilder/main.swift     # TSV → SQLite compilation pipeline
+│   ├── Sources/BurmeseIMETestSupport/   # Shared test framework + suites
+│   ├── Sources/BurmeseBench/            # Benchmark executable + regression check
 │   ├── Tests/
-│   │   ├── BurmeseIMECoreTests/          # XCTest suite (Xcode toolchain)
-│   │   └── TestRunner/main.swift         # CLI test driver (runs without XCTest)
+│   │   ├── BurmeseIMECoreTests/          # XCTest drivers (thin, one class per suite)
+│   │   ├── TestRunner/main.swift         # CLI runner (works without XCTest)
+│   │   └── Benchmarks/baseline.json      # Committed perf baseline for --check
 │   └── Data/
 │       └── BurmeseLexiconSource.tsv      # Word list source
 └── native/macos/
@@ -353,28 +356,54 @@ Then remove the input source in System Settings → Keyboard → Text Input.
 
 ## Testing
 
-Tests live in two parallel targets that share the same cases:
+Every case is defined once in `Sources/BurmeseIMETestSupport/Suites/` and
+exposed via `BurmeseTestSuites.all`. Two runners iterate that shared list:
 
-| File | Coverage |
-|------|----------|
-| `Tests/TestRunner/main.swift` | CLI driver for `swift run TestRunner` |
-| `Tests/BurmeseIMECoreTests/EngineTests.swift` | Public API: empty buffer, input, commit/cancel, normalization |
-| `Tests/BurmeseIMECoreTests/EngineSettingsTests.swift` | Engine respects `IMESettings` values; cluster-alias toggle requires engine rebuild |
-| `Tests/BurmeseIMECoreTests/IMESettingsTests.swift` | UserDefaults suite round-trip, defaults seeding, section-scoped restore |
-| `Tests/BurmeseIMECoreTests/GrammarTests.swift` | Medial legality per consonant, valid/invalid syllable combinations |
-| `Tests/BurmeseIMECoreTests/RomanizationTests.swift` | Consonants, vowel sorting, normalization, alias helpers |
-| `Tests/BurmeseIMECoreTests/ReverseRomanizerTests.swift` | Myanmar → roman, round-trip stability |
-| `Tests/BurmeseIMECoreTests/LanguageModelTests.swift` | Binary-format round-trip, unigram/bigram/trigram lookup, backoff semantics |
-| `Tests/BurmeseIMECoreTests/LexiconRankingTests.swift` | Candidate merge ordering, alias penalties, fixture + real-lexicon spot checks |
-| `Tests/BurmeseIMECoreTests/ParserClusterAliasTests.swift` | Cluster-alias onset expansions at the parser level |
-| `Tests/BurmeseIMECoreTests/SQLiteCandidateStoreTests.swift` | Alias-aware lexicon prefix lookup against the bundled database |
+- `swift run TestRunner` — CLI driver (works without XCTest)
+- `swift test` — XCTest drivers (thin, one `XCTestCase` per suite)
+
+Suites under `Sources/BurmeseIMETestSupport/Suites/`:
+
+| Suite | Coverage |
+|-------|----------|
+| `RomanizationSuite` | Consonants, vowel sorting, normalization, alias helpers |
+| `GrammarSuite` | Medial legality, valid/invalid syllable combinations |
+| `ReverseRomanizerSuite` | Myanmar → roman + round-trip stability |
+| `ClusterAliasSuite` | Parser-level cluster-alias onset expansions |
+| `EngineSuite` | Public API: buffer lifecycle, commit/cancel, ranking |
+| `LexiconRankingSuite` | Merge ordering, alias penalties, real-lexicon spot checks |
+| `LanguageModelSuite` | Binary-format round-trip, unigram/bigram/trigram backoff |
+| `PunctuationSuite` | Punctuation mapper + in-composition tail conversion |
+| `NumberMeasureWordsSuite` | Measure-word expansion, year/currency patterns |
+| `UserHistorySuite` | SQLite history store, score decay, engine integration |
+| `IMESettingsSuite` | UserDefaults suite round-trip, engine honors settings |
+| `SQLiteCandidateStoreSuite` | Alias-aware prefix lookup (bundled + legacy schema) |
+| `PropertySuite` | 5 properties: legal syllables parse, no Latin interleaving (×2), sliding-window equivalence, anchor monotonicity |
+| `FuzzSuite` | Budget-capped random buffers (`FUZZ_BUDGET_MS`, default 1000ms) |
 
 **Key invariants:**
 - All committed output contains only Myanmar Unicode (U+1000–U+109F) and
-  U+200C — no Latin leakage.
+  U+200C — no Latin interleaved inside composed runs.
 - Forward parse → reverse romanize → forward parse produces the same
   surface (round-trip stable).
 - Illegal consonant+medial pairs never appear in committed output.
+
+### Benchmarks
+
+```bash
+cd Packages/BurmeseIMECore
+swift run -c release BurmeseBench                                  # JSON on stdout
+swift run -c release BurmeseBench --check Tests/Benchmarks/baseline.json
+swift run -c release BurmeseBench --update Tests/Benchmarks/baseline.json
+swift run -c release BurmeseBench --scenario medium
+```
+
+Scenarios: `short` (6-char buffer × 1000), `medium` (11-char × 1000),
+`long` (30-char × 500), `incremental` (38-char typed one key at a time).
+Metrics: p50/p95/p99/max per scenario in microseconds. Warm-up = 50
+iterations; each scenario runs three times with the middle-p95 run
+reported. `--check` exits 1 on >20% p95 or >30% p99 regression against
+the committed baseline.
 
 ---
 

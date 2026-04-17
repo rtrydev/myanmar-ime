@@ -7,11 +7,14 @@ for user-facing documentation.
 
 ```
 Packages/BurmeseIMECore/   Swift Package — pure conversion engine, no UI
-  Sources/BurmeseIMECore/  Engine source
-  Sources/LexiconBuilder/  TSV → SQLite lexicon compiler
-  Tests/TestRunner/        CLI test driver (replaces XCTest when unavailable)
-  Tests/BurmeseIMECoreTests XCTest suite (requires Xcode toolchain)
-  Data/                    Lexicon source TSV
+  Sources/BurmeseIMECore/        Engine source
+  Sources/BurmeseIMETestSupport/ Shared test framework + suites (single source)
+  Sources/LexiconBuilder/        TSV → SQLite lexicon compiler
+  Sources/BurmeseBench/          Perf benchmark + regression check
+  Tests/TestRunner/              CLI driver (iterates BurmeseTestSuites.all)
+  Tests/BurmeseIMECoreTests/     XCTest drivers (one XCTestCase per suite)
+  Tests/Benchmarks/baseline.json Committed perf baseline
+  Data/                          Lexicon source TSV
 native/macos/              Xcode project with two apps + installer
   BurmeseIME/              Headless IMK bundle (installs to ~/Library/Input Methods/)
   BurmeseIMEPreferences/   SwiftUI settings app (installs to /Applications/)
@@ -34,6 +37,25 @@ swift run TestRunner    # ← use this, not `swift test`
 `swift test` may fail with *no such module 'XCTest'* on plain SPM toolchains.
 `TestRunner` is a hand-rolled CLI that exercises the same cases and prints
 `ALL N TESTS PASSED`; prefer it for quick iteration.
+
+Every test case lives under `Sources/BurmeseIMETestSupport/Suites/` and
+is exposed via the `BurmeseTestSuites.all` index. Both `TestRunner` and
+the XCTest drivers iterate that same list — when adding a case, edit the
+matching suite file and both runners pick it up. `FUZZ_BUDGET_MS` caps
+the fuzz suite's wall-clock time (default 1000 ms).
+
+### Benchmarks
+
+```bash
+swift run -c release BurmeseBench                               # emit JSON
+swift run -c release BurmeseBench --check Tests/Benchmarks/baseline.json
+swift run -c release BurmeseBench --update Tests/Benchmarks/baseline.json
+swift run -c release BurmeseBench --scenario medium
+```
+
+Four scenarios (`short`/`medium`/`long`/`incremental`). `--check` exits 1
+if p95 regresses >20% or p99 regresses >30% vs the committed baseline.
+Update the baseline only when an intentional perf change lands.
 
 ### Lexicon rebuild
 
