@@ -4,4 +4,7 @@
    <FileRef
       location = "group:BurmeseIMEApp.xcodeproj">
    </FileRef>
+   <FileRef
+      location = "group:../../Packages/BurmeseIMECore">
+   </FileRef>
 </Workspace>

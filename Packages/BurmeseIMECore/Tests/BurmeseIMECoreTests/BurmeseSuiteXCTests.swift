@@ -29,10 +29,8 @@ private final class XCTReporter: TestReporter {
 private func runSuite(_ suite: TestSuite, xctest: XCTestCase) {
     let reporter = XCTReporter(xctest: xctest)
     for testCase in suite.cases {
-        XCTContext.runActivity(named: testCase.name) { _ in
-            let ctx = TestContext(caseName: testCase.name, reporter: reporter)
-            testCase.body(ctx)
-        }
+        let ctx = TestContext(caseName: testCase.name, reporter: reporter)
+        testCase.body(ctx)
     }
 }
 
