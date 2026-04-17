@@ -3,42 +3,60 @@
       {
     "scenario": "short",
     "iterations": 1000,
-    "p50_us": 397.54,
-    "p95_us": 414.58,
-    "p99_us": 430.83,
-    "max_us": 467.92,
+    "p50_us": 55.33,
+    "p95_us": 58.96,
+    "p99_us": 67.17,
+    "max_us": 84.67,
     "allocations": 0
   },
           {
     "scenario": "medium",
     "iterations": 1000,
-    "p50_us": 7820.67,
-    "p95_us": 7942.38,
-    "p99_us": 8007.54,
-    "max_us": 8153.75,
+    "p50_us": 209.79,
+    "p95_us": 227.50,
+    "p99_us": 247.58,
+    "max_us": 333.54,
     "allocations": 0
   },
           {
     "scenario": "long",
     "iterations": 500,
-    "p50_us": 46231.75,
-    "p95_us": 47085.38,
-    "p99_us": 47456.50,
-    "max_us": 49691.29,
+    "p50_us": 873.21,
+    "p95_us": 922.29,
+    "p99_us": 952.67,
+    "max_us": 1006.38,
     "allocations": 0
   },
           {
     "scenario": "incremental",
     "iterations": 481,
-    "p50_us": 12695.58,
-    "p95_us": 38845.46,
-    "p99_us": 40940.58,
-    "max_us": 41570.33,
+    "p50_us": 287.67,
+    "p95_us": 766.21,
+    "p99_us": 822.62,
+    "max_us": 845.71,
+    "allocations": 0
+  },
+          {
+    "scenario": "garbage",
+    "iterations": 200,
+    "p50_us": 269.79,
+    "p95_us": 286.62,
+    "p99_us": 308.67,
+    "max_us": 319.12,
+    "allocations": 0
+  },
+          {
+    "scenario": "garbage_incremental",
+    "iterations": 496,
+    "p50_us": 161.25,
+    "p95_us": 261.71,
+    "p99_us": 275.96,
+    "max_us": 283.92,
     "allocations": 0
   }
   ],
   "meta": {
-    "commit": "45adf6f",
-    "date": "2026-04-17T10:00:39Z"
+    "commit": "83e9cd8",
+    "date": "2026-04-17T14:49:53Z"
   }
 }

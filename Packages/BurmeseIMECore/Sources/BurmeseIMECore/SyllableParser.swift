@@ -13,9 +13,23 @@ import Foundation
 /// pre-computed consonant+medial combinations followed by vowel suffixes.
 public final class SyllableParser: Sendable {
 
-    struct ParseState: Sendable {
-        let output: String
-        let reading: String
+    /// How a state extends its parent. Replaces per-state `output`/`reading`
+    /// strings — the full surface is reconstructed only for the final top-K
+    /// in `finalizeStates` by walking the `parentIdx` chain.
+    private enum MatchRef: Hashable, Sendable {
+        case seed
+        case skip
+        case onsetOnly(onsetId: Int32)
+        case onsetVowel(onsetId: Int32, vowelId: Int32)
+        case vowelOnly(vowelId: Int32)
+    }
+
+    /// DP state. Holds only scalars + a back-pointer; the `output` and
+    /// `reading` strings are derived on demand from the `matchRef` chain.
+    private struct ParseState: Sendable {
+        let parentIdx: Int32       // `-1` for the seed state
+        let matchRef: MatchRef
+        let charEnd: Int32
         let score: Int
         let legalityScore: Int
         let aliasCost: Int
@@ -26,6 +40,7 @@ public final class SyllableParser: Sendable {
 
     /// Pre-computed consonant+medial combinations mapped from roman key to Myanmar output.
     struct OnsetEntry: Sendable {
+        let id: Int32             // index into the parser's flat onset table
         let canonicalRoman: String
         let myanmar: String       // consonant + medials as Myanmar string
         let onset: Character      // the base consonant
@@ -35,6 +50,7 @@ public final class SyllableParser: Sendable {
     }
 
     struct VowelMatchEntry: Sendable {
+        let id: Int32             // index into the parser's flat vowel table
         let canonicalRoman: String
         let myanmar: String
         let aliasCost: Int
@@ -50,15 +66,36 @@ public final class SyllableParser: Sendable {
     private typealias OnsetMatch = (end: Int, entry: OnsetEntry)
     private typealias VowelMatch = (end: Int, entry: VowelMatchEntry)
 
-    /// All possible onset entries (consonant + optional medials), keyed by the
-    /// exact match string or its digitless alias.
-    private let onsetEntries: [String: [OnsetEntry]]
+    /// Flat ASCII trie used to match onsets/vowels without per-lookup string
+    /// slicing. The composing buffer is normalized to lowercase ASCII
+    /// (a-z + "+*':." — see `Romanization.composingCharacters`), so a
+    /// fixed 128-wide children table covers every character the walker can
+    /// encounter. Nodes with terminal payloads store a half-open range into
+    /// a per-trie payload array — one trie for onsets, one for vowels.
+    private struct AsciiTrieTable {
+        /// `children[node * 128 + byte] = childNode` (`-1` if absent).
+        let children: [Int32]
+        /// Per-node half-open terminal range: `terminalStart[n]..<terminalStart[n+1]`
+        /// indexes into the payload array of the owning trie.
+        let terminalStart: [Int32]
+        /// Deepest path in the trie — bounds the walk.
+        let maxDepth: Int
+    }
 
-    /// Vowel entries keyed by the exact match string or its digitless alias.
-    private let vowelEntries: [String: [VowelMatchEntry]]
+    private let onsetTrie: AsciiTrieTable
+    private let onsetTerminals: [OnsetEntry]
 
-    /// Vowel keys sorted by descending length for longest-match.
-    private let vowelKeysSorted: [String]
+    private let vowelTrie: AsciiTrieTable
+    private let vowelTerminals: [VowelMatchEntry]
+
+    /// Pre-computed `Grammar.validateSyllable` result for each onset entry
+    /// paired with vowelRoman = "a" (the inherent vowel used by onset-only
+    /// transitions). Indexed by `OnsetEntry.id`.
+    private let onsetBareLegality: [Int]
+
+    /// Pre-computed `Grammar.validateSyllable` result for each standalone-vowel
+    /// transition (onset: nil). Indexed by `VowelMatchEntry.id`.
+    private let vowelOnlyLegality: [Int]
 
     /// Maximum onset key length for bounded search.
     public let maxOnsetLen: Int
@@ -81,7 +118,9 @@ public final class SyllableParser: Sendable {
             baseAliasCost: Int
         ) {
             for variant in Romanization.aliasVariants(for: canonicalRoman, baseAliasCost: baseAliasCost) {
+                // `id` is rewritten by `buildTrie` during flattening.
                 onsetLookup[variant.key, default: []].append(OnsetEntry(
+                    id: -1,
                     canonicalRoman: canonicalRoman,
                     myanmar: myanmar,
                     onset: onset,
@@ -164,6 +203,7 @@ public final class SyllableParser: Sendable {
                     (hasY2 ? "y2" : "")
 
                 onsetLookup[alias.roman, default: []].append(OnsetEntry(
+                    id: -1,
                     canonicalRoman: canonical,
                     myanmar: myanmarOutput,
                     onset: alias.consonant,
@@ -174,13 +214,26 @@ public final class SyllableParser: Sendable {
             }
         }
 
-        self.onsetEntries = onsetLookup
-        self.maxOnsetLen = onsetLookup.keys.map(\.count).max() ?? 1
+        let builtOnsetTrie = Self.buildTrie(from: onsetLookup) { entry, id in
+            OnsetEntry(
+                id: id,
+                canonicalRoman: entry.canonicalRoman,
+                myanmar: entry.myanmar,
+                onset: entry.onset,
+                medials: entry.medials,
+                aliasCost: entry.aliasCost,
+                structureCost: entry.structureCost
+            )
+        }
+        self.onsetTrie = builtOnsetTrie.table
+        self.onsetTerminals = builtOnsetTrie.terminals
+        self.maxOnsetLen = builtOnsetTrie.table.maxDepth
 
         var vowelLookup: [String: [VowelMatchEntry]] = [:]
         for entry in Romanization.vowels {
             for variant in Romanization.aliasVariants(for: entry.roman, baseAliasCost: entry.aliasCost) {
                 vowelLookup[variant.key, default: []].append(VowelMatchEntry(
+                    id: -1,
                     canonicalRoman: entry.roman,
                     myanmar: entry.myanmar,
                     aliasCost: variant.aliasCost,
@@ -188,14 +241,122 @@ public final class SyllableParser: Sendable {
                 ))
             }
         }
-        self.vowelEntries = vowelLookup
-        self.maxVowelLen = vowelLookup.keys.map(\.count).max() ?? 1
-        self.vowelKeysSorted = vowelLookup.keys.sorted { lhs, rhs in
-            if lhs.count != rhs.count {
-                return lhs.count > rhs.count
-            }
-            return lhs < rhs
+        let builtVowelTrie = Self.buildTrie(from: vowelLookup) { entry, id in
+            VowelMatchEntry(
+                id: id,
+                canonicalRoman: entry.canonicalRoman,
+                myanmar: entry.myanmar,
+                aliasCost: entry.aliasCost,
+                isStandalone: entry.isStandalone
+            )
         }
+        self.vowelTrie = builtVowelTrie.table
+        self.vowelTerminals = builtVowelTrie.terminals
+        self.maxVowelLen = builtVowelTrie.table.maxDepth
+
+        // Pre-compute syllable legality for every bare onset (vowelRoman = "a")
+        // and every standalone vowel. Paired (onset, vowel) legality is
+        // memoized lazily during parse — the Cartesian product is large but
+        // real inputs touch only a small slice of it.
+        var bareOnsetLegalities = [Int](repeating: 0, count: builtOnsetTrie.terminals.count)
+        for (idx, entry) in builtOnsetTrie.terminals.enumerated() {
+            bareOnsetLegalities[idx] = Grammar.validateSyllable(
+                onset: entry.onset,
+                medials: entry.medials,
+                vowelRoman: "a"
+            )
+        }
+        self.onsetBareLegality = bareOnsetLegalities
+
+        var vowelOnlyLegalities = [Int](repeating: 0, count: builtVowelTrie.terminals.count)
+        for (idx, entry) in builtVowelTrie.terminals.enumerated() {
+            vowelOnlyLegalities[idx] = Grammar.validateSyllable(
+                onset: nil,
+                medials: [],
+                vowelRoman: entry.canonicalRoman
+            )
+        }
+        self.vowelOnlyLegality = vowelOnlyLegalities
+    }
+
+    /// Compact a `[String: [Entry]]` map into an ASCII trie + flat terminal
+    /// payloads. Only keys consisting of characters < 128 are indexed — in
+    /// practice the romanization tables include digit-bearing canonical
+    /// forms (e.g. "ay2") which `Romanization.normalize` never produces,
+    /// so skipping those saves nodes and never affects matching.
+    private static func buildTrie<Entry>(
+        from lookup: [String: [Entry]],
+        assignId: (Entry, Int32) -> Entry
+    ) -> (table: AsciiTrieTable, terminals: [Entry]) {
+        // Stage 1: build mutable children + per-node terminal lists as
+        // parallel flat arrays (Swift forbids nested types inside generic
+        // functions, so we avoid a BuildNode struct).
+        var children: [Int32] = Array(repeating: -1, count: 128) // root
+        var nodeTerminals: [[Entry]] = [[]]
+        var maxDepth = 0
+
+        func allocateNode() -> Int32 {
+            let idx = Int32(nodeTerminals.count)
+            children.append(contentsOf: repeatElement(Int32(-1), count: 128))
+            nodeTerminals.append([])
+            return idx
+        }
+
+        for (key, entries) in lookup {
+            // Accept the key only if every character fits in one ASCII byte.
+            // Other keys (digit disambiguators) are unreachable from a
+            // normalized composing buffer, so dropping them is safe.
+            var bytes: [UInt8] = []
+            bytes.reserveCapacity(key.count)
+            var ok = true
+            for scalar in key.unicodeScalars {
+                if scalar.value < 128 {
+                    bytes.append(UInt8(scalar.value))
+                } else {
+                    ok = false
+                    break
+                }
+            }
+            guard ok, !bytes.isEmpty else { continue }
+
+            var current: Int32 = 0
+            for byte in bytes {
+                let slotIndex = Int(current) * 128 + Int(byte)
+                let existing = children[slotIndex]
+                if existing < 0 {
+                    let newIdx = allocateNode()
+                    children[slotIndex] = newIdx
+                    current = newIdx
+                } else {
+                    current = existing
+                }
+            }
+            nodeTerminals[Int(current)].append(contentsOf: entries)
+            if bytes.count > maxDepth { maxDepth = bytes.count }
+        }
+
+        // Stage 2: flatten per-node terminal lists into a packed array.
+        let nodeCount = nodeTerminals.count
+        var terminalStart = [Int32](repeating: 0, count: nodeCount + 1)
+        var terminals: [Entry] = []
+        terminals.reserveCapacity(nodeTerminals.reduce(0) { $0 + $1.count })
+        for index in 0..<nodeCount {
+            terminalStart[index] = Int32(terminals.count)
+            for entry in nodeTerminals[index] {
+                let id = Int32(terminals.count)
+                terminals.append(assignId(entry, id))
+            }
+        }
+        terminalStart[nodeCount] = Int32(terminals.count)
+
+        return (
+            AsciiTrieTable(
+                children: children,
+                terminalStart: terminalStart,
+                maxDepth: max(maxDepth, 1)
+            ),
+            terminals
+        )
     }
 
     // MARK: - Public API
@@ -214,41 +375,109 @@ public final class SyllableParser: Sendable {
         let beamWidth = max(maxResults * 16, 64)
         let onsetMatchesByStart = precomputeOnsetMatches(chars)
         let vowelMatchesByStart = precomputeVowelMatches(chars)
-        let states = finalizeStates(
-            nBestParse(
-                chars,
-                onsetMatchesByStart: onsetMatchesByStart,
-                vowelMatchesByStart: vowelMatchesByStart,
-                maxResults: beamWidth
-            ),
+        let (arena, finalIndices) = nBestParse(
+            chars,
+            onsetMatchesByStart: onsetMatchesByStart,
+            vowelMatchesByStart: vowelMatchesByStart,
+            maxResults: beamWidth
+        )
+        return finalizeStates(
+            arena: arena,
+            finalIndices: finalIndices,
             limit: maxResults
         )
-        return states.map { state in
-            SyllableParse(
-                output: adjustLeadingVowel(state.output),
-                reading: state.reading,
-                aliasCost: state.aliasCost,
-                legalityScore: state.isLegal ? state.legalityScore : 0,
-                score: state.score,
-                structureCost: state.structureCost
+    }
+
+    /// Find the longest prefix of `input` whose top-`maxResults` parses pass
+    /// the caller's `acceptable` predicate, and return that prefix length
+    /// together with its top parses. Equivalent to repeatedly calling
+    /// `parseCandidates` on `input[0..<k]` from `k = n` down to `1` and
+    /// stopping at the first acceptable result — but runs a single DP and
+    /// walks its bucket array backward, so the cost is linear rather than
+    /// quadratic in the buffer length. Returns `(0, [])` when no prefix has
+    /// an acceptable parse.
+    ///
+    /// DP states at bucket `k` only depend on `chars[0..<k]`, so each
+    /// bucket's best parse at position `k` matches what a fresh parse of
+    /// the length-`k` prefix would produce. This property is what makes
+    /// the single-pass walk semantically equivalent to the per-length loop.
+    public func parseLongestAcceptablePrefix(
+        _ input: String,
+        maxResults: Int = 1,
+        acceptable: (SyllableParse) -> Bool
+    ) -> (length: Int, parses: [SyllableParse]) {
+        let normalized = Romanization.normalize(input)
+        guard !normalized.isEmpty, maxResults > 0 else { return (0, []) }
+
+        let chars = Array(normalized)
+        let beamWidth = max(maxResults * 16, 64)
+        let onsetMatchesByStart = precomputeOnsetMatches(chars)
+        let vowelMatchesByStart = precomputeVowelMatches(chars)
+        var (arena, dp) = runDP(
+            chars,
+            onsetMatchesByStart: onsetMatchesByStart,
+            vowelMatchesByStart: vowelMatchesByStart,
+            maxResults: beamWidth
+        )
+
+        // Walk buckets backward; at each position cheaply find the best
+        // legal state via scalar `isBetterDP`, materialize only it, and
+        // test acceptability. `finalizeStates` is deferred until we've
+        // found an acceptable position — its O(bucket) materialize + sort
+        // + dedup is wasted work on every earlier position the walk has
+        // to reject.
+        for k in stride(from: chars.count, through: 1, by: -1) {
+            if dp[k].needsPrune {
+                pruneBucket(&dp[k], arena: arena, limit: beamWidth)
+            }
+            var bestIdx: Int32 = -1
+            for idx in dp[k].stateIndices {
+                let s = arena[Int(idx)]
+                guard s.isLegal, s.syllableCount > 0 else { continue }
+                if bestIdx < 0 || isBetterDP(s, than: arena[Int(bestIdx)]) {
+                    bestIdx = idx
+                }
+            }
+            if bestIdx < 0 { continue }
+
+            let (output, reading) = materialize(stateIdx: bestIdx, arena: arena)
+            let best = arena[Int(bestIdx)]
+            let probe = SyllableParse(
+                output: adjustLeadingVowel(output),
+                reading: reading,
+                aliasCost: best.aliasCost,
+                legalityScore: best.isLegal ? best.legalityScore : 0,
+                score: best.score,
+                structureCost: best.structureCost
             )
+            guard acceptable(probe) else { continue }
+
+            let parses = finalizeStates(
+                arena: arena,
+                finalIndices: dp[k].stateIndices,
+                limit: maxResults
+            )
+            return (k, parses)
         }
+        return (0, [])
     }
 
     // MARK: - N-best DP Parse
 
-    /// Bucket at a single DP position. Uses a dictionary for O(1) dedup
-    /// and defers sorting until all transitions into this position are done.
+    /// Bucket at a single DP position. Holds arena indices only — the arena
+    /// (shared across all buckets in one parse) is where `ParseState` values
+    /// live. Buckets grow until they exceed `limit * 2`, at which point
+    /// `pruneBucket` drops everything below the top `limit` by score.
     private struct DPBucket {
-        /// Best state for each (output, reading) key.
-        var index: [StateKey: Int] = [:]
-        var states: [ParseState] = []
+        var stateIndices: [Int32] = []
         var needsPrune = false
     }
 
-    private struct StateKey: Hashable {
-        let output: String
-        let reading: String
+    /// Pack two 32-bit ids into a single dictionary key. Callers are
+    /// responsible for treating each half as unsigned.
+    @inline(__always)
+    private static func packPair(_ a: Int32, _ b: Int32) -> UInt64 {
+        (UInt64(UInt32(bitPattern: a)) << 32) | UInt64(UInt32(bitPattern: b))
     }
 
     private func nBestParse(
@@ -256,148 +485,166 @@ public final class SyllableParser: Sendable {
         onsetMatchesByStart: [[OnsetMatch]],
         vowelMatchesByStart: [[VowelMatch]],
         maxResults: Int
-    ) -> [ParseState] {
+    ) -> (arena: [ParseState], finalIndices: [Int32]) {
+        var (arena, dp) = runDP(
+            chars,
+            onsetMatchesByStart: onsetMatchesByStart,
+            vowelMatchesByStart: vowelMatchesByStart,
+            maxResults: maxResults
+        )
         let n = chars.count
+        if dp[n].needsPrune {
+            pruneBucket(&dp[n], arena: arena, limit: maxResults)
+        }
+        return (arena, dp[n].stateIndices)
+    }
+
+    /// Run the N-best DP and return the raw arena + per-position buckets.
+    /// Callers that only need the final bucket should use `nBestParse`;
+    /// callers that walk intermediate positions (e.g.
+    /// `parseLongestAcceptablePrefix`) use this variant.
+    private func runDP(
+        _ chars: [Character],
+        onsetMatchesByStart: [[OnsetMatch]],
+        vowelMatchesByStart: [[VowelMatch]],
+        maxResults: Int
+    ) -> (arena: [ParseState], dp: [DPBucket]) {
+        let n = chars.count
+        var arena: [ParseState] = []
+        arena.reserveCapacity(max(n * maxResults / 4, 64))
         var dp = [DPBucket](repeating: DPBucket(), count: n + 1)
-        let seed = ParseState(
-            output: "",
-            reading: "",
+
+        // Seed
+        let seedIdx = Int32(arena.count)
+        arena.append(ParseState(
+            parentIdx: -1,
+            matchRef: .seed,
+            charEnd: 0,
             score: 0,
             legalityScore: 0,
             aliasCost: 0,
             syllableCount: 0,
             structureCost: 0,
             isLegal: true
-        )
-        dp[0].states.append(seed)
-        dp[0].index[StateKey(output: "", reading: "")] = 0
+        ))
+        dp[0].stateIndices.append(seedIdx)
+
+        // Lazy legality cache for paired (onsetId, vowelId). Bare-onset and
+        // standalone-vowel cases are already pre-computed at init time.
+        var pairLegality: [UInt64: Int] = [:]
 
         for i in 0..<n {
-            guard !dp[i].states.isEmpty else { continue }
+            guard !dp[i].stateIndices.isEmpty else { continue }
 
-            // Prune the current bucket before expanding, if it grew large.
             if dp[i].needsPrune {
-                pruneBucket(&dp[i], limit: maxResults)
+                pruneBucket(&dp[i], arena: arena, limit: maxResults)
             }
 
             let onsetMatches = onsetMatchesByStart[i]
             let standaloneVowels = vowelMatchesByStart[i]
-            for previous in dp[i].states {
+            // Snapshot — the bucket's stateIndices is mutated by insertState
+            // into downstream buckets, but we only read dp[i] here.
+            let prevIndices = dp[i].stateIndices
+            for prevIdx in prevIndices {
+                let previous = arena[Int(prevIdx)]
                 var matched = false
 
                 for (onsetEnd, onsetEntry) in onsetMatches {
-                    let onsetReading = onsetEntry.canonicalRoman + "a"
-                    let onsetLegality = Grammar.validateSyllable(
-                        onset: onsetEntry.onset,
-                        medials: onsetEntry.medials,
-                        vowelRoman: "a"
-                    )
-                    insertState(
-                        &dp,
-                        at: onsetEnd,
-                        state: ParseState(
-                            output: previous.output + onsetEntry.myanmar,
-                            reading: previous.reading + onsetReading,
-                            score: previous.score + scoreMatch(
-                                consumed: onsetEnd - i,
-                                ruleCount: 1,
-                                legality: onsetLegality,
-                                aliasCost: onsetEntry.aliasCost
-                            ),
-                            legalityScore: previous.legalityScore + max(onsetLegality, 0),
-                            aliasCost: previous.aliasCost + onsetEntry.aliasCost,
-                            syllableCount: previous.syllableCount + 1,
-                            structureCost: previous.structureCost + onsetEntry.structureCost,
-                            isLegal: previous.isLegal && onsetLegality > 0
+                    let onsetLegality = onsetBareLegality[Int(onsetEntry.id)]
+                    let newState = ParseState(
+                        parentIdx: prevIdx,
+                        matchRef: .onsetOnly(onsetId: onsetEntry.id),
+                        charEnd: Int32(onsetEnd),
+                        score: previous.score + scoreMatch(
+                            consumed: onsetEnd - i,
+                            ruleCount: 1,
+                            legality: onsetLegality,
+                            aliasCost: onsetEntry.aliasCost
                         ),
-                        limit: maxResults
+                        legalityScore: previous.legalityScore + max(onsetLegality, 0),
+                        aliasCost: previous.aliasCost + onsetEntry.aliasCost,
+                        syllableCount: previous.syllableCount + 1,
+                        structureCost: previous.structureCost + onsetEntry.structureCost,
+                        isLegal: previous.isLegal && onsetLegality > 0
                     )
+                    insertState(&arena, &dp, at: onsetEnd, state: newState, limit: maxResults)
                     matched = true
 
                     let vowelMatches = vowelMatchesByStart[onsetEnd]
                     for (vowelEnd, vowelEntry) in vowelMatches {
-                        let legality = Grammar.validateSyllable(
-                            onset: onsetEntry.onset,
-                            medials: onsetEntry.medials,
-                            vowelRoman: vowelEntry.canonicalRoman
-                        )
-                        insertState(
-                            &dp,
-                            at: vowelEnd,
-                            state: ParseState(
-                                output: previous.output + onsetEntry.myanmar + vowelEntry.myanmar,
-                                reading: previous.reading + onsetEntry.canonicalRoman + vowelEntry.canonicalRoman,
-                                score: previous.score + scoreMatch(
-                                    consumed: vowelEnd - i,
-                                    ruleCount: 2,
-                                    legality: legality,
-                                    aliasCost: onsetEntry.aliasCost + vowelEntry.aliasCost
-                                ),
-                                legalityScore: previous.legalityScore + max(legality, 0),
-                                aliasCost: previous.aliasCost + onsetEntry.aliasCost + vowelEntry.aliasCost,
-                                syllableCount: previous.syllableCount + 1,
-                                structureCost: previous.structureCost + onsetEntry.structureCost,
-                                isLegal: previous.isLegal && legality > 0
+                        let key = Self.packPair(onsetEntry.id, vowelEntry.id)
+                        let legality: Int
+                        if let cached = pairLegality[key] {
+                            legality = cached
+                        } else {
+                            legality = Grammar.validateSyllable(
+                                onset: onsetEntry.onset,
+                                medials: onsetEntry.medials,
+                                vowelRoman: vowelEntry.canonicalRoman
+                            )
+                            pairLegality[key] = legality
+                        }
+                        let pairState = ParseState(
+                            parentIdx: prevIdx,
+                            matchRef: .onsetVowel(onsetId: onsetEntry.id, vowelId: vowelEntry.id),
+                            charEnd: Int32(vowelEnd),
+                            score: previous.score + scoreMatch(
+                                consumed: vowelEnd - i,
+                                ruleCount: 2,
+                                legality: legality,
+                                aliasCost: onsetEntry.aliasCost + vowelEntry.aliasCost
                             ),
-                            limit: maxResults
+                            legalityScore: previous.legalityScore + max(legality, 0),
+                            aliasCost: previous.aliasCost + onsetEntry.aliasCost + vowelEntry.aliasCost,
+                            syllableCount: previous.syllableCount + 1,
+                            structureCost: previous.structureCost + onsetEntry.structureCost,
+                            isLegal: previous.isLegal && legality > 0
                         )
+                        insertState(&arena, &dp, at: vowelEnd, state: pairState, limit: maxResults)
                         matched = true
                     }
                 }
 
                 for (vowelEnd, vowelEntry) in standaloneVowels where !vowelEntry.isPureMedial {
-                    let legality = Grammar.validateSyllable(
-                        onset: nil,
-                        medials: [],
-                        vowelRoman: vowelEntry.canonicalRoman
-                    )
-                    insertState(
-                        &dp,
-                        at: vowelEnd,
-                        state: ParseState(
-                            output: previous.output + vowelEntry.myanmar,
-                            reading: previous.reading + vowelEntry.canonicalRoman,
-                            score: previous.score + scoreMatch(
-                                consumed: vowelEnd - i,
-                                ruleCount: 1,
-                                legality: legality,
-                                aliasCost: vowelEntry.aliasCost
-                            ),
-                            legalityScore: previous.legalityScore + max(legality, 0),
-                            aliasCost: previous.aliasCost + vowelEntry.aliasCost,
-                            syllableCount: previous.syllableCount + 1,
-                            structureCost: previous.structureCost,
-                            isLegal: previous.isLegal && legality > 0
+                    let legality = vowelOnlyLegality[Int(vowelEntry.id)]
+                    let newState = ParseState(
+                        parentIdx: prevIdx,
+                        matchRef: .vowelOnly(vowelId: vowelEntry.id),
+                        charEnd: Int32(vowelEnd),
+                        score: previous.score + scoreMatch(
+                            consumed: vowelEnd - i,
+                            ruleCount: 1,
+                            legality: legality,
+                            aliasCost: vowelEntry.aliasCost
                         ),
-                        limit: maxResults
+                        legalityScore: previous.legalityScore + max(legality, 0),
+                        aliasCost: previous.aliasCost + vowelEntry.aliasCost,
+                        syllableCount: previous.syllableCount + 1,
+                        structureCost: previous.structureCost,
+                        isLegal: previous.isLegal && legality > 0
                     )
+                    insertState(&arena, &dp, at: vowelEnd, state: newState, limit: maxResults)
                     matched = true
                 }
 
                 if !matched {
-                    insertState(
-                        &dp,
-                        at: i + 1,
-                        state: ParseState(
-                            output: previous.output,
-                            reading: previous.reading,
-                            score: previous.score - 100,
-                            legalityScore: previous.legalityScore,
-                            aliasCost: previous.aliasCost,
-                            syllableCount: previous.syllableCount,
-                            structureCost: previous.structureCost,
-                            isLegal: false
-                        ),
-                        limit: maxResults
+                    let newState = ParseState(
+                        parentIdx: prevIdx,
+                        matchRef: .skip,
+                        charEnd: Int32(i + 1),
+                        score: previous.score - 100,
+                        legalityScore: previous.legalityScore,
+                        aliasCost: previous.aliasCost,
+                        syllableCount: previous.syllableCount,
+                        structureCost: previous.structureCost,
+                        isLegal: false
                     )
+                    insertState(&arena, &dp, at: i + 1, state: newState, limit: maxResults)
                 }
             }
         }
 
-        if dp[n].needsPrune {
-            pruneBucket(&dp[n], limit: maxResults)
-        }
-        return dp[n].states
+        return (arena, dp)
     }
 
     // MARK: - Matching
@@ -407,13 +654,20 @@ public final class SyllableParser: Sendable {
         var results: [OnsetMatch] = []
         let remaining = chars.count - start
         guard remaining > 0 else { return results }
+        let maxLen = min(onsetTrie.maxDepth, remaining)
 
-        let maxLen = min(maxOnsetLen, remaining)
-        for len in stride(from: maxLen, through: 1, by: -1) {
-            let key = String(chars[start..<start + len])
-            if let entries = onsetEntries[key] {
-                for entry in entries {
-                    results.append((start + len, entry))
+        var nodeIdx: Int32 = 0
+        for offset in 0..<maxLen {
+            guard let byte = chars[start + offset].asciiValue else { break }
+            let child = onsetTrie.children[Int(nodeIdx) * 128 + Int(byte)]
+            if child < 0 { break }
+            nodeIdx = child
+            let startRange = onsetTrie.terminalStart[Int(nodeIdx)]
+            let endRange = onsetTrie.terminalStart[Int(nodeIdx) + 1]
+            if startRange < endRange {
+                let end = start + offset + 1
+                for i in Int(startRange)..<Int(endRange) {
+                    results.append((end, onsetTerminals[i]))
                 }
             }
         }
@@ -425,13 +679,20 @@ public final class SyllableParser: Sendable {
         var results: [VowelMatch] = []
         let remaining = chars.count - start
         guard remaining > 0 else { return results }
+        let maxLen = min(vowelTrie.maxDepth, remaining)
 
-        for key in vowelKeysSorted {
-            guard key.count <= remaining else { continue }
-            let slice = String(chars[start..<start + key.count])
-            if slice == key, let entries = vowelEntries[key] {
-                for entry in entries {
-                    results.append((start + key.count, entry))
+        var nodeIdx: Int32 = 0
+        for offset in 0..<maxLen {
+            guard let byte = chars[start + offset].asciiValue else { break }
+            let child = vowelTrie.children[Int(nodeIdx) * 128 + Int(byte)]
+            if child < 0 { break }
+            nodeIdx = child
+            let startRange = vowelTrie.terminalStart[Int(nodeIdx)]
+            let endRange = vowelTrie.terminalStart[Int(nodeIdx) + 1]
+            if startRange < endRange {
+                let end = start + offset + 1
+                for i in Int(startRange)..<Int(endRange) {
+                    results.append((end, vowelTerminals[i]))
                 }
             }
         }
@@ -460,31 +721,135 @@ public final class SyllableParser: Sendable {
 
     // MARK: - Finalization
 
-    private func finalizeStates(_ states: [ParseState], limit: Int) -> [ParseState] {
-        let nonEmptyStates = states.filter { !$0.output.isEmpty }
-        let legalStates = nonEmptyStates.filter(\.isLegal)
+    /// A fully materialized candidate: scalar fields plus the reconstructed
+    /// `output`/`reading` strings. Only produced for states that survive
+    /// pre-filtering in `finalizeStates` — materialization cost is amortized
+    /// over a handful of candidates rather than every DP transition.
+    private struct MaterializedState {
+        let state: ParseState
+        let output: String
+        let reading: String
+    }
 
-        let filteredStates: [ParseState]
-        if let minimumLegalSyllables = legalStates.map(\.syllableCount).min() {
-            filteredStates = legalStates.filter { $0.syllableCount == minimumLegalSyllables }
-        } else {
-            filteredStates = nonEmptyStates
+    private func finalizeStates(
+        arena: [ParseState],
+        finalIndices: [Int32],
+        limit: Int
+    ) -> [SyllableParse] {
+        // "Non-empty" under the legacy code meant `!output.isEmpty`; here that
+        // is precisely `syllableCount > 0` because every emitted output
+        // fragment is attached to a syllable-bearing transition. Skip-only
+        // paths accumulate syllableCount = 0 with no output.
+        var nonEmptyIndices: [Int32] = []
+        nonEmptyIndices.reserveCapacity(finalIndices.count)
+        for idx in finalIndices where arena[Int(idx)].syllableCount > 0 {
+            nonEmptyIndices.append(idx)
         }
 
-        var deduplicated: [String: ParseState] = [:]
+        var legalIndices: [Int32] = []
+        for idx in nonEmptyIndices where arena[Int(idx)].isLegal {
+            legalIndices.append(idx)
+        }
 
-        for state in sortedStates(filteredStates) {
-            let adjustedOutput = adjustLeadingVowel(state.output)
+        let filteredIndices: [Int32]
+        if !legalIndices.isEmpty {
+            var minimumLegalSyllables = Int.max
+            for idx in legalIndices {
+                let c = arena[Int(idx)].syllableCount
+                if c < minimumLegalSyllables { minimumLegalSyllables = c }
+            }
+            filteredIndices = legalIndices.filter {
+                arena[Int($0)].syllableCount == minimumLegalSyllables
+            }
+        } else {
+            filteredIndices = nonEmptyIndices
+        }
+
+        // Materialize strings once per surviving candidate. This is the only
+        // place output/reading are ever built.
+        var materialized: [MaterializedState] = []
+        materialized.reserveCapacity(filteredIndices.count)
+        for idx in filteredIndices {
+            let (output, reading) = materialize(stateIdx: idx, arena: arena)
+            materialized.append(MaterializedState(
+                state: arena[Int(idx)],
+                output: output,
+                reading: reading
+            ))
+        }
+
+        // Sort + dedup by `adjustLeadingVowel(output)`, matching legacy.
+        materialized.sort { isBetter($0, than: $1) }
+
+        var deduplicated: [String: MaterializedState] = [:]
+        for m in materialized {
+            let adjustedOutput = adjustLeadingVowel(m.output)
             if let existing = deduplicated[adjustedOutput] {
-                if isBetter(state, than: existing) {
-                    deduplicated[adjustedOutput] = state
+                if isBetter(m, than: existing) {
+                    deduplicated[adjustedOutput] = m
                 }
             } else {
-                deduplicated[adjustedOutput] = state
+                deduplicated[adjustedOutput] = m
             }
         }
 
-        return Array(sortedStates(Array(deduplicated.values)).prefix(limit))
+        let sortedFinal = deduplicated.values.sorted { isBetter($0, than: $1) }
+        return sortedFinal.prefix(limit).map { m in
+            SyllableParse(
+                output: adjustLeadingVowel(m.output),
+                reading: m.reading,
+                aliasCost: m.state.aliasCost,
+                legalityScore: m.state.isLegal ? m.state.legalityScore : 0,
+                score: m.state.score,
+                structureCost: m.state.structureCost
+            )
+        }
+    }
+
+    /// Walk the `parentIdx` chain backward to the seed, collect each
+    /// transition's contribution, then concatenate forward into a single
+    /// `output`/`reading` pair. Only called for the handful of states that
+    /// survive finalizing pre-filters.
+    private func materialize(stateIdx: Int32, arena: [ParseState]) -> (output: String, reading: String) {
+        var refs: [MatchRef] = []
+        var cur = stateIdx
+        while cur >= 0 {
+            let state = arena[Int(cur)]
+            refs.append(state.matchRef)
+            cur = state.parentIdx
+        }
+        refs.reverse()
+
+        var output = ""
+        var reading = ""
+        // Rough pre-sizing: Myanmar output is usually short enough that
+        // reservations a bit above refs.count × 2 avoid reallocation.
+        output.reserveCapacity(refs.count * 4)
+        reading.reserveCapacity(refs.count * 4)
+
+        for ref in refs {
+            switch ref {
+            case .seed, .skip:
+                continue
+            case .onsetOnly(let onsetId):
+                let entry = onsetTerminals[Int(onsetId)]
+                output.append(entry.myanmar)
+                reading.append(entry.canonicalRoman)
+                reading.append("a")
+            case .onsetVowel(let onsetId, let vowelId):
+                let onset = onsetTerminals[Int(onsetId)]
+                let vowel = vowelTerminals[Int(vowelId)]
+                output.append(onset.myanmar)
+                output.append(vowel.myanmar)
+                reading.append(onset.canonicalRoman)
+                reading.append(vowel.canonicalRoman)
+            case .vowelOnly(let vowelId):
+                let entry = vowelTerminals[Int(vowelId)]
+                output.append(entry.myanmar)
+                reading.append(entry.canonicalRoman)
+            }
+        }
+        return (output, reading)
     }
 
     // MARK: - Leading Vowel Adjustment
@@ -523,47 +888,38 @@ public final class SyllableParser: Sendable {
     }
 
     private func insertState(
+        _ arena: inout [ParseState],
         _ dp: inout [DPBucket],
         at index: Int,
         state: ParseState,
         limit: Int
     ) {
         guard index < dp.count else { return }
-
-        let key = StateKey(output: state.output, reading: state.reading)
-        if let existingIdx = dp[index].index[key] {
-            if isBetter(state, than: dp[index].states[existingIdx]) {
-                dp[index].states[existingIdx] = state
-            }
-        } else {
-            dp[index].index[key] = dp[index].states.count
-            dp[index].states.append(state)
-            if dp[index].states.count > limit * 2 {
-                dp[index].needsPrune = true
-            }
+        let stateIdx = Int32(arena.count)
+        arena.append(state)
+        dp[index].stateIndices.append(stateIdx)
+        if dp[index].stateIndices.count > limit * 2 {
+            dp[index].needsPrune = true
         }
     }
 
-    private func pruneBucket(_ bucket: inout DPBucket, limit: Int) {
-        guard bucket.states.count > limit else {
+    private func pruneBucket(_ bucket: inout DPBucket, arena: [ParseState], limit: Int) {
+        guard bucket.stateIndices.count > limit else {
             bucket.needsPrune = false
             return
         }
-        bucket.states = Array(sortedStates(bucket.states).prefix(limit))
-        bucket.index.removeAll(keepingCapacity: true)
-        for (i, state) in bucket.states.enumerated() {
-            bucket.index[StateKey(output: state.output, reading: state.reading)] = i
+        bucket.stateIndices.sort { lhsIdx, rhsIdx in
+            isBetterDP(arena[Int(lhsIdx)], than: arena[Int(rhsIdx)])
         }
+        bucket.stateIndices.removeLast(bucket.stateIndices.count - limit)
         bucket.needsPrune = false
     }
 
-    private func sortedStates(_ states: [ParseState]) -> [ParseState] {
-        states.sorted { lhs, rhs in
-            isBetter(lhs, than: rhs)
-        }
-    }
-
-    private func isBetter(_ lhs: ParseState, than rhs: ParseState) -> Bool {
+    /// DP-internal ranking — operates on scalar fields only. The top-K
+    /// surfaced to callers is re-sorted with the full string-aware tiebreak
+    /// in `finalizeStates`, so DP-time order ties don't affect output.
+    @inline(__always)
+    private func isBetterDP(_ lhs: ParseState, than rhs: ParseState) -> Bool {
         if lhs.isLegal != rhs.isLegal {
             return lhs.isLegal
         }
@@ -578,6 +934,27 @@ public final class SyllableParser: Sendable {
         }
         if lhs.structureCost != rhs.structureCost {
             return lhs.structureCost < rhs.structureCost
+        }
+        return lhs.charEnd < rhs.charEnd
+    }
+
+    /// Final ranking — uses materialized strings for the legacy lex
+    /// tiebreakers so the user-visible top-K order matches pre-refactor.
+    private func isBetter(_ lhs: MaterializedState, than rhs: MaterializedState) -> Bool {
+        if lhs.state.isLegal != rhs.state.isLegal {
+            return lhs.state.isLegal
+        }
+        if lhs.state.aliasCost != rhs.state.aliasCost {
+            return lhs.state.aliasCost < rhs.state.aliasCost
+        }
+        if lhs.state.score != rhs.state.score {
+            return lhs.state.score > rhs.state.score
+        }
+        if lhs.state.syllableCount != rhs.state.syllableCount {
+            return lhs.state.syllableCount < rhs.state.syllableCount
+        }
+        if lhs.state.structureCost != rhs.state.structureCost {
+            return lhs.state.structureCost < rhs.state.structureCost
         }
         if lhs.output != rhs.output {
             return lhs.output < rhs.output

@@ -71,7 +71,12 @@ public final class BurmeseEngine: @unchecked Sendable {
         var input: String
         var branches: [FrozenPrefixBranch]
     }
-    private var prefixCache: FrozenPrefixCache?
+    /// Small LRU (most-recent-first). Survives backspace-then-retype without
+    /// re-parsing the frozen prefix. Capacity is deliberately tiny — each
+    /// entry is one parse plus its branches (typically K=1), and linear scan
+    /// at this size is cheaper than dictionary overhead.
+    private var prefixCache: [FrozenPrefixCache] = []
+    private static let frozenPrefixCacheCapacity = 8
     private let cacheLock = NSLock()
 
     /// Anchor remembered across `update()` calls to keep the rendered
@@ -174,10 +179,22 @@ public final class BurmeseEngine: @unchecked Sendable {
     /// before LM-rescoring picks the top-K branches.
     private static let frozenPrefixCandidatePool = 16
 
-    private func renderFrozenPrefixBranches(_ prefix: String, baseContext: [String]) -> [FrozenPrefixBranch] {
+    /// Call-scoped memo key for LM `scoreSurface` lookups.
+    private struct LMScoreKey: Hashable {
+        let surface: String
+        let context: [String]
+    }
+
+    private func renderFrozenPrefixBranches(
+        _ prefix: String,
+        baseContext: [String],
+        lmCache: inout [LMScoreKey: Double]
+    ) -> [FrozenPrefixBranch] {
         cacheLock.lock()
-        if let cached = prefixCache, cached.input == prefix {
-            let branches = cached.branches
+        if let hitIdx = prefixCache.firstIndex(where: { $0.input == prefix }) {
+            let entry = prefixCache.remove(at: hitIdx)
+            prefixCache.insert(entry, at: 0)
+            let branches = entry.branches
             cacheLock.unlock()
             return branches
         }
@@ -189,7 +206,7 @@ public final class BurmeseEngine: @unchecked Sendable {
             branches = [FrozenPrefixBranch(
                 output: prefix,
                 reading: prefix,
-                lmScore: languageModel.scoreSurface(prefix, context: baseContext),
+                lmScore: scoreSurfaceCached(prefix, context: baseContext, cache: &lmCache),
                 contextWords: [prefix]
             )]
         } else {
@@ -198,7 +215,7 @@ public final class BurmeseEngine: @unchecked Sendable {
             var seen: Set<String> = []
             var scored: [FrozenPrefixBranch] = []
             for parse in parses where seen.insert(parse.output).inserted {
-                let lm = languageModel.scoreSurface(parse.output, context: baseContext)
+                let lm = scoreSurfaceCached(parse.output, context: baseContext, cache: &lmCache)
                 scored.append(FrozenPrefixBranch(
                     output: parse.output,
                     reading: parse.reading,
@@ -217,9 +234,25 @@ public final class BurmeseEngine: @unchecked Sendable {
         }
 
         cacheLock.lock()
-        prefixCache = FrozenPrefixCache(input: prefix, branches: branches)
+        prefixCache.removeAll(where: { $0.input == prefix })
+        prefixCache.insert(FrozenPrefixCache(input: prefix, branches: branches), at: 0)
+        if prefixCache.count > Self.frozenPrefixCacheCapacity {
+            prefixCache.removeLast(prefixCache.count - Self.frozenPrefixCacheCapacity)
+        }
         cacheLock.unlock()
         return branches
+    }
+
+    private func scoreSurfaceCached(
+        _ surface: String,
+        context: [String],
+        cache: inout [LMScoreKey: Double]
+    ) -> Double {
+        let key = LMScoreKey(surface: surface, context: context)
+        if let hit = cache[key] { return hit }
+        let score = languageModel.scoreSurface(surface, context: context)
+        cache[key] = score
+        return score
     }
 
     /// Update the composition state based on the current buffer and context.
@@ -359,14 +392,18 @@ public final class BurmeseEngine: @unchecked Sendable {
         // The probe always runs on the full normalized buffer: probing
         // only a trailing slice would start mid-syllable for long inputs
         // and reject valid letters that parse fine in full context.
-        // Single-best DP is linear in input length, so this stays cheap.
-        var normalized = initialNormalized
-        var droppedTail = ""
-        while !normalized.isEmpty {
-            let probe = parser.parseCandidates(normalized, maxResults: 1)
-            if probe.contains(where: { Self.isAcceptableParse($0) }) { break }
-            droppedTail = String(normalized.removeLast()) + droppedTail
-        }
+        //
+        // `parseLongestAcceptablePrefix` collapses the per-length loop
+        // into a single DP pass + backward walk of its buckets. On garbage
+        // / keyboard-bashing input this turns O(n) full parses into O(1).
+        let (acceptableLen, _) = parser.parseLongestAcceptablePrefix(
+            initialNormalized,
+            maxResults: 1,
+            acceptable: Self.isAcceptableParse
+        )
+        let initialChars = Array(initialNormalized)
+        let normalized = String(initialChars.prefix(acceptableLen))
+        let droppedTail = String(initialChars.suffix(initialChars.count - acceptableLen))
 
         guard !normalized.isEmpty else {
             return CompositionState(
@@ -470,8 +507,9 @@ public final class BurmeseEngine: @unchecked Sendable {
         let prefixBranches: [FrozenPrefixBranch]
         let parseInput: String
         let windowed: Bool
+        var lmCache: [LMScoreKey: Double] = [:]
         if anchorApplies, let anchor = priorAnchor {
-            let anchorLM = languageModel.scoreSurface(anchor.surface, context: context)
+            let anchorLM = scoreSurfaceCached(anchor.surface, context: context, cache: &lmCache)
             prefixBranches = [FrozenPrefixBranch(
                 output: anchor.surface,
                 reading: anchor.reading,
@@ -504,7 +542,7 @@ public final class BurmeseEngine: @unchecked Sendable {
             }
             let frozenPrefix = String(normalized.prefix(split))
             let activeTail = String(normalized.suffix(normalized.count - split))
-            prefixBranches = renderFrozenPrefixBranches(frozenPrefix, baseContext: context)
+            prefixBranches = renderFrozenPrefixBranches(frozenPrefix, baseContext: context, lmCache: &lmCache)
             parseInput = activeTail
             windowed = true
         } else {
@@ -547,7 +585,7 @@ public final class BurmeseEngine: @unchecked Sendable {
                 for parse in grammarParses {
                     let surface = branch.output + parse.output
                     let reading = branch.reading + parse.reading
-                    let tailLM = languageModel.scoreSurface(parse.output, context: branch.contextWords)
+                    let tailLM = scoreSurfaceCached(parse.output, context: branch.contextWords, cache: &lmCache)
                     grammarCandidates.append(RankedGrammarCandidate(
                         candidate: Candidate(
                             surface: surface,
@@ -576,7 +614,7 @@ public final class BurmeseEngine: @unchecked Sendable {
                     aliasCost: parse.aliasCost,
                     parserScore: parse.score,
                     structureCost: parse.structureCost,
-                    lmLogProb: languageModel.scoreSurface(parse.output, context: context)
+                    lmLogProb: scoreSurfaceCached(parse.output, context: context, cache: &lmCache)
                 )
             }
         }
@@ -651,7 +689,7 @@ public final class BurmeseEngine: @unchecked Sendable {
                         aliasPenalty: Romanization.aliasPenaltyCount(for: lexiconCandidate.reading),
                         aliasReading: Romanization.aliasReading(lexiconCandidate.reading),
                         composeReading: Romanization.composeLookupKey(lexiconCandidate.reading),
-                        lmLogProb: languageModel.scoreSurface(lexiconCandidate.surface, context: context)
+                        lmLogProb: scoreSurfaceCached(lexiconCandidate.surface, context: context, cache: &lmCache)
                     )
                 )
             }
@@ -1005,7 +1043,14 @@ public final class BurmeseEngine: @unchecked Sendable {
         // previously committed prefix from shrinking when we're forced
         // to recompute because the tail outgrew its budget.
         let scanFloor = max(1, lowerBound)
-        let scanLimit = max(scanFloor, target - targetTail)
+        // Cap the walk-back to one syllable's worth of characters. No legal
+        // syllable boundary spans more than `maxOnsetLen + maxVowelLen`, so
+        // if we don't find a legal prefix within that window the buffer is
+        // unparseable (garbage / keyboard bashing) — walking further just
+        // burns N-best parses against a string the user isn't going to
+        // keep typing. Give up and return the target split unchanged.
+        let maxWalkBack = parser.maxOnsetLen + parser.maxVowelLen
+        let scanLimit = max(scanFloor, target - maxWalkBack)
         var split = max(target, scanFloor)
         while split >= scanLimit {
             let prefix = String(chars[0..<split])
@@ -1024,12 +1069,15 @@ public final class BurmeseEngine: @unchecked Sendable {
     private func stableCachedPrefixLength(for normalized: String) -> Int? {
         cacheLock.lock()
         defer { cacheLock.unlock() }
-        guard let cached = prefixCache,
-              !cached.input.isEmpty,
-              normalized.hasPrefix(cached.input) else {
-            return nil
+        var best: Int? = nil
+        for entry in prefixCache {
+            guard !entry.input.isEmpty,
+                  normalized.hasPrefix(entry.input) else { continue }
+            if best == nil || entry.input.count > best! {
+                best = entry.input.count
+            }
         }
-        return cached.input.count
+        return best
     }
 
     /// Strip zero-width spaces (U+200B) so surfaces from the lexicon

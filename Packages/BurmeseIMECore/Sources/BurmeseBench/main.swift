@@ -25,6 +25,15 @@ let scenarios: [Scenario] = [
     Scenario(name: "incremental",
              kind: .incremental("mingalarparshinbyarthwarmaylaynaykaun"),
              iterations: 500),
+    // Keyboard-bashing: long stream of characters that don't form legal
+    // syllables. Guards against pathological fallthrough paths — the DP
+    // must not blow up on junk input.
+    Scenario(name: "garbage",
+             kind: .fullBuffer("jeiowfgneiorngieorndmfsoigjeiorngieorjgjerogijeqoprjgpojergpoj"),
+             iterations: 200),
+    Scenario(name: "garbage_incremental",
+             kind: .incremental("jeiowfgneiorngieorndmfsoigjeiorngieorjgjerogijeqoprjgpojergpoj"),
+             iterations: 500),
 ]
 
 // MARK: - Timing
