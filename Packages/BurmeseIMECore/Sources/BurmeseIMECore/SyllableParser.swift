@@ -775,8 +775,15 @@ public final class SyllableParser: Sendable {
                 let c = arena[Int(idx)].syllableCount
                 if c < minimumLegalSyllables { minimumLegalSyllables = c }
             }
-            filteredIndices = legalIndices.filter {
+            let minTier = legalIndices.filter {
                 arena[Int($0)].syllableCount == minimumLegalSyllables
+            }
+            if limit > 1 && minTier.count < 2 {
+                filteredIndices = legalIndices.filter {
+                    arena[Int($0)].syllableCount <= minimumLegalSyllables + 1
+                }
+            } else {
+                filteredIndices = minTier
             }
         } else {
             filteredIndices = nonEmptyIndices
@@ -810,7 +817,20 @@ public final class SyllableParser: Sendable {
             }
         }
 
-        let sortedFinal = deduplicated.values.sorted { isBetter($0, than: $1) }
+        // Rank with rarity penalty baked in so rare-codepoint parses fall
+        // below their common counterparts even when DP-time scalar fields
+        // tie. Retroflex onsets (Pali; correctly romanized with the "2"
+        // marker) and non-initial independent vowels each add a penalty;
+        // see `computeRarityPenalty` for the exact weights.
+        let rarityFor = deduplicated.mapValues { Self.computeRarityPenalty($0.output) }
+        let sortedFinal = deduplicated.values.sorted { lhs, rhs in
+            isBetter(
+                lhs,
+                rarity: rarityFor[adjustLeadingVowel(lhs.output)] ?? 0,
+                than: rhs,
+                rarity: rarityFor[adjustLeadingVowel(rhs.output)] ?? 0
+            )
+        }
         return sortedFinal.prefix(limit).map { m in
             SyllableParse(
                 output: adjustLeadingVowel(m.output),
@@ -818,9 +838,31 @@ public final class SyllableParser: Sendable {
                 aliasCost: m.state.aliasCost,
                 legalityScore: m.state.isLegal ? m.state.legalityScore : 0,
                 score: m.state.score,
-                structureCost: m.state.structureCost
+                structureCost: m.state.structureCost,
+                syllableCount: m.state.syllableCount,
+                rarityPenalty: rarityFor[adjustLeadingVowel(m.output)] ?? 0
             )
         }
+    }
+
+    /// Count rare-codepoint usages in an output surface so the final
+    /// ranker can downweight parses the user did not explicitly spell.
+    /// +1 per Pali retroflex consonant (these are correctly selected with
+    /// "t2" / "d2" / "n2" / "l2" — their appearance under a bare onset is
+    /// user-unexpected). Independent vowels are not penalized: the user
+    /// already pays `aliasCost` for picking an independent-vowel variant,
+    /// and explicit disambiguators like "u2." specifically request them.
+    private static func computeRarityPenalty(_ output: String) -> Int {
+        var penalty = 0
+        for scalar in output.unicodeScalars {
+            let v = scalar.value
+            // Retroflex consonants: ဋ ဌ ဍ ဎ ဏ ဠ
+            if v == 0x100B || v == 0x100C || v == 0x100D
+                || v == 0x100E || v == 0x100F || v == 0x1020 {
+                penalty += 1
+            }
+        }
+        return penalty
     }
 
     /// Walk the `parentIdx` chain backward to the seed, collect each
@@ -957,9 +999,18 @@ public final class SyllableParser: Sendable {
 
     /// Final ranking — uses materialized strings for the legacy lex
     /// tiebreakers so the user-visible top-K order matches pre-refactor.
+    ///
+    /// `syllableCount` sits above `aliasCost` so that when `finalizeStates`
+    /// widens the admitted set to `min+1` (for thin min-tiers), an extended
+    /// parse with lower alias cost cannot displace the canonical min-tier
+    /// parse at the top. Within a single tier all counts match, so this
+    /// has no effect on pre-widening behavior.
     private func isBetter(_ lhs: MaterializedState, than rhs: MaterializedState) -> Bool {
         if lhs.state.isLegal != rhs.state.isLegal {
             return lhs.state.isLegal
+        }
+        if lhs.state.syllableCount != rhs.state.syllableCount {
+            return lhs.state.syllableCount < rhs.state.syllableCount
         }
         if lhs.state.aliasCost != rhs.state.aliasCost {
             return lhs.state.aliasCost < rhs.state.aliasCost
@@ -967,8 +1018,40 @@ public final class SyllableParser: Sendable {
         if lhs.state.score != rhs.state.score {
             return lhs.state.score > rhs.state.score
         }
+        if lhs.state.structureCost != rhs.state.structureCost {
+            return lhs.state.structureCost < rhs.state.structureCost
+        }
+        if lhs.output != rhs.output {
+            return lhs.output < rhs.output
+        }
+        return lhs.reading < rhs.reading
+    }
+
+    /// Rarity-aware ordering for the final top-K step. Legality remains
+    /// the hard filter. `rarityPenalty` then sits above `syllableCount` so
+    /// a 2-syllable common parse (e.g. တဦ) outranks a 1-syllable retroflex
+    /// parse (ဋူ) even though the retroflex is "shorter" — users who did
+    /// not type the "2" disambiguator rarely want the retroflex up front.
+    private func isBetter(
+        _ lhs: MaterializedState,
+        rarity lhsRarity: Int,
+        than rhs: MaterializedState,
+        rarity rhsRarity: Int
+    ) -> Bool {
+        if lhs.state.isLegal != rhs.state.isLegal {
+            return lhs.state.isLegal
+        }
+        if lhsRarity != rhsRarity {
+            return lhsRarity < rhsRarity
+        }
         if lhs.state.syllableCount != rhs.state.syllableCount {
             return lhs.state.syllableCount < rhs.state.syllableCount
+        }
+        if lhs.state.aliasCost != rhs.state.aliasCost {
+            return lhs.state.aliasCost < rhs.state.aliasCost
+        }
+        if lhs.state.score != rhs.state.score {
+            return lhs.state.score > rhs.state.score
         }
         if lhs.state.structureCost != rhs.state.structureCost {
             return lhs.state.structureCost < rhs.state.structureCost

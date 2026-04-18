@@ -58,6 +58,10 @@ final class LexiconRankingXCTests: XCTestCase {
     func testAll() { runSuite(LexiconRankingSuite.suite, xctest: self) }
 }
 
+final class RankingXCTests: XCTestCase {
+    func testAll() { runSuite(RankingSuite.suite, xctest: self) }
+}
+
 final class LanguageModelXCTests: XCTestCase {
     func testAll() { runSuite(LanguageModelSuite.suite, xctest: self) }
 }

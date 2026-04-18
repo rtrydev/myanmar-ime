@@ -16,6 +16,8 @@ public final class BurmeseEngine: @unchecked Sendable {
         let aliasCost: Int
         let parserScore: Int
         let structureCost: Int
+        let syllableCount: Int
+        let rarityPenalty: Int
         var lmLogProb: Double
     }
 
@@ -597,6 +599,8 @@ public final class BurmeseEngine: @unchecked Sendable {
                         aliasCost: parse.aliasCost,
                         parserScore: parse.score,
                         structureCost: parse.structureCost,
+                        syllableCount: parse.syllableCount,
+                        rarityPenalty: parse.rarityPenalty,
                         lmLogProb: branch.lmScore + tailLM
                     ))
                 }
@@ -614,6 +618,8 @@ public final class BurmeseEngine: @unchecked Sendable {
                     aliasCost: parse.aliasCost,
                     parserScore: parse.score,
                     structureCost: parse.structureCost,
+                    syllableCount: parse.syllableCount,
+                    rarityPenalty: parse.rarityPenalty,
                     lmLogProb: scoreSurfaceCached(parse.output, context: context, cache: &lmCache)
                 )
             }
@@ -764,11 +770,11 @@ public final class BurmeseEngine: @unchecked Sendable {
                 else { continue }
                 let anchorKey = Self.stripZWSP(anchor.surface)
                 // Already matching — no promotion needed.
-                if Self.stripZWSP(merged[0].surface).hasPrefix(anchorKey) {
+                if Self.scalarHasPrefix(Self.stripZWSP(merged[0].surface), anchorKey) {
                     promoted = true
                     break
                 }
-                if let idx = merged.firstIndex(where: { Self.stripZWSP($0.surface).hasPrefix(anchorKey) }) {
+                if let idx = merged.firstIndex(where: { Self.scalarHasPrefix(Self.stripZWSP($0.surface), anchorKey) }) {
                     let keeper = merged.remove(at: idx)
                     merged.insert(keeper, at: 0)
                     promoted = true
@@ -832,9 +838,25 @@ public final class BurmeseEngine: @unchecked Sendable {
                 // differently). This prevents stale anchors from being
                 // used in synthesis and producing extra syllable splits.
                 let topStripped = Self.stripZWSP(top.surface)
-                anchorHistory.removeAll {
-                    !normalized.hasPrefix($0.normalized)
-                    || !topStripped.hasPrefix(Self.stripZWSP($0.surface))
+                let topScalars = Array(topStripped.unicodeScalars)
+                anchorHistory.removeAll { anchor in
+                    if !normalized.hasPrefix(anchor.normalized) { return true }
+                    let anchorStripped = Self.stripZWSP(anchor.surface)
+                    if !Self.scalarHasPrefix(topStripped, anchorStripped) { return true }
+                    // Anchor's last consonant was absorbed into a cluster
+                    // in the new top (e.g. anchor `...ဘ` followed by a
+                    // medial `ြ` in top `...ဘြ` means the bare `ဘ` is
+                    // stale — reusing that anchor would prevent the
+                    // cluster from forming in subsequent windowing).
+                    let anchorScalarCount = anchorStripped.unicodeScalars.count
+                    if anchorScalarCount > 0,
+                       anchorScalarCount < topScalars.count,
+                       let last = anchorStripped.unicodeScalars.last,
+                       Myanmar.isConsonant(last),
+                       Self.isMedialOrMarker(topScalars[anchorScalarCount]) {
+                        return true
+                    }
+                    return false
                 }
                 // Replace the last entry if it has the same normalized
                 // length (we're updating the same checkpoint, not adding).
@@ -982,23 +1004,40 @@ public final class BurmeseEngine: @unchecked Sendable {
     /// Walk a surface string and rewrite each ာ/ါ to the shape appropriate
     /// for its preceding consonant. Medials and signs between the
     /// consonant and the aa sign are skipped over.
+    ///
+    /// Operates on Unicode scalars, not grapheme clusters: Myanmar
+    /// consonant + dependent vowel signs form a single extended grapheme,
+    /// so a `Character`-level scan would never see the aa scalar on its
+    /// own and the correction would silently no-op on multi-sign
+    /// syllables like `ပေါင်း`.
     private static func correctAaShape(_ text: String) -> String {
-        let shortAa: Character = "\u{102C}"
-        let tallAa: Character = "\u{102B}"
-        var chars = Array(text)
-        for i in 0..<chars.count where chars[i] == shortAa || chars[i] == tallAa {
+        let shortAa: UInt32 = 0x102C
+        let tallAa: UInt32 = 0x102B
+        var scalars = Array(text.unicodeScalars)
+        let tallAaSet: Set<UInt32> = Set(Grammar.requiresTallAa.compactMap { $0.unicodeScalars.first?.value })
+        for i in 0..<scalars.count {
+            let v = scalars[i].value
+            guard v == shortAa || v == tallAa else { continue }
             var j = i - 1
             while j >= 0 {
-                let prev = chars[j]
-                if let scalar = prev.unicodeScalars.first, Myanmar.isConsonant(scalar) {
-                    let wantsTall = Grammar.requiresTallAa.contains(prev)
-                    chars[i] = wantsTall ? tallAa : shortAa
+                let prev = scalars[j]
+                if Myanmar.isConsonant(prev) {
+                    let wantsTall = tallAaSet.contains(prev.value)
+                    let target: UInt32 = wantsTall ? tallAa : shortAa
+                    if v != target {
+                        scalars[i] = Unicode.Scalar(target)!
+                    }
                     break
                 }
                 j -= 1
             }
         }
-        return String(chars)
+        var result = ""
+        result.unicodeScalars.reserveCapacity(scalars.count)
+        for scalar in scalars {
+            result.unicodeScalars.append(scalar)
+        }
+        return result
     }
 
     /// Tall-aa vowel keys that only make sense after a descender consonant.
@@ -1097,6 +1136,31 @@ public final class BurmeseEngine: @unchecked Sendable {
             return String(s.unicodeScalars.filter { $0.value != 0x200B })
         }
         return s
+    }
+
+    /// Scalar-level prefix check. Swift's `String.hasPrefix` operates on
+    /// grapheme clusters, which fails for Myanmar when a syllable grows
+    /// across keystrokes: the anchor's trailing consonant (e.g. `ပ`,
+    /// a grapheme by itself) becomes part of a composite grapheme in
+    /// the next step (e.g. `ပြ` = pa + medial ra-yit). Scalar prefix
+    /// semantics correctly treat the extension as preserving the anchor.
+    private static func scalarHasPrefix(_ s: String, _ prefix: String) -> Bool {
+        s.unicodeScalars.starts(with: prefix.unicodeScalars)
+    }
+
+    /// True if the scalar is one that attaches to a preceding consonant
+    /// (medial, dependent vowel, e-kar, asat, diacritics). Used to detect
+    /// when an anchor's last bare consonant has been absorbed into a
+    /// cluster by a later keystroke — such anchors are orthographically
+    /// stale even though scalar prefix semantics would still accept them.
+    private static func isMedialOrMarker(_ scalar: Unicode.Scalar) -> Bool {
+        let v = scalar.value
+        // U+1031 e-kar, U+1039 virama/asat, U+103A visible asat,
+        // U+103B-U+103E medials, U+102B-U+1032 dependent vowels.
+        if v == 0x1031 || v == 0x1039 || v == 0x103A { return true }
+        if (0x103B...0x103E).contains(v) { return true }
+        if (0x102B...0x1032).contains(v) { return true }
+        return false
     }
 
     /// Replace both ya-pin (U+103B) and ya-yit (U+103C) with ya-pin so
@@ -1333,7 +1397,27 @@ public final class BurmeseEngine: @unchecked Sendable {
 
     private func grammarCandidateIsBetter(_ lhs: RankedGrammarCandidate, than rhs: RankedGrammarCandidate) -> Bool {
         // Legality is a hard filter — orthographically legal syllables
-        // always beat illegal ones. Everything else is probabilistic.
+        // always beat illegal ones.
+        let lhsLegal = lhs.legalityScore > 0
+        let rhsLegal = rhs.legalityScore > 0
+        if lhsLegal != rhsLegal {
+            return lhsLegal
+        }
+        // Character-class rarity sits above `syllableCount` so a longer
+        // common-consonant parse outranks a shorter retroflex one when
+        // the user did not type the "2" disambiguator. Rare parses stay
+        // in the panel — they just aren't top-1.
+        if lhs.rarityPenalty != rhs.rarityPenalty {
+            return lhs.rarityPenalty < rhs.rarityPenalty
+        }
+        // Prefer fewer syllables before legality magnitude: when the
+        // parser's min+1 widening admits extended parses, the per-syllable
+        // sum in `legalityScore` mechanically favors the longer parse
+        // even though the canonical (min-tier) parse is what the user
+        // expects as top-1. Anchor stability depends on this.
+        if lhs.syllableCount != rhs.syllableCount {
+            return lhs.syllableCount < rhs.syllableCount
+        }
         if lhs.legalityScore != rhs.legalityScore {
             return lhs.legalityScore > rhs.legalityScore
         }

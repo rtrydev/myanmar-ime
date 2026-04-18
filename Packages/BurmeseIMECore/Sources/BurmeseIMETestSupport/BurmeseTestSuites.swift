@@ -11,6 +11,7 @@ public enum BurmeseTestSuites {
         ClusterAliasSuite.suite,
         EngineSuite.suite,
         LexiconRankingSuite.suite,
+        RankingSuite.suite,
         LanguageModelSuite.suite,
         PunctuationSuite.suite,
         NumberMeasureWordsSuite.suite,

@@ -57,6 +57,8 @@ public struct SyllableParse: Sendable, Equatable {
     public let legalityScore: Int
     public let score: Int
     public let structureCost: Int
+    public let syllableCount: Int
+    public let rarityPenalty: Int
 
     public init(
         output: String,
@@ -64,7 +66,9 @@ public struct SyllableParse: Sendable, Equatable {
         aliasCost: Int = 0,
         legalityScore: Int = 0,
         score: Int = 0,
-        structureCost: Int = 0
+        structureCost: Int = 0,
+        syllableCount: Int = 0,
+        rarityPenalty: Int = 0
     ) {
         self.output = output
         self.reading = reading
@@ -72,5 +76,7 @@ public struct SyllableParse: Sendable, Equatable {
         self.legalityScore = legalityScore
         self.score = score
         self.structureCost = structureCost
+        self.syllableCount = syllableCount
+        self.rarityPenalty = rarityPenalty
     }
 }
