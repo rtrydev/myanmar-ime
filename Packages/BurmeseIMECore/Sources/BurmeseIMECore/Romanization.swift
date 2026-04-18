@@ -119,11 +119,23 @@ public enum Romanization {
         }
     }
 
+    /// Phonetically, "kya"/"cha"/"gya" can be spelled with either ya-pin (ျ) or
+    /// ya-yit (ြ). The canonical structural scheme exposes both — "kya" yields
+    /// both ကြ (canonical "ky") and ကျ (digit-stripped alias of "ky2"). The
+    /// cluster aliases below mirror that behaviour: each ya-pin shortcut gets
+    /// a ya-yit twin at a slight alias-cost bump so users typing "jar" see
+    /// ကြာ in the candidate list alongside ကျာ. "gy"/"gyw" already pick up
+    /// their ya-yit twin from the canonical `cons+"y"` path, so they need no
+    /// explicit mirror here.
     public static let clusterAliases: [ClusterAliasEntry] = [
         .init(roman: "j",   consonant: Myanmar.ka,  medials: [Myanmar.medialYa]),
+        .init(roman: "j",   consonant: Myanmar.ka,  medials: [Myanmar.medialRa], aliasCost: 51),
         .init(roman: "jw",  consonant: Myanmar.ka,  medials: [Myanmar.medialYa, Myanmar.medialWa]),
+        .init(roman: "jw",  consonant: Myanmar.ka,  medials: [Myanmar.medialRa, Myanmar.medialWa], aliasCost: 51),
         .init(roman: "ch",  consonant: Myanmar.kha, medials: [Myanmar.medialYa]),
+        .init(roman: "ch",  consonant: Myanmar.kha, medials: [Myanmar.medialRa], aliasCost: 51),
         .init(roman: "chw", consonant: Myanmar.kha, medials: [Myanmar.medialYa, Myanmar.medialWa]),
+        .init(roman: "chw", consonant: Myanmar.kha, medials: [Myanmar.medialRa, Myanmar.medialWa], aliasCost: 51),
         .init(roman: "gy",  consonant: Myanmar.ga,  medials: [Myanmar.medialYa]),
         .init(roman: "gyw", consonant: Myanmar.ga,  medials: [Myanmar.medialYa, Myanmar.medialWa]),
         .init(roman: "sh",  consonant: Myanmar.ra,  medials: [Myanmar.medialHa]),

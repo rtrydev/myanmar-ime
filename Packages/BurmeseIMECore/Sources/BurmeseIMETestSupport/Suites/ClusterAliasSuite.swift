@@ -118,5 +118,31 @@ public enum ClusterAliasSuite {
             let parser = SyllableParser()
             ctx.assertEqual(parser.parse("kya").first?.output ?? "", "ကြ")
         },
+
+        TestCase("cluster_jar_exposesYaYit") { ctx in
+            let parser = SyllableParser(useClusterAliases: true)
+            let surfaces = parser.parseCandidates("jar", maxResults: 8).map(\.output)
+            ctx.assertTrue(
+                surfaces.contains("ကြာ"),
+                detail: "expected 'jar' candidates to include ကြာ, got: \(surfaces)"
+            )
+            ctx.assertTrue(
+                surfaces.contains("ကျာ"),
+                detail: "expected 'jar' candidates to include ကျာ, got: \(surfaces)"
+            )
+        },
+
+        TestCase("cluster_char_exposesYaYit") { ctx in
+            let parser = SyllableParser(useClusterAliases: true)
+            let surfaces = parser.parseCandidates("char", maxResults: 8).map(\.output)
+            ctx.assertTrue(
+                surfaces.contains("ခြာ"),
+                detail: "expected 'char' candidates to include ခြာ, got: \(surfaces)"
+            )
+            ctx.assertTrue(
+                surfaces.contains("ချာ"),
+                detail: "expected 'char' candidates to include ချာ, got: \(surfaces)"
+            )
+        },
     ])
 }
