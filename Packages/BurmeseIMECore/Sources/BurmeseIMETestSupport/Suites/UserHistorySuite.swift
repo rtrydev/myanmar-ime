@@ -305,6 +305,42 @@ public enum UserHistorySuite {
             ctx.assertEqual(store.recorded.first?.0, "kyar", "recordedReading")
         },
 
+        TestCase("engine_historyDoesNotLeakIntoAnchoredSlidingWindow") { ctx in
+            // When the user types the exact reading of a stored history
+            // entry one character at a time, every intermediate update
+            // surfaces the history candidate at the top (its full
+            // surface). Previously the engine captured that full surface
+            // as the prefix anchor even though the anchor's normalized
+            // key represented only part of the reading. When the buffer
+            // later crossed the sliding-window threshold, the mismatched
+            // anchor was reused as a "frozen prefix" and concatenated
+            // with a fresh tail parse — producing candidates shaped like
+            // `<full history surface> + <tail re-rendered>`, flooding
+            // the panel with duplicates that ignored every other variant.
+            let store = PrefixHistoryMock(
+                reading: "htamin:sar:pyi:pyilar:",
+                surface: "ထမင်းစားပြီးပြီးလား"
+            )
+            let engine = BurmeseEngine(historyStore: store)
+            let full = "htamin:sar:pyi:pyilar:"
+            var state = engine.update(buffer: "", context: [])
+            for length in 1...full.count {
+                let prefix = String(full.prefix(length))
+                state = engine.update(buffer: prefix, context: [])
+            }
+            let historySurface = "ထမင်းစားပြီးပြီးလား"
+            ctx.assertEqual(state.candidates.first?.surface, historySurface,
+                            "historyAtTop")
+            let leaked = state.candidates.filter { cand in
+                cand.surface != historySurface
+                    && cand.surface.hasPrefix(historySurface)
+            }
+            let leakedDetail = leaked.map(\.surface).joined(separator: " | ")
+            ctx.assertTrue(leaked.isEmpty,
+                           "noHistorySurfacePlusExtraTail",
+                           detail: "leaked=\(leakedDetail)")
+        },
+
         TestCase("engine_recordSelection_skippedWhenLearningDisabled") { ctx in
             let suiteName = "UserHistorySuite.\(UUID().uuidString)"
             defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }

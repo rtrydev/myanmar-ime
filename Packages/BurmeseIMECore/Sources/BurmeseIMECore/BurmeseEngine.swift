@@ -659,12 +659,16 @@ public final class BurmeseEngine: @unchecked Sendable {
             : candidateStore.lookup(prefix: aliasPrefix, previousSurface: previousSurface)
         // History lookup uses the same alias key as the lexicon so stored
         // reads (written by `recordSelection`) line up exactly with reads.
-        // Skipped when the sliding window is active (the full buffer isn't
-        // what was originally committed under) or learning is disabled.
+        // Unlike lexicon candidates, history entries carry a self-contained
+        // surface that isn't composed with the frozen prefix, so they are
+        // safe to surface even when windowing is active — otherwise a user
+        // who committed a long phrase once wouldn't see it again the next
+        // time they typed the same reading (the buffer crosses the window
+        // threshold long before they reach the end).
         let historyEnabled = settings?.learningEnabled ?? true
-        let historyCandidates: [Candidate] = (effectiveWindowed || !historyEnabled)
-            ? []
-            : historyStore.lookup(prefix: aliasPrefix, previousSurface: previousSurface)
+        let historyCandidates: [Candidate] = historyEnabled
+            ? historyStore.lookup(prefix: aliasPrefix, previousSurface: previousSurface)
+            : []
         cacheLock.lock()
         lastHistoryKey = aliasPrefix
         cacheLock.unlock()
@@ -760,7 +764,12 @@ public final class BurmeseEngine: @unchecked Sendable {
         // Surface comparison strips ZWSPs because lexicon entries may
         // contain U+200B word-boundary markers that grammar-generated
         // surfaces lack.
-        if !merged.isEmpty {
+        //
+        // A history-sourced top outranks anchor stability: the user
+        // explicitly committed that surface previously, so displacing it
+        // with a parser-derived anchor extension would revert a deliberate
+        // pick.
+        if !merged.isEmpty, merged[0].source != .history {
             var promoted = false
             for anchor in historySnapshot.reversed() {
                 guard !anchor.normalized.isEmpty,
@@ -828,7 +837,16 @@ public final class BurmeseEngine: @unchecked Sendable {
         // than committing the fallback top that may have drifted.
         if !windowFallback {
             cacheLock.lock()
-            if let top = merged.first {
+            // Skip history candidates when picking the anchor: their surface
+            // is the full stored rendering for a longer reading that still
+            // begins with the currently-typed prefix, so capturing it as
+            // the anchor for `normalized` pairs a short key with an overly
+            // long surface. A later windowed update would reuse that anchor
+            // as a frozen prefix and concatenate a fresh tail parse,
+            // producing candidates shaped like `<full history surface> +
+            // <tail re-rendered>`. The non-history top reflects the actual
+            // syllable rendering of the typed chars and is safe to anchor.
+            if let top = merged.first(where: { $0.source != .history }) {
                 // Prune prior entries that are stale: either (a) their
                 // normalized is not a prefix of the current buffer (user
                 // backspaced/diverged), or (b) their surface is not a
