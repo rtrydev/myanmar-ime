@@ -66,6 +66,9 @@ private struct ConsonantsSection: View {
                     )
                 }
             }
+            Text("ဈ, ဋ, ဌ, ဍ, ဎ, ဏ, and ဠ are Pali/Sanskrit-loanword consonants. They only combine with a narrow vowel set (inherent a, ar*, i*, u*, ay*) — diphthong finals like -own, -ote, -ain on these onsets are down-ranked.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 }

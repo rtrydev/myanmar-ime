@@ -137,6 +137,7 @@ public enum Grammar {
     /// a, ar*, i*, u*, ay*, plus asat/anusvara finals). Native-Burmese
     /// diphthong finals on these onsets produce orthographic garbage.
     public static let palaRestrictedOnsets: Set<Character> = [
+        Myanmar.jha,
         Myanmar.tta, Myanmar.ttha, Myanmar.dda, Myanmar.ddha,
         Myanmar.nna, Myanmar.lla,
     ]

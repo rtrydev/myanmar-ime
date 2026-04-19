@@ -101,6 +101,13 @@ public enum GrammarSuite {
             ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
         },
 
+        TestCase("validateSyllable_jhaWithDiphthong_rareButLegal") { ctx in
+            let score = Grammar.validateSyllable(
+                onset: Myanmar.jha, medials: [], vowelRoman: "own")
+            ctx.assertGreaterThan(score, 0)
+            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+        },
+
         TestCase("validateSyllable_palaRetroflexWithSimpleVowel_legal") { ctx in
             let score = Grammar.validateSyllable(
                 onset: Myanmar.tta, medials: [], vowelRoman: "i")
