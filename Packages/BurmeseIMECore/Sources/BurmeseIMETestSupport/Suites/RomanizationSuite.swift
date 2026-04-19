@@ -4,8 +4,9 @@ public enum RomanizationSuite {
     public static let suite = TestSuite(name: "Romanization", cases: [
 
         TestCase("consonantCount") { ctx in
-            // 33 standard base consonants plus ဿ (great sa, U+103F).
-            ctx.assertEqual(Romanization.consonants.count, 34)
+            // 33 standard base consonants + ဿ (great sa, U+103F)
+            // + a second key for ဉ (U+1009) disambiguated from ည (U+100A).
+            ctx.assertEqual(Romanization.consonants.count, 35)
         },
 
         TestCase("consonantRomanKeysUnique") { ctx in
@@ -119,6 +120,31 @@ public enum RomanizationSuite {
 
         TestCase("consonantLookup_ss") { ctx in
             ctx.assertEqual(Romanization.romanToConsonant["ss"], Myanmar.greatSa)
+        },
+
+        TestCase("consonantLookup_nyIsNnya") { ctx in
+            // "ny" must produce the common curly ည (U+100A, MYANMAR LETTER NNYA).
+            ctx.assertEqual(Romanization.romanToConsonant["ny"], Myanmar.nnya)
+        },
+
+        TestCase("consonantLookup_ny2IsNya") { ctx in
+            // The rarer flat ဉ (U+1009, MYANMAR LETTER NYA) lives under "ny2".
+            ctx.assertEqual(Romanization.romanToConsonant["ny2"], Myanmar.nya)
+        },
+
+        TestCase("consonantReverse_nnya") { ctx in
+            ctx.assertEqual(Romanization.consonantToRoman[Myanmar.nnya], "ny")
+        },
+
+        TestCase("consonantReverse_nya") { ctx in
+            ctx.assertEqual(Romanization.consonantToRoman[Myanmar.nya], "ny2")
+        },
+
+        TestCase("consonants_containsBothNyaAndNnya") { ctx in
+            ctx.assertTrue(Myanmar.consonants.contains(Myanmar.nya),
+                detail: "Myanmar.consonants must include U+1009 (ဉ)")
+            ctx.assertTrue(Myanmar.consonants.contains(Myanmar.nnya),
+                detail: "Myanmar.consonants must include U+100A (ည)")
         },
 
         TestCase("vowelLookup_ii_shortIndependent") { ctx in

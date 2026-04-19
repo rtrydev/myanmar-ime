@@ -32,7 +32,8 @@ public enum Romanization {
         .init("s", Myanmar.ca),          // စ = sa → base "s"
         .init("z", Myanmar.ja),          // ဇ = za → base "z"
         .init("zz", Myanmar.jha),        // ဈ = zza → base "zz"
-        .init("ny", Myanmar.nya),        // ည = nya → base "ny"
+        .init("ny", Myanmar.nnya),       // ည = nnya → base "ny" (common curly form)
+        .init("ny2", Myanmar.nya),       // ဉ = nya → base "ny2" (rare flat form)
         .init("t2", Myanmar.tta),        // ဋ = t2a → base "t2"
         .init("ht2", Myanmar.ttha),      // ဌ = ht2a → base "ht2"
         .init("d2", Myanmar.dda),        // ဍ = d2a → base "d2"

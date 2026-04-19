@@ -25,7 +25,7 @@ public enum Grammar {
     /// Consonants that can take medial ya-pin (ျ U+103B).
     public static let canTakeMedialYa: Set<Character> = [
         Myanmar.ka, Myanmar.kha, Myanmar.ga, Myanmar.gha,
-        Myanmar.ca, Myanmar.cha, Myanmar.ja, Myanmar.nya,
+        Myanmar.ca, Myanmar.cha, Myanmar.ja, Myanmar.nnya, Myanmar.nya,
         Myanmar.ta, Myanmar.tha, Myanmar.da, Myanmar.dha, Myanmar.na,
         Myanmar.pa, Myanmar.pha, Myanmar.ba, Myanmar.bha, Myanmar.ma,
         Myanmar.ya, Myanmar.la, Myanmar.ha,
@@ -34,7 +34,7 @@ public enum Grammar {
     /// Consonants that can take medial wa-hswe (ွ U+103D).
     public static let canTakeMedialWa: Set<Character> = [
         Myanmar.ka, Myanmar.kha, Myanmar.ga, Myanmar.gha, Myanmar.nga,
-        Myanmar.ca, Myanmar.cha, Myanmar.ja, Myanmar.nya,
+        Myanmar.ca, Myanmar.cha, Myanmar.ja, Myanmar.nnya, Myanmar.nya,
         Myanmar.ta, Myanmar.tha, Myanmar.da, Myanmar.dha, Myanmar.na,
         Myanmar.pa, Myanmar.pha, Myanmar.ba, Myanmar.bha, Myanmar.ma,
         Myanmar.ya, Myanmar.ra, Myanmar.la, Myanmar.wa,
@@ -44,7 +44,7 @@ public enum Grammar {
     /// Consonants that can take medial ha-htoe (ှ U+103E).
     public static let canTakeMedialHa: Set<Character> = [
         Myanmar.ka, Myanmar.kha, Myanmar.ga, Myanmar.gha, Myanmar.nga,
-        Myanmar.ca, Myanmar.cha, Myanmar.ja, Myanmar.nya,
+        Myanmar.ca, Myanmar.cha, Myanmar.ja, Myanmar.nnya, Myanmar.nya,
         Myanmar.ta, Myanmar.tha, Myanmar.da, Myanmar.dha, Myanmar.na, Myanmar.nna,
         Myanmar.pa, Myanmar.pha, Myanmar.ba, Myanmar.bha, Myanmar.ma,
         Myanmar.ya, Myanmar.ra, Myanmar.la, Myanmar.wa,

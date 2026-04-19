@@ -101,7 +101,7 @@ public enum ClusterAliasSuite {
 
         TestCase("aspirated_hnya") { ctx in
             let parser = SyllableParser()
-            ctx.assertEqual(parser.parse("hnya").first?.output ?? "", "\u{1009}\u{103E}")
+            ctx.assertEqual(parser.parse("hnya").first?.output ?? "", "\u{100A}\u{103E}")
         },
 
         TestCase("canonical_hr") { ctx in

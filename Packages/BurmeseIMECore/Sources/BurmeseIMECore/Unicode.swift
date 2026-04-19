@@ -12,8 +12,8 @@ public enum Myanmar {
     public static let cha: Character   = "\u{1006}"  // ဆ  (hsa)
     public static let ja: Character    = "\u{1007}"  // ဇ  (za)
     public static let jha: Character   = "\u{1008}"  // ဈ  (zza)
-    public static let nya: Character   = "\u{1009}"  // ည
-    public static let nnya: Character  = "\u{100A}"  // ဉ
+    public static let nya: Character   = "\u{1009}"  // ဉ
+    public static let nnya: Character  = "\u{100A}"  // ည
     public static let tta: Character   = "\u{100B}"  // ဋ  (t2a)
     public static let ttha: Character  = "\u{100C}"  // ဌ  (ht2a)
     public static let dda: Character   = "\u{100D}"  // ဍ  (d2a)
@@ -102,7 +102,7 @@ public enum Myanmar {
     /// All 33 base consonants used in standard Burmese.
     public static let consonants: [Character] = [
         ka, kha, ga, gha, nga,
-        cha, ca, ja, jha, nya,
+        cha, ca, ja, jha, nnya, nya,
         tta, ttha, dda, ddha, nna,
         ta, tha, da, dha, na,
         pa, pha, ba, bha, ma,

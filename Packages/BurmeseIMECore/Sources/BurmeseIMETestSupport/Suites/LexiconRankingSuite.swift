@@ -31,6 +31,8 @@ public enum LexiconRankingSuite {
         ("ကောင်း", 8500),
         ("လူ", 8460),
         ("နှင့်", 8380),
+        ("ညီ", 6400),    // ည (U+100A) as onset — regression guard for the
+                          // NNYA-romanization fix (task 004).
     ]
 
     private static func stripZW(_ s: String) -> String {

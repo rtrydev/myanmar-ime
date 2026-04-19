@@ -188,8 +188,7 @@ public enum ComprehensiveRankingSuite {
         // stress the LM with multi-syllable compound words (စီးပွားရေး,
         // အခြေအနေ, လေ့ကျင့်ခန်း…), medial stacks (ြ, ျ, ွ), kinzi clusters
         // (င်္), and formal connectives (လို့, ပေမယ့်, တာကြောင့်, နဲ့အတူ)
-        // not exercised by the short-sentence block above. Avoid U+100A ည
-        // in leading/standalone positions because ReverseRomanizer drops it.
+        // not exercised by the short-sentence block above.
         .init(id: "article_rainyWorkFromHome",
               gloss: "it's raining hard today so i'm working from home instead of the office",
               surface: "ဒီနေ့မိုးအရမ်းရွာနေလို့ရုံးမသွားပဲအိမ်မှာအလုပ်လုပ်နေတယ်",
@@ -226,6 +225,7 @@ public enum ComprehensiveRankingSuite {
               surface: "သတင်းစာကိုနေ့စဉ်ဖတ်ပြီးလောကအကြောင်းသိအောင်လေ့လာတယ်",
               alternatives: [
                 "တဟတ်င်းစာကိုနေ့စဉ်ဖတပြီးလောကဟကြောင်းသိဟောင်လေ့လာတယ်",
+                "သတင်းစာကိုနေ့စဉ်ဖတပြီးလောကဟကြောင်းသိဟောင်လေ့လာတယ်",
               ], topK: 8),
         .init(id: "article_governmentAnnounce",
               gloss: "the government announced new plans for the public",
