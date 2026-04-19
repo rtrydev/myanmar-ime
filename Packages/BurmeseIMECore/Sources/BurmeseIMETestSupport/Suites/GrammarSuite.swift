@@ -305,5 +305,70 @@ public enum GrammarSuite {
             let scalars = output.unicodeScalars.map(\.value)
             ctx.assertEqual(scalars, [0x1019, 0x103D, 0x1014, 0x103A])
         },
+
+        // MARK: - Onset Emission Canonical Order
+
+        // Direct test of the onset-emission helper. `medialCombinations`
+        // currently never pairs ya-pin (U+103B) with ya-yit (U+103C), so
+        // the mis-ordered emission path is latent. Exercise it here so a
+        // future combination-table extension can't reintroduce the bug.
+        TestCase("composeOnset_medialRaAndYa_emitsCanonicalOrder") { ctx in
+            let output = Grammar.composeOnset(
+                consonant: Myanmar.ka,
+                medials: [Myanmar.medialRa, Myanmar.medialYa]
+            )
+            let scalars = output.unicodeScalars.map(\.value)
+            ctx.assertEqual(scalars, [0x1000, 0x103B, 0x103C])
+        },
+
+        // Every current entry in `medialCombinations` must round-trip
+        // through `composeOnset` in canonical order. Stays green when
+        // new combinations are added, as long as emission is sorted.
+        TestCase("composeOnset_allMedialCombinations_ascending") { ctx in
+            for combo in Grammar.medialCombinations {
+                let output = Grammar.composeOnset(consonant: Myanmar.ka, medials: combo)
+                let medialScalars = output.unicodeScalars.dropFirst().map(\.value)
+                var previous: UInt32 = 0
+                for v in medialScalars {
+                    ctx.assertTrue(
+                        v > previous,
+                        detail: "medials not strictly ascending for combo \(combo): \(Array(medialScalars))"
+                    )
+                    previous = v
+                }
+            }
+        },
+
+        // End-to-end guard: parsing the canonical roman key for each combo
+        // must produce medials in Unicode canonical order. Enumerating the
+        // combination table keeps the check alive for any future entry.
+        TestCase("parse_allMedialCombinations_emitCanonicalOrder") { ctx in
+            let parser = SyllableParser()
+            for combo in Grammar.medialCombinations {
+                let hasH  = combo.contains(Myanmar.medialHa)
+                let hasW  = combo.contains(Myanmar.medialWa)
+                let hasY  = combo.contains(Myanmar.medialRa)
+                let hasY2 = combo.contains(Myanmar.medialYa)
+                let roman =
+                    (hasH ? "h" : "") +
+                    "m" +
+                    (hasW ? "w" : "") +
+                    (hasY ? "y" : "") +
+                    (hasY2 ? "y2" : "") +
+                    "a"
+                let output = parser.parse(roman).first?.output ?? ""
+                let medialScalars = output.unicodeScalars
+                    .map(\.value)
+                    .filter { $0 >= 0x103B && $0 <= 0x103E }
+                var previous: UInt32 = 0
+                for v in medialScalars {
+                    ctx.assertTrue(
+                        v > previous,
+                        detail: "\(roman): medials not ascending — \(medialScalars)"
+                    )
+                    previous = v
+                }
+            }
+        },
     ])
 }

@@ -81,6 +81,21 @@ public enum Grammar {
         [Myanmar.medialYa, Myanmar.medialWa, Myanmar.medialHa],     // ျွှ (y2wh)
     ]
 
+    /// Appends `consonant` and its `medials` as a single string, emitting the
+    /// medials in Unicode canonical (ascending codepoint) order. Used by the
+    /// parser's onset-table build to keep emission order decoupled from the
+    /// iteration order of `medialCombinations` / cluster-alias entries.
+    public static func composeOnset(consonant: Character, medials: [Character]) -> String {
+        var output = String(consonant)
+        let sorted = Array(Set(medials)).sorted {
+            $0.unicodeScalars.first!.value < $1.unicodeScalars.first!.value
+        }
+        for medial in sorted {
+            output.append(medial)
+        }
+        return output
+    }
+
     // MARK: - Tall/Short Aa Legality
 
     /// Consonants with descenders that require tall aa (ါ U+102B) instead of

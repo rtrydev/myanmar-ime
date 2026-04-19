@@ -168,11 +168,7 @@ public final class SyllableParser: Sendable {
                     (hasY ? "y" : "") +
                     (hasY2 ? "y2" : "")
 
-                var myanmarOutput = String(cons.myanmar)
-                if hasY  { myanmarOutput += String(Myanmar.medialRa) }
-                if hasY2 { myanmarOutput += String(Myanmar.medialYa) }
-                if hasW  { myanmarOutput += String(Myanmar.medialWa) }
-                if hasH  { myanmarOutput += String(Myanmar.medialHa) }
+                let myanmarOutput = Grammar.composeOnset(consonant: cons.myanmar, medials: combo)
 
                 appendOnset(
                     canonicalRoman: canonicalRoman,
@@ -190,10 +186,7 @@ public final class SyllableParser: Sendable {
         // so users who prefer structural typing can opt out.
         if useClusterAliases {
             for alias in Romanization.clusterAliases {
-                var myanmarOutput = String(alias.consonant)
-                for medial in alias.medials {
-                    myanmarOutput.append(medial)
-                }
+                let myanmarOutput = Grammar.composeOnset(consonant: alias.consonant, medials: alias.medials)
 
                 let hasH  = alias.medials.contains(Myanmar.medialHa)
                 let hasW  = alias.medials.contains(Myanmar.medialWa)
