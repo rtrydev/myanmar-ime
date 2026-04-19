@@ -222,5 +222,88 @@ public enum GrammarSuite {
             let result = SyllableParser().parse("n+da").first
             ctx.assertGreaterThan(result?.legalityScore ?? 0, 0)
         },
+
+        // MARK: - Medial Canonical Order
+
+        // Onset carries medial ha-htoe (U+103E) and the vowel starts with
+        // medial wa-hswe (U+103D). Concatenation without normalization
+        // yields U+103E followed by U+103D — a violation of Unicode
+        // canonical order that no downstream renderer corrects.
+
+        TestCase("parse_canonicalMedialOrder_hmon") { ctx in
+            let output = SyllableParser().parse("hmon").first?.output ?? ""
+            let scalars = output.unicodeScalars.map(\.value)
+            ctx.assertEqual(scalars, [0x1019, 0x103D, 0x103E, 0x1014, 0x103A])
+        },
+
+        TestCase("parse_canonicalMedialOrder_hmonTone") { ctx in
+            let output = SyllableParser().parse("hmon:").first?.output ?? ""
+            let scalars = output.unicodeScalars.map(\.value)
+            ctx.assertEqual(scalars, [0x1019, 0x103D, 0x103E, 0x1014, 0x103A, 0x1038])
+        },
+
+        TestCase("parse_canonicalMedialOrder_hmut") { ctx in
+            let output = SyllableParser().parse("hmut").first?.output ?? ""
+            let scalars = output.unicodeScalars.map(\.value)
+            ctx.assertEqual(scalars, [0x1019, 0x103D, 0x103E, 0x1010, 0x103A])
+        },
+
+        TestCase("parse_canonicalMedialOrder_hnon") { ctx in
+            let output = SyllableParser().parse("hnon").first?.output ?? ""
+            let scalars = output.unicodeScalars.map(\.value)
+            ctx.assertEqual(scalars, [0x1014, 0x103D, 0x103E, 0x1014, 0x103A])
+        },
+
+        // Every onset emitted by the parser must have its medial run in
+        // ascending codepoint order. Enumerate onsets whose trailing
+        // medial is higher than the vowel's leading medial — these are
+        // the pairings where concatenation flips the order.
+        TestCase("parse_medialRun_isStrictlyAscending_allOnsetVowelPairs") { ctx in
+            let parser = SyllableParser()
+            // Onsets ending in ha-htoe (U+103E). Excluded: `w`-variants
+            // that would also carry U+103D, which duplicates the vowel's
+            // leading medial — a separate concern from ordering.
+            let onsetKeys = [
+                "hm", "hn", "hk", "hng", "hp", "hb", "hl", "hy",
+            ]
+            // Vowels whose Myanmar form begins with U+103D (wa-hswe).
+            let vowelKeys = [
+                "on", "on:", "on.", "on2", "on2:", "on2.",
+                "on3", "on3:", "on3.", "ut",
+            ]
+            for onsetKey in onsetKeys {
+                for vowelKey in vowelKeys {
+                    let key = onsetKey + vowelKey
+                    let output = parser.parse(key).first?.output ?? ""
+                    let scalars = output.unicodeScalars.map(\.value)
+                    var previous: UInt32 = 0
+                    for v in scalars {
+                        if v >= 0x103B && v <= 0x103E {
+                            if previous >= 0x103B && previous <= 0x103E {
+                                ctx.assertTrue(
+                                    v >= previous,
+                                    detail: "\(key): medials out of order — \(String(format: "%04X", previous)) before \(String(format: "%04X", v))"
+                                )
+                            }
+                        }
+                        previous = v
+                    }
+                }
+            }
+        },
+
+        // Regression: onset-only medials (no vowel medial) stay unchanged.
+        TestCase("parse_canonicalMedialOrder_onsetOnly_hma") { ctx in
+            let output = SyllableParser().parse("hma").first?.output ?? ""
+            let scalars = output.unicodeScalars.map(\.value)
+            ctx.assertEqual(scalars, [0x1019, 0x103E])
+        },
+
+        // Regression: vowel starts with U+103D but no onset medial collides.
+        TestCase("parse_canonicalMedialOrder_vowelOnly_mon") { ctx in
+            let output = SyllableParser().parse("mon").first?.output ?? ""
+            let scalars = output.unicodeScalars.map(\.value)
+            ctx.assertEqual(scalars, [0x1019, 0x103D, 0x1014, 0x103A])
+        },
     ])
 }

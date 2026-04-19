@@ -961,7 +961,48 @@ public final class SyllableParser: Sendable {
                 reading.append(entry.canonicalRoman)
             }
         }
-        return (output, reading)
+        return (Self.canonicalizeMedialOrder(output), reading)
+    }
+
+    /// Sort each run of consecutive medial scalars (U+103B..U+103E) into
+    /// ascending codepoint order. The onset table emits medials in a
+    /// fixed order and each vowel entry stores its own medial prefix; at
+    /// the join (e.g. onset ending in ှ U+103E followed by a vowel
+    /// starting with ွ U+103D for "hmon") the run can land out of order.
+    /// Sort in place so every emitted surface is in Unicode canonical
+    /// order regardless of which side contributed which medial.
+    private static func canonicalizeMedialOrder(_ text: String) -> String {
+        var scalars = Array(text.unicodeScalars)
+        var changed = false
+        var i = 0
+        while i < scalars.count {
+            let v = scalars[i].value
+            if v >= 0x103B && v <= 0x103E {
+                var j = i + 1
+                while j < scalars.count {
+                    let w = scalars[j].value
+                    guard w >= 0x103B && w <= 0x103E else { break }
+                    j += 1
+                }
+                if j - i > 1 {
+                    let sorted = scalars[i..<j].sorted { $0.value < $1.value }
+                    for k in 0..<(j - i) where scalars[i + k].value != sorted[k].value {
+                        scalars[i + k] = sorted[k]
+                        changed = true
+                    }
+                }
+                i = j
+            } else {
+                i += 1
+            }
+        }
+        guard changed else { return text }
+        var result = ""
+        result.unicodeScalars.reserveCapacity(scalars.count)
+        for scalar in scalars {
+            result.unicodeScalars.append(scalar)
+        }
+        return result
     }
 
     // MARK: - Leading Vowel Adjustment
