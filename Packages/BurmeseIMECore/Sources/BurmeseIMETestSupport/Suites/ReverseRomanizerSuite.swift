@@ -71,6 +71,37 @@ public enum ReverseRomanizerSuite {
             ctx.assertEqual(forward, roundTrip)
         },
 
+        TestCase("reverse_kinzi_tinKyi") { ctx in
+            // တင်္ကြီး = U+1010 U+1004 U+103A U+1039 U+1000 U+103C U+102E U+1038
+            let surface = "\u{1010}\u{1004}\u{103A}\u{1039}\u{1000}\u{103C}\u{102E}\u{1038}"
+            ctx.assertEqual(ReverseRomanizer.romanize(surface), "tin+kyi:")
+        },
+
+        TestCase("roundTrip_kinzi_tinKyi") { ctx in
+            let parser = SyllableParser()
+            let surface = "\u{1010}\u{1004}\u{103A}\u{1039}\u{1000}\u{103C}\u{102E}\u{1038}"
+            let reversed = ReverseRomanizer.romanize(surface)
+            let roundTrip = parser.parse(reversed).first?.output ?? ""
+            ctx.assertEqual(roundTrip, surface)
+        },
+
+        TestCase("roundTrip_kinzi_mingalar") { ctx in
+            // မင်္ဂလာ with no override surface form — asserts the direct
+            // surface→reverse→parse loop round-trips.
+            let parser = SyllableParser()
+            let surface = "\u{1019}\u{1004}\u{103A}\u{1039}\u{1002}\u{101C}\u{102C}"
+            let reversed = ReverseRomanizer.romanize(surface)
+            let roundTrip = parser.parse(reversed).first?.output ?? ""
+            ctx.assertEqual(roundTrip, surface)
+        },
+
+        TestCase("reverse_kinzi_preserves_plainVirama") { ctx in
+            // Plain virama stack (consonant + 1039 + consonant) with no kinzi
+            // should still be handled. ကမ္ဘာ = U+1000 U+1019 U+1039 U+1018 U+102C.
+            let surface = "\u{1000}\u{1019}\u{1039}\u{1018}\u{102C}"
+            ctx.assertEqual(ReverseRomanizer.romanize(surface), "kam+bar")
+        },
+
         TestCase("reverse_gha") { ctx in
             ctx.assertEqual(ReverseRomanizer.romanize("ဃ"), "gha")
         },
