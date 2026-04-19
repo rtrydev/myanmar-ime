@@ -93,4 +93,8 @@ final class PropertyXCTests: XCTestCase {
 final class FuzzXCTests: XCTestCase {
     func testAll() { runSuite(FuzzSuite.suite, xctest: self) }
 }
+
+final class ComprehensiveRankingXCTests: XCTestCase {
+    func testAll() { runSuite(ComprehensiveRankingSuite.suite, xctest: self) }
+}
 #endif

@@ -20,5 +20,6 @@ public enum BurmeseTestSuites {
         SQLiteCandidateStoreSuite.suite,
         PropertySuite.suite,
         FuzzSuite.suite,
+        ComprehensiveRankingSuite.suite,
     ]
 }
