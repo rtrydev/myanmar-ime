@@ -474,6 +474,28 @@ public enum LexiconRankingSuite {
             }
         })
 
+        cases.append(TestCase("realLM_progressiveTyping_htaminSarPyiPyilar_correctTop") { ctx in
+            guard let lexPath = BundledArtifacts.lexiconPath,
+                  let store = SQLiteCandidateStore(path: lexPath),
+                  let lmPath = BundledArtifacts.trigramLMPath,
+                  let lm = try? TrigramLanguageModel(path: lmPath) else {
+                ctx.assertTrue(true, "skipped_noBundledArtifacts")
+                return
+            }
+            let engine = BurmeseEngine(candidateStore: store, languageModel: lm)
+            let input = "htamin:sar:pyi:pyilar:"
+            var buffer = ""
+            for ch in Array(input) {
+                buffer.append(ch)
+                _ = engine.update(buffer: buffer, context: [])
+            }
+            let state = engine.update(buffer: input, context: [])
+            let top = stripZW(state.candidates.first?.surface ?? "")
+            let top5 = state.candidates.prefix(5).map { stripZW($0.surface) }
+            ctx.assertTrue(top == "ထမင်းစားပြီးပြီလား",
+                           detail: "top=\(top) top5=\(top5)")
+        })
+
         cases.append(TestCase("realLM_progressiveTyping_fullSentenceSimulation") { ctx in
             guard let lexPath = BundledArtifacts.lexiconPath,
                   let store = SQLiteCandidateStore(path: lexPath),

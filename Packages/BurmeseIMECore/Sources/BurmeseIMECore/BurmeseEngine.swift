@@ -843,16 +843,17 @@ public final class BurmeseEngine: @unchecked Sendable {
                     if !normalized.hasPrefix(anchor.normalized) { return true }
                     let anchorStripped = Self.stripZWSP(anchor.surface)
                     if !Self.scalarHasPrefix(topStripped, anchorStripped) { return true }
-                    // Anchor's last consonant was absorbed into a cluster
-                    // in the new top (e.g. anchor `...ဘ` followed by a
-                    // medial `ြ` in top `...ဘြ` means the bare `ဘ` is
-                    // stale — reusing that anchor would prevent the
-                    // cluster from forming in subsequent windowing).
+                    // Anchor's last consonant or medial was extended by
+                    // an additional sign in the new top (e.g. anchor
+                    // `...ဘ` followed by a medial `ြ` in top `...ဘြ`, or
+                    // anchor `...ပြ` followed by a vowel `ီ` in top
+                    // `...ပြီ`). Reusing that stale anchor would prevent
+                    // the extension from forming in subsequent windowing.
                     let anchorScalarCount = anchorStripped.unicodeScalars.count
                     if anchorScalarCount > 0,
                        anchorScalarCount < topScalars.count,
                        let last = anchorStripped.unicodeScalars.last,
-                       Myanmar.isConsonant(last),
+                       Myanmar.isConsonant(last) || Myanmar.isMedial(last),
                        Self.isMedialOrMarker(topScalars[anchorScalarCount]) {
                         return true
                     }
