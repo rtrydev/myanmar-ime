@@ -969,20 +969,18 @@ public final class SyllableParser: Sendable {
     private func adjustLeadingVowel(_ text: String) -> String {
         guard let first = text.unicodeScalars.first else { return text }
 
-        let leadingVowelSigns: Set<UInt32> = [
-            0x1031,  // ေ
-            0x1032,  // ဲ
-            0x102D,  // ိ
-            0x102E,  // ီ
-            0x102F,  // ု
-            0x1030,  // ူ
-            0x103E,  // ှ
-        ]
-
-        if leadingVowelSigns.contains(first.value) {
+        // Every dependent sign in the Myanmar block — dependent vowels
+        // (U+102B–U+1032), tone/shaping marks and virama/asat
+        // (U+1036–U+103A), and medials (U+103B–U+103E) — must attach to a
+        // preceding base. When the parser accepts an onset-less surface
+        // that begins with one, prefix U+200C so the mark has a
+        // display-safe base.
+        switch first.value {
+        case 0x102B...0x1032, 0x1036...0x103E:
             return "\u{200C}" + text
+        default:
+            return text
         }
-        return text
     }
 
     // MARK: - Scoring

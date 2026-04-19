@@ -511,6 +511,23 @@ public enum EngineSuite {
             ctx.assertEqual(parseTop("own"), "\u{200C}\u{102F}\u{1014}\u{103A}")
         },
 
+        TestCase("leadingVowel_medialWa_on") { ctx in
+            // U+103D (medial wa) is a combining sign — standalone parses
+            // beginning with it must be prefixed with U+200C so the mark
+            // has a display base.
+            ctx.assertEqual(parseTop("on"), "\u{200C}\u{103D}\u{1014}\u{103A}")
+        },
+
+        TestCase("leadingVowel_virama") { ctx in
+            // U+1039 (virama) as a standalone parse must be ZWNJ-prefixed.
+            ctx.assertEqual(parseTop("+"), "\u{200C}\u{1039}")
+        },
+
+        TestCase("leadingVowel_asat") { ctx in
+            // U+103A (asat) as a standalone parse must be ZWNJ-prefixed.
+            ctx.assertEqual(parseTop("*"), "\u{200C}\u{103A}")
+        },
+
         // MARK: - Standard Burmese character coverage
 
         TestCase("standardChar_gha_types") { ctx in
