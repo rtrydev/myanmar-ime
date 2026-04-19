@@ -97,6 +97,11 @@ public final class SyllableParser: Sendable {
     /// transition (onset: nil). Indexed by `VowelMatchEntry.id`.
     private let vowelOnlyLegality: [Int]
 
+    /// `VowelMatchEntry.id` of the virama connector (`+`), or `-1` if the
+    /// vowel table has no virama entry. Used in the hot DP loop to detect
+    /// stack contexts with an integer compare rather than a string compare.
+    private let viramaVowelId: Int32
+
     /// Maximum onset key length for bounded search.
     public let maxOnsetLen: Int
 
@@ -269,14 +274,19 @@ public final class SyllableParser: Sendable {
         self.onsetBareLegality = bareOnsetLegalities
 
         var vowelOnlyLegalities = [Int](repeating: 0, count: builtVowelTrie.terminals.count)
+        var foundViramaId: Int32 = -1
         for (idx, entry) in builtVowelTrie.terminals.enumerated() {
             vowelOnlyLegalities[idx] = Grammar.validateSyllable(
                 onset: nil,
                 medials: [],
                 vowelRoman: entry.canonicalRoman
             )
+            if foundViramaId < 0 && entry.canonicalRoman == "+" {
+                foundViramaId = entry.id
+            }
         }
         self.vowelOnlyLegality = vowelOnlyLegalities
+        self.viramaVowelId = foundViramaId
     }
 
     /// Compact a `[String: [Entry]]` map into an ASCII trie + flat terminal
@@ -533,6 +543,12 @@ public final class SyllableParser: Sendable {
         // standalone-vowel cases are already pre-computed at init time.
         var pairLegality: [UInt64: Int] = [:]
 
+        // Virama-stack validation can only fire if the buffer contains a
+        // "+" connector. Precompute this once so the common case (plain
+        // buffers, including the worst-case "garbage" scenario) skips the
+        // per-state match-ref inspection entirely.
+        let hasViramaInBuffer = chars.contains("+")
+
         for i in 0..<n {
             guard !dp[i].stateIndices.isEmpty else { continue }
 
@@ -549,8 +565,44 @@ public final class SyllableParser: Sendable {
                 let previous = arena[Int(prevIdx)]
                 var matched = false
 
+                // If the previous syllable ended with a virama connector
+                // ("+"), the next onset is the subscript of a virama stack
+                // and must be validated against the upper consonant.
+                // Cross-class stacks (e.g. က္ယ, က္ဝ, က္ဿ) fall outside the
+                // native subscript model; force their onset legality to 0
+                // so the resulting parse drops below the legality
+                // threshold. Two shapes reach here because the DP admits
+                // both a glued `.onsetVowel(upper, +)` and a split
+                // `.onsetOnly(upper)` → `.vowelOnly(+)` path.
+                let viramaUpper: Character?
+                if hasViramaInBuffer {
+                    switch previous.matchRef {
+                    case let .onsetVowel(onsetId, vowelId) where vowelId == viramaVowelId:
+                        viramaUpper = onsetTerminals[Int(onsetId)].onset
+                    case let .vowelOnly(vowelId)
+                        where vowelId == viramaVowelId && previous.parentIdx >= 0:
+                        switch arena[Int(previous.parentIdx)].matchRef {
+                        case let .onsetOnly(onsetId):
+                            viramaUpper = onsetTerminals[Int(onsetId)].onset
+                        case let .onsetVowel(onsetId, _):
+                            viramaUpper = onsetTerminals[Int(onsetId)].onset
+                        default:
+                            viramaUpper = nil
+                        }
+                    default:
+                        viramaUpper = nil
+                    }
+                } else {
+                    viramaUpper = nil
+                }
+
                 for (onsetEnd, onsetEntry) in onsetMatches {
-                    let onsetLegality = onsetBareLegality[Int(onsetEntry.id)]
+                    let stackLegal = viramaUpper.map {
+                        Grammar.isValidStack(upper: $0, lower: onsetEntry.onset)
+                    } ?? true
+                    let onsetLegality = stackLegal
+                        ? onsetBareLegality[Int(onsetEntry.id)]
+                        : 0
                     let newState = ParseState(
                         parentIdx: prevIdx,
                         matchRef: .onsetOnly(onsetId: onsetEntry.id),
@@ -573,17 +625,18 @@ public final class SyllableParser: Sendable {
                     let vowelMatches = vowelMatchesByStart[onsetEnd]
                     for (vowelEnd, vowelEntry) in vowelMatches {
                         let key = Self.packPair(onsetEntry.id, vowelEntry.id)
-                        let legality: Int
+                        let pairLegalityRaw: Int
                         if let cached = pairLegality[key] {
-                            legality = cached
+                            pairLegalityRaw = cached
                         } else {
-                            legality = Grammar.validateSyllable(
+                            pairLegalityRaw = Grammar.validateSyllable(
                                 onset: onsetEntry.onset,
                                 medials: onsetEntry.medials,
                                 vowelRoman: vowelEntry.canonicalRoman
                             )
-                            pairLegality[key] = legality
+                            pairLegality[key] = pairLegalityRaw
                         }
+                        let legality = stackLegal ? pairLegalityRaw : 0
                         let pairState = ParseState(
                             parentIdx: prevIdx,
                             matchRef: .onsetVowel(onsetId: onsetEntry.id, vowelId: vowelEntry.id),

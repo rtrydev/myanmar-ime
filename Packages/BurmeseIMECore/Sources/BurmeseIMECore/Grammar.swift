@@ -143,17 +143,48 @@ public enum Grammar {
 
     // MARK: - Stacking (Virama / Kinzi)
 
-    /// Consonants commonly seen as the subscript in a virama stack (္ + consonant).
-    /// This is not exhaustive but covers the standard Pali/Sanskrit stacks used in Burmese.
-    public static let stackableConsonants: Set<Character> = [
-        Myanmar.ka, Myanmar.kha, Myanmar.ga, Myanmar.gha, Myanmar.nga,
-        Myanmar.ca, Myanmar.cha, Myanmar.ja, Myanmar.nya,
-        Myanmar.tta, Myanmar.ttha, Myanmar.dda, Myanmar.ddha, Myanmar.nna,
-        Myanmar.ta, Myanmar.tha, Myanmar.da, Myanmar.dha, Myanmar.na,
-        Myanmar.pa, Myanmar.pha, Myanmar.ba, Myanmar.bha, Myanmar.ma,
-        Myanmar.ya, Myanmar.ra, Myanmar.la, Myanmar.wa,
-        Myanmar.sa, Myanmar.ha,
-    ]
+    /// Maps each consonant to its Pali/Sanskrit phonetic-class index.
+    /// Modern Burmese virama stacks are restricted to pairs whose upper
+    /// and lower members come from the same class — that yields the
+    /// familiar native conjuncts (က္က, ဂ္ဂ, စ္ဆ, တ္တ, န္ဒ, ပ္ပ, မ္မ, …)
+    /// without admitting cross-class shapes (က္ယ, က္ဝ, က္ဿ) that fall
+    /// outside the native subscript model.
+    ///
+    /// Classes:
+    ///   0 — velar     (က ခ ဂ ဃ င)
+    ///   1 — palatal   (စ ဆ ဇ ဈ ည ဉ)
+    ///   2 — retroflex (ဋ ဌ ဍ ဎ ဏ)
+    ///   3 — dental    (တ ထ ဒ ဓ န)
+    ///   4 — labial    (ပ ဖ ဗ ဘ မ)
+    ///
+    /// Semi-vowels / liquids / sibilants (ယ ရ လ ဝ သ ဟ ဠ ဿ အ) intentionally
+    /// have no class assignment — they never participate in native virama
+    /// stacks, so neither position accepts them.
+    private static let stackClass: [Character: Int] = {
+        var map: [Character: Int] = [:]
+        for c in [Myanmar.ka, Myanmar.kha, Myanmar.ga, Myanmar.gha, Myanmar.nga] { map[c] = 0 }
+        for c in [Myanmar.ca, Myanmar.cha, Myanmar.ja, Myanmar.jha, Myanmar.nya, Myanmar.nnya] { map[c] = 1 }
+        for c in [Myanmar.tta, Myanmar.ttha, Myanmar.dda, Myanmar.ddha, Myanmar.nna] { map[c] = 2 }
+        for c in [Myanmar.ta, Myanmar.tha, Myanmar.da, Myanmar.dha, Myanmar.na] { map[c] = 3 }
+        for c in [Myanmar.pa, Myanmar.pha, Myanmar.ba, Myanmar.bha, Myanmar.ma] { map[c] = 4 }
+        return map
+    }()
+
+    /// Consonants that may appear on either side of a virama stack. This is
+    /// every character with a `stackClass` assignment — derived from the
+    /// class table so the two cannot drift.
+    public static let stackableConsonants: Set<Character> = Set(stackClass.keys)
+
+    /// Returns `true` if `upper + ္ + lower` forms a legal virama stack in
+    /// modern Burmese. The rule is strict same-class stacking (see
+    /// `stackClass`): both consonants must be mapped and must share a class.
+    public static func isValidStack(upper: Character, lower: Character) -> Bool {
+        guard let upperClass = stackClass[upper],
+              let lowerClass = stackClass[lower] else {
+            return false
+        }
+        return upperClass == lowerClass
+    }
 
     /// Kinzi is formed by: consonant + ္ + င  (where the first consonant becomes superscript).
     /// In practice, kinzi is almost always င + ္ + next consonant, written as
