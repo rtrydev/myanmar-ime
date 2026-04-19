@@ -1041,7 +1041,13 @@ public final class BurmeseEngine: @unchecked Sendable {
             while j >= 0 {
                 let prev = scalars[j]
                 if Myanmar.isConsonant(prev) {
-                    let wantsTall = tallAaSet.contains(prev.value)
+                    // A round-bottomed consonant sitting as the subscript of a
+                    // virama-stacked conjunct (e.g. ပ္ပ in အဓိပ္ပာယ်, ဂ္ဂ in
+                    // အဂ္ဂ) takes the plain ာ, not the hooked ါ — the stacking
+                    // already disambiguates the visual footprint.
+                    let virama: UInt32 = 0x1039
+                    let isStackedSubscript = j >= 1 && scalars[j - 1].value == virama
+                    let wantsTall = tallAaSet.contains(prev.value) && !isStackedSubscript
                     let target: UInt32 = wantsTall ? tallAa : shortAa
                     if v != target {
                         scalars[i] = Unicode.Scalar(target)!

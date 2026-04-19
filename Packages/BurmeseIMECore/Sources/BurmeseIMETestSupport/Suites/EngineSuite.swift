@@ -145,6 +145,47 @@ public enum EngineSuite {
             )
         },
 
+        TestCase("candidates_aaShapeOnStackedConjunct") {
+            ctx in
+            let engine = BurmeseEngine()
+
+            // ပ္ပ + aa: stacked round-bottomed subscript takes plain ာ, not ါ.
+            let stackedP = "\u{1015}\u{1039}\u{1015}"
+            let pPar = engine.update(buffer: "p+par", context: [])
+            ctx.assertTrue(
+                pPar.candidates.contains { $0.surface.contains(stackedP + "\u{102C}") },
+                "p+par_shortAa", detail: "Expected ပ္ပာ (plain ာ) for stacked ပ္ပ"
+            )
+            ctx.assertFalse(
+                pPar.candidates.contains { $0.surface.contains(stackedP + "\u{102B}") },
+                "p+par_noTallAa", detail: "ါ must not appear after stacked ပ္ပ"
+            )
+
+            // User typing the tall-aa token explicitly still gets rewritten
+            // to plain ာ when the preceding consonant is a stacked subscript.
+            let pPar2 = engine.update(buffer: "p+par2", context: [])
+            ctx.assertTrue(
+                pPar2.candidates.contains { $0.surface.contains(stackedP + "\u{102C}") },
+                "p+par2_shortAa", detail: "ar2 after stacked ပ္ပ must fold to ာ"
+            )
+            ctx.assertFalse(
+                pPar2.candidates.contains { $0.surface.contains(stackedP + "\u{102B}") },
+                "p+par2_noTallAa", detail: "ါ must not survive after stacked ပ္ပ"
+            )
+
+            // Same rule for another round-bottomed stack (ဂ္ဂ as in အဂ္ဂ…).
+            let stackedG = "\u{1002}\u{1039}\u{1002}"
+            let gGar = engine.update(buffer: "g+gar", context: [])
+            ctx.assertTrue(
+                gGar.candidates.contains { $0.surface.contains(stackedG + "\u{102C}") },
+                "g+gar_shortAa", detail: "Expected ဂ္ဂာ (plain ာ) for stacked ဂ္ဂ"
+            )
+            ctx.assertFalse(
+                gGar.candidates.contains { $0.surface.contains(stackedG + "\u{102B}") },
+                "g+gar_noTallAa", detail: "ါ must not appear after stacked ဂ္ဂ"
+            )
+        },
+
         TestCase("candidates_consonantFormRanksAheadOfMedialFallback") { ctx in
             let state = BurmeseEngine().update(buffer: "hsa", context: [])
             ctx.assertEqual(state.candidates.first?.surface, "ဆ")
