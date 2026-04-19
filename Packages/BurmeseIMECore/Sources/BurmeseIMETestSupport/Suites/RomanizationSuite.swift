@@ -4,7 +4,8 @@ public enum RomanizationSuite {
     public static let suite = TestSuite(name: "Romanization", cases: [
 
         TestCase("consonantCount") { ctx in
-            ctx.assertEqual(Romanization.consonants.count, 33)
+            // 33 standard base consonants plus ဿ (great sa, U+103F).
+            ctx.assertEqual(Romanization.consonants.count, 34)
         },
 
         TestCase("consonantRomanKeysUnique") { ctx in
@@ -110,6 +111,56 @@ public enum RomanizationSuite {
                     "excludesSpecials.\(ch)"
                 )
             }
+        },
+
+        TestCase("consonantLookup_gh") { ctx in
+            ctx.assertEqual(Romanization.romanToConsonant["gh"], Myanmar.gha)
+        },
+
+        TestCase("consonantLookup_ss") { ctx in
+            ctx.assertEqual(Romanization.romanToConsonant["ss"], Myanmar.greatSa)
+        },
+
+        TestCase("vowelLookup_ii_shortIndependent") { ctx in
+            let entry = Romanization.romanToVowel["ii."]
+            ctx.assertTrue(entry != nil, detail: "ii. not found")
+            ctx.assertEqual(entry?.myanmar, "\u{1023}")
+            ctx.assertTrue(entry?.isStandalone == true, detail: "ii. must be standalone")
+        },
+
+        TestCase("vowelLookup_ii_longIndependent") { ctx in
+            let entry = Romanization.romanToVowel["ii"]
+            ctx.assertTrue(entry != nil, detail: "ii not found")
+            ctx.assertEqual(entry?.myanmar, "\u{1024}")
+            ctx.assertTrue(entry?.isStandalone == true, detail: "ii must be standalone")
+        },
+
+        TestCase("vowelLookup_oo_independent") { ctx in
+            let entry = Romanization.romanToVowel["oo"]
+            ctx.assertTrue(entry != nil, detail: "oo not found")
+            ctx.assertEqual(entry?.myanmar, "\u{1029}")
+            ctx.assertTrue(entry?.isStandalone == true, detail: "oo must be standalone")
+        },
+
+        TestCase("vowelLookup_ooTonal_independent") { ctx in
+            let entry = Romanization.romanToVowel["oo:"]
+            ctx.assertTrue(entry != nil, detail: "oo: not found")
+            ctx.assertEqual(entry?.myanmar, "\u{102A}")
+            ctx.assertTrue(entry?.isStandalone == true, detail: "oo: must be standalone")
+        },
+
+        TestCase("vowelLookup_locativeSymbol") { ctx in
+            let entry = Romanization.romanToVowel["ywe"]
+            ctx.assertTrue(entry != nil, detail: "ywe not found")
+            ctx.assertEqual(entry?.myanmar, "\u{104D}")
+            ctx.assertTrue(entry?.isStandalone == true, detail: "ywe must be standalone")
+        },
+
+        TestCase("vowelLookup_genitiveSymbol") { ctx in
+            let entry = Romanization.romanToVowel["ei"]
+            ctx.assertTrue(entry != nil, detail: "ei not found")
+            ctx.assertEqual(entry?.myanmar, "\u{104F}")
+            ctx.assertTrue(entry?.isStandalone == true, detail: "ei must be standalone")
         },
     ])
 }

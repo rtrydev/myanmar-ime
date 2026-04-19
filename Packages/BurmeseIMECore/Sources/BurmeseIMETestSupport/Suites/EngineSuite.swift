@@ -469,5 +469,81 @@ public enum EngineSuite {
         TestCase("leadingVowel_own") { ctx in
             ctx.assertEqual(parseTop("own"), "\u{200C}\u{102F}\u{1014}\u{103A}")
         },
+
+        // MARK: - Standard Burmese character coverage
+
+        TestCase("standardChar_gha_types") { ctx in
+            // ဃ (U+1003) is a regular consonant; "gh" + "a" should produce ဃ.
+            let state = BurmeseEngine().update(buffer: "gha", context: [])
+            ctx.assertTrue(
+                state.candidates.contains { $0.surface.contains("\u{1003}") },
+                "gha_hasGha",
+                detail: "surfaces=\(state.candidates.map(\.surface))"
+            )
+        },
+
+        TestCase("standardChar_gha_withFinal") { ctx in
+            // Confirm ဃ composes with a final (ဃာ is a legitimate sequence).
+            let state = BurmeseEngine().update(buffer: "ghar", context: [])
+            ctx.assertTrue(
+                state.candidates.contains {
+                    $0.surface.hasPrefix("\u{1003}") && $0.surface.contains("\u{102C}")
+                },
+                "ghar_hasGhaWithAa",
+                detail: "surfaces=\(state.candidates.map(\.surface))"
+            )
+        },
+
+        TestCase("standardChar_shortIndependentI") { ctx in
+            // ii. → ဣ (U+1023), no ZWNJ prefix since this is an independent vowel.
+            ctx.assertEqual(parseTop("ii."), "\u{1023}")
+        },
+
+        TestCase("standardChar_longIndependentI") { ctx in
+            // ii → ဤ (U+1024).
+            ctx.assertEqual(parseTop("ii"), "\u{1024}")
+        },
+
+        TestCase("standardChar_independentO") { ctx in
+            // oo → ဩ (U+1029).
+            ctx.assertEqual(parseTop("oo"), "\u{1029}")
+        },
+
+        TestCase("standardChar_independentOTonal") { ctx in
+            // oo: → ဪ (U+102A).
+            ctx.assertEqual(parseTop("oo:"), "\u{102A}")
+        },
+
+        TestCase("standardChar_locativeSymbol") { ctx in
+            // ywe → ၍ (U+104D, conjunctive particle).
+            ctx.assertEqual(parseTop("ywe"), "\u{104D}")
+        },
+
+        TestCase("standardChar_genitiveSymbol") { ctx in
+            // ei → ၏ (U+104F, possessive particle).
+            ctx.assertEqual(parseTop("ei"), "\u{104F}")
+        },
+
+        TestCase("standardChar_greatSa_bare") { ctx in
+            // ss → ဿ + inherent a. ဿ itself (U+103F) must be present.
+            let state = BurmeseEngine().update(buffer: "ssa", context: [])
+            ctx.assertTrue(
+                state.candidates.contains { $0.surface.contains("\u{103F}") },
+                "ssa_hasGreatSa",
+                detail: "surfaces=\(state.candidates.map(\.surface))"
+            )
+        },
+
+        TestCase("standardChar_greatSa_withVowel") { ctx in
+            // ဿ accepts a vowel suffix (appears as ဿ + ာ for non-descender onsets).
+            let state = BurmeseEngine().update(buffer: "ssar", context: [])
+            ctx.assertTrue(
+                state.candidates.contains {
+                    $0.surface.hasPrefix("\u{103F}") && $0.surface.contains("\u{102C}")
+                },
+                "ssar_hasGreatSaWithAa",
+                detail: "surfaces=\(state.candidates.map(\.surface))"
+            )
+        },
     ])
 }

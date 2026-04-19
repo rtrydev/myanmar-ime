@@ -56,6 +56,7 @@ public enum Romanization {
         .init("h", Myanmar.ha),          // ဟ = ha → base "h"
         .init("l2", Myanmar.lla),        // ဠ = l2a → base "l2"
         .init("ah", Myanmar.ah),         // အ = ah (no trailing 'a' removal)
+        .init("ss", Myanmar.greatSa),    // ဿ = great sa (doubled-s mnemonic)
     ]
 
     /// Lookup: roman base → myanmar consonant.
@@ -195,6 +196,10 @@ public enum Romanization {
         .init("i.", "\u{102D}"),                    // ိ
         .init("i", "\u{102E}"),                     // ီ
 
+        // -ii family (independent vowels, standalone)
+        .init("ii.", "\u{1023}", standalone: true),  // ဣ short independent i
+        .init("ii",  "\u{1024}", standalone: true),  // ဤ long independent i
+
         // -u family
         .init("u2:", "\u{1026}\u{1038}", standalone: true),  // ဦး
         .init("u2.", "\u{1025}", standalone: true),           // ဥ
@@ -222,6 +227,10 @@ public enum Romanization {
         .init("aw:", "\u{1031}\u{102C}"),           // ော  (note: tall aa vs short)
         .init("aw.", "\u{1031}\u{102C}\u{1037}"),   // ော့
         .init("aw", "\u{1031}\u{102C}\u{103A}"),    // ော်
+
+        // -oo family (independent vowels, standalone)
+        .init("oo:", "\u{102A}", standalone: true),  // ဪ long/tonal independent o
+        .init("oo",  "\u{1029}", standalone: true),  // ဩ independent o
 
         // -an family
         .init("an3:", "\u{1036}\u{1038}"),           // ံး (non-standard but in table)
@@ -312,6 +321,13 @@ public enum Romanization {
 
         // Standalone medial as vowel suffix (h as ha-htoe)
         .init("h", "\u{103E}"),                      // ှ
+
+        // Standalone symbols. No digit disambiguator: these keys don't collide
+        // with any dependent-vowel sibling, and the alias-penalty from a "2"
+        // form would let the onset+medial+vowel parse of "ywe" (ယွယ်) out-rank
+        // the standalone ၍ on ties.
+        .init("ywe", "\u{104D}", standalone: true), // ၍ locative/conjunctive particle
+        .init("ei",  "\u{104F}", standalone: true), // ၏ genitive/possessive particle
     ]
 
     /// Sorted vowel keys by descending length for longest-match.

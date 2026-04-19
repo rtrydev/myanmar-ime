@@ -70,5 +70,73 @@ public enum ReverseRomanizerSuite {
             let roundTrip = parser.parse(reversed).first?.output ?? ""
             ctx.assertEqual(forward, roundTrip)
         },
+
+        TestCase("reverse_gha") { ctx in
+            ctx.assertEqual(ReverseRomanizer.romanize("ဃ"), "gha")
+        },
+
+        TestCase("reverse_shortIndependentI") { ctx in
+            ctx.assertEqual(ReverseRomanizer.romanize("ဣ"), "ii.")
+        },
+
+        TestCase("reverse_longIndependentI") { ctx in
+            ctx.assertEqual(ReverseRomanizer.romanize("ဤ"), "ii")
+        },
+
+        TestCase("reverse_independentO") { ctx in
+            ctx.assertEqual(ReverseRomanizer.romanize("ဩ"), "oo")
+        },
+
+        TestCase("reverse_independentOTonal") { ctx in
+            ctx.assertEqual(ReverseRomanizer.romanize("ဪ"), "oo:")
+        },
+
+        TestCase("reverse_locativeSymbol") { ctx in
+            ctx.assertEqual(ReverseRomanizer.romanize("၍"), "ywe")
+        },
+
+        TestCase("reverse_genitiveSymbol") { ctx in
+            ctx.assertEqual(ReverseRomanizer.romanize("၏"), "ei")
+        },
+
+        TestCase("reverse_greatSa") { ctx in
+            // ဿ behaves as a consonant with its inherent vowel.
+            ctx.assertEqual(ReverseRomanizer.romanize("ဿ"), "ssa")
+        },
+
+        TestCase("reverse_greatSaInWord") { ctx in
+            // ပြဿနာ is a common Pali loanword ("problem") that embeds ဿ.
+            let reversed = ReverseRomanizer.romanize("ပြဿနာ")
+            ctx.assertTrue(reversed.contains("ss"),
+                "containsSs", detail: "expected 'ss' in \(reversed)")
+        },
+
+        TestCase("roundTrip_shortIndependentI") { ctx in
+            let parser = SyllableParser()
+            let forward = parser.parse("ii.").first?.output ?? ""
+            ctx.assertEqual(forward, "\u{1023}")
+            let reversed = ReverseRomanizer.romanize(forward)
+            ctx.assertEqual(reversed, "ii.")
+        },
+
+        TestCase("roundTrip_longIndependentI") { ctx in
+            let parser = SyllableParser()
+            let forward = parser.parse("ii").first?.output ?? ""
+            ctx.assertEqual(forward, "\u{1024}")
+        },
+
+        TestCase("roundTrip_locativeSymbol") { ctx in
+            let parser = SyllableParser()
+            let forward = parser.parse("ywe").first?.output ?? ""
+            ctx.assertEqual(forward, "\u{104D}")
+            let reversed = ReverseRomanizer.romanize(forward)
+            ctx.assertEqual(reversed, "ywe")
+        },
+
+        TestCase("roundTrip_genitiveSymbol") { ctx in
+            let parser = SyllableParser()
+            let forward = parser.parse("ei").first?.output ?? ""
+            ctx.assertEqual(forward, "\u{104F}")
+        },
     ])
 }

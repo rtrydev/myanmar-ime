@@ -37,6 +37,7 @@ public enum Myanmar {
     public static let ha: Character    = "\u{101F}"  // ဟ
     public static let lla: Character   = "\u{1020}"  // ဠ  (l2a)
     public static let ah: Character    = "\u{1021}"  // အ
+    public static let greatSa: Character = "\u{103F}"  // ဿ  (ss) — doubled-sa consonant
 
     // MARK: - Independent Vowels (U+1023–U+1029)
 
@@ -87,6 +88,11 @@ public enum Myanmar {
     public static let digit8: Character = "\u{1048}"  // ၈
     public static let digit9: Character = "\u{1049}"  // ၉
 
+    // MARK: - Symbols
+
+    public static let locativeMark: Character = "\u{104D}"  // ၍ conjunctive/locative particle
+    public static let genitiveMark: Character = "\u{104F}"  // ၏ possessive particle
+
     // MARK: - Special
 
     public static let zwnj: Character = "\u{200C}"  // Zero-width non-joiner
@@ -104,8 +110,10 @@ public enum Myanmar {
     ]
 
     /// Scalar values for the Myanmar consonant range.
+    /// U+103F (ဿ, great sa) sits outside the contiguous block but behaves
+    /// as a consonant — it can carry an inherent vowel or vowel suffix.
     public static func isConsonant(_ scalar: Unicode.Scalar) -> Bool {
-        (0x1000...0x1021).contains(scalar.value)
+        (0x1000...0x1021).contains(scalar.value) || scalar.value == 0x103F
     }
 
     /// Check if a scalar is a Myanmar medial consonant sign.

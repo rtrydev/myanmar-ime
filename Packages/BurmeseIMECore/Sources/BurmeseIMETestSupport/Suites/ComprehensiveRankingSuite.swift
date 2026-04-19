@@ -249,6 +249,85 @@ public enum ComprehensiveRankingSuite {
               gloss: "in recent days rain falls continuously so travelling is difficult",
               surface: "ဒီရက်ပိုင်းမှာမိုးဆက်တိုက်ရွာနေတာကြောင့်ခရီးထွက်ဖို့ခက်ခဲတယ်",
               alternatives: [], topK: 10),
+
+        // --- extra-long multi-clause sentences (60-90 chars surface)
+        // that chain several of the short-sentence topics back to back
+        // (daily routine, weekend plans, career + family, illness +
+        // recovery, shopping + cooking, festival gathering). These
+        // stress the LM's ability to carry context across multiple
+        // clause boundaries within one continuous composition buffer.
+        .init(id: "longArticle_morningRoutine",
+              gloss: "wake early, shower, eat rice, read the paper, then head to work",
+              surface: "မနက်စောစောထပြီးရေချိုးပြီးထမင်းစားပြီးသတင်းစာဖတ်ပြီးမှအလုပ်ကိုသွားတယ်",
+              alternatives: [
+                "မနက်စောစောထပြီးရေချိုးပြီးထမင်းစားပြီးသတင်းစာဖတပြီးမှဟလုတ်ကိုသွားတယ်",
+              ], topK: 10),
+        .init(id: "longArticle_weekendMovie",
+              gloss: "on sunday i plan to meet friends and watch a movie together",
+              surface: "တနင်္ဂနွေနေ့မှာသူငယ်ချင်းတွေနဲ့တွေ့ပြီးအတူတူရုပ်ရှင်သွားကြည့်ဖို့စီစဉ်ထားတယ်",
+              alternatives: [
+                "တနီငန်ဝေနေ့မှာသူငယ်ချင်းတွေနဲ့တွေ့ပြီးဟတူတူရုတ်ရှင်သွားကြည့်ဖို့စီစဉ်ထားတယ်",
+              ], topK: 10),
+        .init(id: "longArticle_careerAndFamily",
+              gloss: "after school i want to land a job and support my family",
+              surface: "ကျောင်းပြီးရင်အလုပ်တစ်ခုရအောင်ကြိုးစားပြီးမိသားစုကိုပြန်ထောက်ပံ့ချင်တယ်",
+              alternatives: [
+                "ကြောင်းပြီးရင်ဟလုပ်တစ်ခုရဟောင်ကြိုးစားပြီးမိသားစုကိုပြနှတောက်ပန့်ခြင်တယ်",
+                "ကြောင်းပြီးရင်ဟလုပ်တစ်ခုရဟောင်ကြိုးစားပြီးမိသားစုကိုပြနထောက်ပန့်ခြင်တယ်",
+              ], topK: 10),
+        .init(id: "longArticle_illnessRecovery",
+              gloss: "was sick recently so saw the doctor, took medicine, and rested at home",
+              surface: "လွန်ခဲ့တဲ့ရက်ပိုင်းကဖျားနာနေလို့ဆရာဝန်ဆီသွားပြပြီးဆေးသောက်ပြီးအိမ်မှာနားခဲ့တယ်",
+              alternatives: [
+                "လဝန်ခယ့်တယ့်ရက်ပိုင်းကဖြားနာနေလို့ဆာရွန်ဆီသွားပြပြီးဆေးသောက်ပြီးဟိန်မှာနားခယ့်တယ်",
+              ], topK: 10),
+        .init(id: "longArticle_marketShopping",
+              gloss: "yesterday i went to the market and bought spices and vegetables to cook",
+              surface: "မနေ့ကစျေးသွားပြီးဟင်းချက်ဖို့ဟင်းခတ်တွေနဲ့ဟင်းသီးဟင်းရွက်တွေဝယ်ခဲ့တယ်",
+              alternatives: [
+                "မနေ့ကစြေးသွားပြီးဟင်းချက်ဖို့ဟင်းခတ်တွေနဲ့ဟင်းသီးဟင်းရွက်တွေဝယ်ခဲ့တယ်",
+              ], topK: 10),
+        .init(id: "longArticle_festivalGathering",
+              gloss: "during thingyan the whole family gathers at home and plays with water",
+              surface: "သင်္ကြန်ပွဲတော်မှာမိသားစုအားလုံးစုရုံးပြီးအိမ်မှာရေကစားကြမယ်",
+              alternatives: [
+                "တဟင်ကြန်ပွဲတော်မှာမိသားစုဟားလုံးစုရုံးပြီးဟိမ်မှာရေကစားကြမယ်",
+              ], topK: 10),
+
+        // --- long sentences that embed the standard-orthography
+        // characters wired in alongside the short unit tests:
+        //   ဤ  (ii,  long independent i) — literary "this"
+        //   ဩ  (oo,  independent o)       — ဩဂုတ် "August", ဩဇာ "influence"
+        //   ဪ  (oo:, tonal independent o) — exclamation "oh!"
+        //   ၍  (ywe, locative / conjunctive particle, formal "and/so")
+        //   ၏  (ei,  genitive particle / literary sentence-ender)
+        //   ဿ  (ss,  great sa)            — embedded in ပြဿနာ "problem"
+        // ဃ and ဣ are rare enough in modern prose that they are only
+        // exercised in the per-character unit tests.
+        .init(id: "longArticle_literaryProblem",
+              gloss: "this problem cannot be solved in a short time",
+              surface: "ဤပြဿနာကိုအချိန်တိုအတွင်းဖြေရှင်း၍မရနိုင်ဘူး",
+              alternatives: [
+                "ဤပြဿနာကိုဟခြိန်တိုအတွင်းဖြေရှင်း၍မရနိုင်ဘူး",
+              ], topK: 10),
+        .init(id: "longArticle_augustTravel",
+              gloss: "next august i plan to travel to yangon with family",
+              surface: "လာမယ့်ဩဂုတ်လမှာမိသားစုနဲ့ရန်ကုန်ကိုခရီးထွက်ဖို့စီစဉ်ထားတယ်",
+              alternatives: [
+                "လာမယ့်ဩဂုတ်လမှာမိသားစုနဲ့ရနကုန်ကိုခရီးထွက်ဖို့စီစဉ်ထားတယ်",
+              ], topK: 10),
+        .init(id: "longArticle_literaryInfluence",
+              gloss: "his influence is great so many people respect him",
+              surface: "သူ၏ဩဇာကြီးမား၍လူအများကလေးစားကြ၏",
+              alternatives: [
+                "သူ၏ဩဇာကြီးမား၍လူဟများကလေးစားကြ၏",
+              ], topK: 10),
+        .init(id: "longArticle_exclamationProblem",
+              gloss: "oh this problem is so complex and hard to solve",
+              surface: "ဪဤပြဿနာကအလွန်ရှုပ်ထွေး၍ဖြေရှင်းရခက်တယ်",
+              alternatives: [
+                "ဪဤပြဿနာကဟလွန်ရှုတ်ထွေး၍ဖြေရှင်းရခက်တယ်",
+              ], topK: 10),
     ]
 
     private static func stripZW(_ s: String) -> String {

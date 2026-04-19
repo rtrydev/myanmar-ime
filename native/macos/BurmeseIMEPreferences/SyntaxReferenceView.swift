@@ -145,10 +145,12 @@ private struct VowelsSection: View {
         ("a",    "Inherent vowel (a)",  "Implicit after any consonant; type explicitly to end a syllable."),
         ("ar",   "-ar family",          "Long /a/. ar uses ာ; ar2 uses ါ (tall aa) on descending consonants — the engine picks the right shape automatically."),
         ("i",    "-i family",           "/i/. i2 variants use ည instead of ီ."),
+        ("ii",   "-ii family (independent)", "Standalone /i/ vowels: ii. → ဣ (short), ii → ဤ (long). Typed by themselves, no consonant needed."),
         ("u",    "-u family",           "/u/. u2 variants produce the standalone vowel forms ဥ / ဦ."),
         ("ay",   "-ay family",          "/e/-like. ay2 is the standalone ဧ."),
         ("e",    "-e family",           "/ɛ/-like."),
         ("aw",   "-aw family",          "/ɔ/. aw2 uses the tall aa shape (ေါ)."),
+        ("oo",   "-oo family (independent)", "Standalone /o/ vowels: oo → ဩ, oo: → ဪ."),
         ("an",   "-an family",          "Nasal final /-an/. an / an2 / an3 cover န် / မ် / ံ."),
         ("o",    "-o family",           "/o/ diphthong (i + u)."),
         ("in",   "-in family",          "/-in/ with င."),
@@ -243,6 +245,8 @@ private struct SpecialCharactersSection: View {
         ("'", "Syllable separator", "Forces a syllable break with no output. Useful when adjacent characters would otherwise merge."),
         (":", "Long / heavy tone", "Appended to a vowel key: ar → ာ, ar: → ား."),
         (".", "Short / creaky tone", "Appended to a vowel key: ay → ေ, ay. → ေ့."),
+        ("ywe", "Locative / conjunctive ၍", "Standalone particle meaning \"and thus\". Type on its own — no consonant needed."),
+        ("ei", "Genitive ၏", "Standalone possessive / sentence-ending particle."),
     ]
 
     var body: some View {
@@ -253,7 +257,7 @@ private struct SpecialCharactersSection: View {
                 HStack(alignment: .top, spacing: 12) {
                     Text(entry.key)
                         .font(.system(.title3, design: .monospaced))
-                        .frame(width: 28, alignment: .center)
+                        .frame(width: 36, alignment: .center)
                         .padding(.vertical, 2)
                         .padding(.horizontal, 4)
                         .background(.quaternary, in: RoundedRectangle(cornerRadius: 4))

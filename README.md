@@ -97,6 +97,12 @@ The romanization scheme maps 33 base consonants × medial combinations ×
 | `kyaw` | ကြော် | onset `k` + ya-yit + vowel `aw` |
 | `min+galarpar` | မင်္ဂလာပာ | multi-syllable with virama stack |
 | `hkwy2` | ကျွှ | onset with three medials |
+| `gha` | ဃ | consonant `gh` (gha) + inherent vowel |
+| `ssa` | ဿ | great-sa consonant `ss` with inherent vowel |
+| `ii.` / `ii` | ဣ / ဤ | short / long independent i, no onset needed |
+| `oo` / `oo:` | ဩ / ဪ | independent o, plain and tonal |
+| `ywe` | ၍ | standalone locative/conjunctive particle |
+| `ei` | ၏ | standalone genitive particle |
 
 ### 11 Medial Combinations
 ```

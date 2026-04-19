@@ -110,8 +110,10 @@ public enum ReverseRomanizer {
         let s = scalars[start]
 
         switch s.value {
-        case 0x1027: // ဧ
-            return ("ay2", 1)
+        case 0x1023: // ဣ short independent i
+            return ("ii.", 1)
+        case 0x1024: // ဤ long independent i
+            return ("ii", 1)
         case 0x1025: // ဥ
             return ("u2.", 1)
         case 0x1026: // ဦ
@@ -120,6 +122,12 @@ public enum ReverseRomanizer {
                 return ("u2:", 2)
             }
             return ("u2", 1)
+        case 0x1027: // ဧ
+            return ("ay2", 1)
+        case 0x1029: // ဩ
+            return ("oo", 1)
+        case 0x102A: // ဪ
+            return ("oo:", 1)
         default:
             return nil
         }
