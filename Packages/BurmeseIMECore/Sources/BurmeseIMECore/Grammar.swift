@@ -283,7 +283,7 @@ public enum Grammar {
         // example, in "min+ga" the virama must be standalone so that
         // "in" stays as the vowel of "m"; if the virama were parsed as
         // "n" + virama, the "in" vowel would be split into "i" + "n".
-        if connectorVowels.contains(vowelRoman) && onset != nil {
+        if connectorVowels.contains(vowelRoman) {
             score -= 10
         }
 
