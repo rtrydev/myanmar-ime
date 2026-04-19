@@ -233,6 +233,33 @@ public enum RankingSuite {
             )
         })
 
+        // MARK: - Issue D: digit-disambiguated independent vowels
+
+        cases.append(TestCase("issueD_parserStandaloneIndependentVowelsMatchEngineTop") { ctx in
+            let parser = SyllableParser()
+            let engine = BurmeseEngine()
+            let expectations: [(key: String, expected: String)] = [
+                ("u2.", "ဥ"),
+                ("u2", "ဦ"),
+                ("ay2", "ဧ"),
+            ]
+
+            for expectation in expectations {
+                let parserTop = parser.parseCandidates(expectation.key, maxResults: 3).first?.output
+                let engineTop = engine.update(buffer: expectation.key, context: []).candidates.first?.surface
+                ctx.assertEqual(
+                    parserTop ?? "",
+                    expectation.expected,
+                    "parserTop.\(expectation.key)"
+                )
+                ctx.assertEqual(
+                    parserTop ?? "",
+                    engineTop ?? "",
+                    "parserMatchesEngine.\(expectation.key)"
+                )
+            }
+        })
+
         return TestSuite(name: "Ranking", cases: cases)
     }()
 }

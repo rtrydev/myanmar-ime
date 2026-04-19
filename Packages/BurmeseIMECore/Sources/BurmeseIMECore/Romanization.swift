@@ -352,6 +352,10 @@ public enum Romanization {
     private static let numericAliasMarkers: Set<Character> = ["2", "3"]
     private static let composeSeparators: Set<Character> = ["+", "'"]
 
+    package static func isNumericAliasMarker(_ character: Character) -> Bool {
+        numericAliasMarkers.contains(character)
+    }
+
     /// Strip numeric disambiguation markers used by canonical readings.
     package static func aliasReading(_ canonical: String) -> String {
         String(canonical.filter { !numericAliasMarkers.contains($0) })

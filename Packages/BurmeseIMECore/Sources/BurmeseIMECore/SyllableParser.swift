@@ -67,11 +67,11 @@ public final class SyllableParser: Sendable {
     private typealias VowelMatch = (end: Int, entry: VowelMatchEntry)
 
     /// Flat ASCII trie used to match onsets/vowels without per-lookup string
-    /// slicing. The composing buffer is normalized to lowercase ASCII
-    /// (a-z + "+*':." — see `Romanization.composingCharacters`), so a
-    /// fixed 128-wide children table covers every character the walker can
-    /// encounter. Nodes with terminal payloads store a half-open range into
-    /// a per-trie payload array — one trie for onsets, one for vowels.
+    /// slicing. Parser input is normalized to lowercase ASCII composing
+    /// characters plus numeric alias markers (`2`/`3`), so a fixed 128-wide
+    /// children table covers every character the walker can encounter.
+    /// Nodes with terminal payloads store a half-open range into a per-trie
+    /// payload array — one trie for onsets, one for vowels.
     private struct AsciiTrieTable {
         /// `children[node * 128 + byte] = childNode` (`-1` if absent).
         let children: [Int32]
@@ -400,6 +400,12 @@ public final class SyllableParser: Sendable {
 
     // MARK: - Public API
 
+    private static func normalizeForParser(_ input: String) -> String {
+        String(input.lowercased().filter {
+            Romanization.composingCharacters.contains($0) || Romanization.isNumericAliasMarker($0)
+        })
+    }
+
     /// Parse a romanized buffer into its best Burmese output.
     public func parse(_ input: String) -> [SyllableParse] {
         parseCandidates(input, maxResults: 1)
@@ -407,7 +413,7 @@ public final class SyllableParser: Sendable {
 
     /// Parse a romanized buffer into multiple Burmese candidates.
     public func parseCandidates(_ input: String, maxResults: Int = 8) -> [SyllableParse] {
-        let normalized = Romanization.normalize(input)
+        let normalized = Self.normalizeForParser(input)
         guard !normalized.isEmpty, maxResults > 0 else { return [] }
 
         let chars = Array(normalized)
@@ -423,7 +429,8 @@ public final class SyllableParser: Sendable {
         return finalizeStates(
             arena: arena,
             finalIndices: finalIndices,
-            limit: maxResults
+            limit: maxResults,
+            requestedReading: normalized
         )
     }
 
@@ -445,7 +452,7 @@ public final class SyllableParser: Sendable {
         maxResults: Int = 1,
         acceptable: (SyllableParse) -> Bool
     ) -> (length: Int, parses: [SyllableParse]) {
-        let normalized = Romanization.normalize(input)
+        let normalized = Self.normalizeForParser(input)
         guard !normalized.isEmpty, maxResults > 0 else { return (0, []) }
 
         let chars = Array(normalized)
@@ -459,44 +466,25 @@ public final class SyllableParser: Sendable {
             maxResults: beamWidth
         )
 
-        // Walk buckets backward; at each position cheaply find the best
-        // legal state via scalar `isBetterDP`, materialize only it, and
-        // test acceptability. `finalizeStates` is deferred until we've
-        // found an acceptable position — its O(bucket) materialize + sort
-        // + dedup is wasted work on every earlier position the walk has
-        // to reject.
+        // Walk buckets backward and finalize the candidate list at each
+        // position until one of the surfaced parses satisfies the caller's
+        // acceptability predicate. This keeps the acceptability walk aligned
+        // with the same string-aware ranking and cleanup used by
+        // `parseCandidates`, which matters for cleaned virama stacks and
+        // explicit digit-disambiguated readings.
         for k in stride(from: chars.count, through: 1, by: -1) {
             if dp[k].needsPrune {
                 pruneBucket(&dp[k], arena: arena, limit: beamWidth)
             }
-            var bestIdx: Int32 = -1
-            for idx in dp[k].stateIndices {
-                let s = arena[Int(idx)]
-                guard s.isLegal, s.syllableCount > 0 else { continue }
-                if bestIdx < 0 || isBetterDP(s, than: arena[Int(bestIdx)]) {
-                    bestIdx = idx
-                }
-            }
-            if bestIdx < 0 { continue }
-
-            let (output, reading) = materialize(stateIdx: bestIdx, arena: arena)
-            let best = arena[Int(bestIdx)]
-            let probe = SyllableParse(
-                output: adjustLeadingVowel(output),
-                reading: reading,
-                aliasCost: best.aliasCost,
-                legalityScore: best.isLegal ? best.legalityScore : 0,
-                score: best.score,
-                structureCost: best.structureCost
-            )
-            guard acceptable(probe) else { continue }
-
             let parses = finalizeStates(
                 arena: arena,
                 finalIndices: dp[k].stateIndices,
-                limit: maxResults
+                limit: maxResults,
+                requestedReading: String(chars.prefix(k))
             )
-            return (k, parses)
+            if parses.contains(where: acceptable) {
+                return (k, parses)
+            }
         }
         return (0, [])
     }
@@ -862,7 +850,8 @@ public final class SyllableParser: Sendable {
     private func finalizeStates(
         arena: [ParseState],
         finalIndices: [Int32],
-        limit: Int
+        limit: Int,
+        requestedReading: String
     ) -> [SyllableParse] {
         // "Non-empty" under the legacy code meant `!output.isEmpty`; here that
         // is precisely `syllableCount > 0` because every emitted output
@@ -913,14 +902,34 @@ public final class SyllableParser: Sendable {
             ))
         }
 
+        var markerPenaltyForReading: [String: Int] = [:]
+        for state in materialized {
+            markerPenaltyForReading[state.reading] = Self.explicitMarkerPenalty(
+                requested: requestedReading,
+                candidate: state.reading
+            )
+        }
+
         // Sort + dedup by `adjustLeadingVowel(output)`, matching legacy.
-        materialized.sort { isBetter($0, than: $1) }
+        materialized.sort {
+            isBetter(
+                $0,
+                markerPenalty: markerPenaltyForReading[$0.reading] ?? Int.max,
+                than: $1,
+                markerPenalty: markerPenaltyForReading[$1.reading] ?? Int.max
+            )
+        }
 
         var deduplicated: [String: MaterializedState] = [:]
         for m in materialized {
             let adjustedOutput = adjustLeadingVowel(m.output)
             if let existing = deduplicated[adjustedOutput] {
-                if isBetter(m, than: existing) {
+                if isBetter(
+                    m,
+                    markerPenalty: markerPenaltyForReading[m.reading] ?? Int.max,
+                    than: existing,
+                    markerPenalty: markerPenaltyForReading[existing.reading] ?? Int.max
+                ) {
                     deduplicated[adjustedOutput] = m
                 }
             } else {
@@ -938,8 +947,10 @@ public final class SyllableParser: Sendable {
             isBetter(
                 lhs,
                 rarity: rarityFor[adjustLeadingVowel(lhs.output)] ?? 0,
+                markerPenalty: markerPenaltyForReading[lhs.reading] ?? Int.max,
                 than: rhs,
-                rarity: rarityFor[adjustLeadingVowel(rhs.output)] ?? 0
+                rarity: rarityFor[adjustLeadingVowel(rhs.output)] ?? 0,
+                markerPenalty: markerPenaltyForReading[rhs.reading] ?? Int.max
             )
         }
         return sortedFinal.prefix(limit).map { m in
@@ -974,6 +985,33 @@ public final class SyllableParser: Sendable {
             }
         }
         return penalty
+    }
+
+    private struct NumericMarkerPlacement: Hashable {
+        let offset: Int
+        let marker: Character
+    }
+
+    private static func numericMarkerPlacements(in reading: String) -> Set<NumericMarkerPlacement> {
+        var placements: Set<NumericMarkerPlacement> = []
+        var offset = 0
+        for character in reading {
+            if Romanization.isNumericAliasMarker(character) {
+                placements.insert(NumericMarkerPlacement(offset: offset, marker: character))
+            } else {
+                offset += 1
+            }
+        }
+        return placements
+    }
+
+    private static func explicitMarkerPenalty(requested: String, candidate: String) -> Int {
+        guard requested.contains(where: { Romanization.isNumericAliasMarker($0) }) else {
+            return 0
+        }
+        let requestedPlacements = numericMarkerPlacements(in: requested)
+        let candidatePlacements = numericMarkerPlacements(in: candidate)
+        return requestedPlacements.symmetricDifference(candidatePlacements).count
     }
 
     /// Walk the `parentIdx` chain backward to the seed, collect each
@@ -1210,12 +1248,20 @@ public final class SyllableParser: Sendable {
     /// parse with lower alias cost cannot displace the canonical min-tier
     /// parse at the top. Within a single tier all counts match, so this
     /// has no effect on pre-widening behavior.
-    private func isBetter(_ lhs: MaterializedState, than rhs: MaterializedState) -> Bool {
+    private func isBetter(
+        _ lhs: MaterializedState,
+        markerPenalty lhsMarkerPenalty: Int,
+        than rhs: MaterializedState,
+        markerPenalty rhsMarkerPenalty: Int
+    ) -> Bool {
         if lhs.state.isLegal != rhs.state.isLegal {
             return lhs.state.isLegal
         }
         if lhs.state.syllableCount != rhs.state.syllableCount {
             return lhs.state.syllableCount < rhs.state.syllableCount
+        }
+        if lhsMarkerPenalty != rhsMarkerPenalty {
+            return lhsMarkerPenalty < rhsMarkerPenalty
         }
         if lhs.state.aliasCost != rhs.state.aliasCost {
             return lhs.state.aliasCost < rhs.state.aliasCost
@@ -1240,8 +1286,10 @@ public final class SyllableParser: Sendable {
     private func isBetter(
         _ lhs: MaterializedState,
         rarity lhsRarity: Int,
+        markerPenalty lhsMarkerPenalty: Int,
         than rhs: MaterializedState,
-        rarity rhsRarity: Int
+        rarity rhsRarity: Int,
+        markerPenalty rhsMarkerPenalty: Int
     ) -> Bool {
         if lhs.state.isLegal != rhs.state.isLegal {
             return lhs.state.isLegal
@@ -1251,6 +1299,9 @@ public final class SyllableParser: Sendable {
         }
         if lhs.state.syllableCount != rhs.state.syllableCount {
             return lhs.state.syllableCount < rhs.state.syllableCount
+        }
+        if lhsMarkerPenalty != rhsMarkerPenalty {
+            return lhsMarkerPenalty < rhsMarkerPenalty
         }
         if lhs.state.aliasCost != rhs.state.aliasCost {
             return lhs.state.aliasCost < rhs.state.aliasCost

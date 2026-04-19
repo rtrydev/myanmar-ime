@@ -258,6 +258,16 @@ public enum EngineSuite {
                            "arabicVariant")
         },
 
+        TestCase("digitDisambiguator_beforeStackDoesNotBreakComposablePrefix") { ctx in
+            let state = BurmeseEngine().update(buffer: "thate2+pa", context: [])
+            let top = state.candidates.first?.surface ?? ""
+            ctx.assertEqual(
+                top,
+                "\u{101E}\u{102D}\u{1015}\u{1039}\u{1015}",
+                "thate2+pa_topSurface"
+            )
+        },
+
         TestCase("update_candidatesIncludeTrailingDigits") { ctx in
             let state = BurmeseEngine().update(buffer: "thar123", context: [])
             ctx.assertFalse(state.candidates.isEmpty, "nonEmpty")
