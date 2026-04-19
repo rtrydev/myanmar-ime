@@ -44,6 +44,73 @@ the XCTest drivers iterate that same list — when adding a case, edit the
 matching suite file and both runners pick it up. `FUZZ_BUDGET_MS` caps
 the fuzz suite's wall-clock time (default 1000 ms).
 
+### Behavioral probes
+
+When validating task completion or debugging edge cases, a one-off probe
+linked against the built module is faster than writing a full test case.
+Probes are useful for inspecting scalars, scores, and ranked candidates
+interactively without adding noise to the suites.
+
+1. Build the core package first (see above) — the probe links against
+   the per-file `.swift.o` objects under `.build/arm64-apple-macosx/debug/`.
+
+2. Write the probe to `/tmp/<name>-probe.swift`. Import the module,
+   instantiate `SyllableParser()` (and `BurmeseEngine` / `ReverseRomanizer`
+   as needed), and print scalar hex alongside the rendered surface so
+   combining-mark issues are visible:
+
+   ```swift
+   import Foundation
+   import BurmeseIMECore
+
+   let parser = SyllableParser()
+   func hex(_ s: String) -> String {
+       s.unicodeScalars.map { String(format: "%04X", $0.value) }.joined(separator: " ")
+   }
+   for key in ["hmon", "k+ya"] {
+       if let p = parser.parse(key).first {
+           print("\(key)\tscore=\(p.score)\tlegal=\(p.legalityScore)\t\(hex(p.output))\t\(p.output)")
+       }
+   }
+   ```
+
+3. Compile and run (from the `Packages/BurmeseIMECore` directory):
+
+   ```bash
+   xcrun swiftc -module-cache-path .build/module-cache \
+     -I .build/arm64-apple-macosx/debug/Modules \
+     /tmp/<name>-probe.swift \
+     .build/arm64-apple-macosx/debug/BurmeseIMECore.build/*.swift.o \
+     -o /tmp/<name>-probe
+   /tmp/<name>-probe
+   ```
+
+   Use **bare `xcrun swiftc`** — do *not* prefix with
+   `DEVELOPER_DIR=/Applications/Xcode.app/...`. `swift build` runs under the
+   system toolchain (whichever `xcode-select -p` resolves — on this machine
+   `/Library/Developer/CommandLineTools`), and the probe must link against
+   modules compiled by the same toolchain. Pointing the probe at Xcode's
+   bundled Swift produces *"module compiled with Swift X.Y.Z cannot be
+   imported by the Swift X.Y compiler"* even when the version numbers look
+   close. (The `DEVELOPER_DIR` override is only needed for `xcodebuild`
+   invocations further below, which require the full Xcode SDK.)
+
+Notes:
+- `SyllableParser.parse(_:)` returns only the top candidate;
+  `parseCandidates(_:maxResults:)` exposes the ranked N-best if tie-breakers
+  matter. `score` is the DP score (illegal parses are penalized ≤-10000);
+  `legalityScore` is 0 for strictly illegal outputs.
+- `Romanization.normalize` strips digits (`"ny2"` → `"ny"`), so probing
+  digit-disambiguated keys via `parser.parse` reflects what the composing
+  buffer sees. Use `Romanization.consonantToRoman[Myanmar.X]` to look up
+  the canonical key for a given consonant before building the input.
+- `SyllableParse.output` is the parser's raw emission. Engine-level
+  post-processing (e.g. `correctAaShape` switching U+102C↔U+102B) runs
+  in `BurmeseEngine`, not here — instantiate the full engine if a probe
+  needs to match lexicon surfaces exactly.
+- Keep probes under `/tmp/` — they are intentionally throwaway. A finding
+  worth keeping graduates to a `TestCase` under `Sources/BurmeseIMETestSupport/Suites/`.
+
 ### Benchmarks
 
 ```bash
