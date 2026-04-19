@@ -958,41 +958,47 @@ public final class SyllableParser: Sendable {
     }
 
     /// Sort each run of consecutive medial scalars (U+103B..U+103E) into
-    /// ascending codepoint order. The onset table emits medials in a
-    /// fixed order and each vowel entry stores its own medial prefix; at
-    /// the join (e.g. onset ending in ှ U+103E followed by a vowel
-    /// starting with ွ U+103D for "hmon") the run can land out of order.
-    /// Sort in place so every emitted surface is in Unicode canonical
-    /// order regardless of which side contributed which medial.
+    /// ascending codepoint order and collapse adjacent duplicates. The
+    /// onset table emits medials in a fixed order and each vowel entry
+    /// stores its own medial prefix; at the join (e.g. onset ending in
+    /// ှ U+103E followed by a vowel starting with ွ U+103D for "hmon") the
+    /// run can land out of order, and when onset and vowel both contribute
+    /// the same medial scalar it must appear only once in the surface.
     private static func canonicalizeMedialOrder(_ text: String) -> String {
-        var scalars = Array(text.unicodeScalars)
-        var changed = false
+        let input = Array(text.unicodeScalars)
+        var output: [Unicode.Scalar] = []
+        output.reserveCapacity(input.count)
         var i = 0
-        while i < scalars.count {
-            let v = scalars[i].value
-            if v >= 0x103B && v <= 0x103E {
-                var j = i + 1
-                while j < scalars.count {
-                    let w = scalars[j].value
-                    guard w >= 0x103B && w <= 0x103E else { break }
-                    j += 1
-                }
-                if j - i > 1 {
-                    let sorted = scalars[i..<j].sorted { $0.value < $1.value }
-                    for k in 0..<(j - i) where scalars[i + k].value != sorted[k].value {
-                        scalars[i + k] = sorted[k]
-                        changed = true
-                    }
-                }
-                i = j
-            } else {
+        while i < input.count {
+            let v = input[i].value
+            guard v >= 0x103B && v <= 0x103E else {
+                output.append(input[i])
                 i += 1
+                continue
             }
+            var j = i + 1
+            while j < input.count {
+                let w = input[j].value
+                guard w >= 0x103B && w <= 0x103E else { break }
+                j += 1
+            }
+            let sorted = input[i..<j].sorted { $0.value < $1.value }
+            var lastValue: UInt32 = 0
+            var haveLast = false
+            for scalar in sorted {
+                if haveLast && scalar.value == lastValue { continue }
+                output.append(scalar)
+                lastValue = scalar.value
+                haveLast = true
+            }
+            i = j
         }
-        guard changed else { return text }
+        guard output.count != input.count || zip(output, input).contains(where: { $0.value != $1.value }) else {
+            return text
+        }
         var result = ""
-        result.unicodeScalars.reserveCapacity(scalars.count)
-        for scalar in scalars {
+        result.unicodeScalars.reserveCapacity(output.count)
+        for scalar in output {
             result.unicodeScalars.append(scalar)
         }
         return result

@@ -592,6 +592,22 @@ public enum EngineSuite {
             )
         },
 
+        // MARK: - Medial deduplication at onset/vowel join
+
+        TestCase("dedupeMedial_wOverlap_khwon") { ctx in
+            // Onset "khw" contributes U+103D; vowel "on" also starts with U+103D.
+            // The duplicate must collapse.
+            let state = BurmeseEngine().update(buffer: "khwon", context: [])
+            ctx.assertEqual(state.candidates.first?.surface, "\u{1001}\u{103D}\u{1014}\u{103A}")
+        },
+
+        TestCase("dedupeMedial_hOverlap_hmh") { ctx in
+            // Onset "hm" contributes U+103E; standalone vowel "h" is also U+103E.
+            // The duplicate must collapse.
+            let state = BurmeseEngine().update(buffer: "hmh", context: [])
+            ctx.assertEqual(state.candidates.first?.surface, "\u{1019}\u{103E}")
+        },
+
         TestCase("standardChar_greatSa_withVowel") { ctx in
             // ဿ accepts a vowel suffix (appears as ဿ + ာ for non-descender onsets).
             let state = BurmeseEngine().update(buffer: "ssar", context: [])
