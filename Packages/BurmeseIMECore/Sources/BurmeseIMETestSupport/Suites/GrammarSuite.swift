@@ -108,6 +108,107 @@ public enum GrammarSuite {
             ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
         },
 
+        TestCase("validateSyllable_palaRetroflexWithOte2_rareButLegal") { ctx in
+            let score = Grammar.validateSyllable(
+                onset: Myanmar.nna, medials: [], vowelRoman: "ote2")
+            ctx.assertGreaterThan(score, 0)
+            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+        },
+
+        TestCase("validateSyllable_palaRetroflexWithAte2_rareButLegal") { ctx in
+            let score = Grammar.validateSyllable(
+                onset: Myanmar.tta, medials: [], vowelRoman: "ate2")
+            ctx.assertGreaterThan(score, 0)
+            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+        },
+
+        TestCase("validateSyllable_palaRetroflexWithOwn2_rareButLegal") { ctx in
+            let score = Grammar.validateSyllable(
+                onset: Myanmar.nna, medials: [], vowelRoman: "own2")
+            ctx.assertGreaterThan(score, 0)
+            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+        },
+
+        TestCase("validateSyllable_palaRetroflexWithOwnHeavy_rareButLegal") { ctx in
+            let score = Grammar.validateSyllable(
+                onset: Myanmar.nna, medials: [], vowelRoman: "own:")
+            ctx.assertGreaterThan(score, 0)
+            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+        },
+
+        TestCase("validateSyllable_palaRetroflexWithOwn2Heavy_rareButLegal") { ctx in
+            let score = Grammar.validateSyllable(
+                onset: Myanmar.nna, medials: [], vowelRoman: "own2:")
+            ctx.assertGreaterThan(score, 0)
+            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+        },
+
+        TestCase("validateSyllable_palaRetroflexWithOwn2Creaky_rareButLegal") { ctx in
+            let score = Grammar.validateSyllable(
+                onset: Myanmar.nna, medials: [], vowelRoman: "own2.")
+            ctx.assertGreaterThan(score, 0)
+            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+        },
+
+        TestCase("validateSyllable_palaRetroflexWithAinHeavy_rareButLegal") { ctx in
+            let score = Grammar.validateSyllable(
+                onset: Myanmar.tta, medials: [], vowelRoman: "ain:")
+            ctx.assertGreaterThan(score, 0)
+            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+        },
+
+        TestCase("validateSyllable_palaRetroflexWithAinCreaky_rareButLegal") { ctx in
+            let score = Grammar.validateSyllable(
+                onset: Myanmar.tta, medials: [], vowelRoman: "ain.")
+            ctx.assertGreaterThan(score, 0)
+            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+        },
+
+        TestCase("validateSyllable_palaRetroflexWithAin2_rareButLegal") { ctx in
+            let score = Grammar.validateSyllable(
+                onset: Myanmar.tta, medials: [], vowelRoman: "ain2")
+            ctx.assertGreaterThan(score, 0)
+            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+        },
+
+        TestCase("validateSyllable_palaRetroflexWithAin2Heavy_rareButLegal") { ctx in
+            let score = Grammar.validateSyllable(
+                onset: Myanmar.tta, medials: [], vowelRoman: "ain2:")
+            ctx.assertGreaterThan(score, 0)
+            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+        },
+
+        TestCase("validateSyllable_palaRetroflexWithAin2Creaky_rareButLegal") { ctx in
+            let score = Grammar.validateSyllable(
+                onset: Myanmar.tta, medials: [], vowelRoman: "ain2.")
+            ctx.assertGreaterThan(score, 0)
+            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+        },
+
+        TestCase("validateSyllable_palaRetroflexWithAiHeavy_rareButLegal") { ctx in
+            let score = Grammar.validateSyllable(
+                onset: Myanmar.nna, medials: [], vowelRoman: "ai:")
+            ctx.assertGreaterThan(score, 0)
+            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+        },
+
+        TestCase("validateSyllable_palaRetroflexWithAiCreaky_rareButLegal") { ctx in
+            let score = Grammar.validateSyllable(
+                onset: Myanmar.nna, medials: [], vowelRoman: "ai.")
+            ctx.assertGreaterThan(score, 0)
+            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+        },
+
+        TestCase("validateSyllable_palaRetroflexWithAnusvara_legal") { ctx in
+            // own3 / on3 are the anusvara family (ုံ / ွံ) — niggahita
+            // finals are common in Pali declensions, so they stay legal
+            // on retroflex onsets without rarity penalty.
+            let score = Grammar.validateSyllable(
+                onset: Myanmar.nna, medials: [], vowelRoman: "own3")
+            ctx.assertGreaterThan(score, 0)
+            ctx.assertTrue(score >= 100, detail: "anusvara should not be penalised; got \(score)")
+        },
+
         TestCase("validateSyllable_palaRetroflexWithSimpleVowel_legal") { ctx in
             let score = Grammar.validateSyllable(
                 onset: Myanmar.tta, medials: [], vowelRoman: "i")

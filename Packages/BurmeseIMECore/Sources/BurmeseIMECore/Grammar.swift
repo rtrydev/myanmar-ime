@@ -143,10 +143,24 @@ public enum Grammar {
     ]
 
     /// Native-Burmese compound/diphthong finals that never occur on Pali
-    /// retroflex onsets in real text.
+    /// retroflex onsets in real text. Covers every tonal + codepoint
+    /// variant of the same orthographic shape (plain, digit-disambiguated,
+    /// heavy `:`, creaky `.`) so typo-close siblings receive the same
+    /// rarity penalty as the canonical key.
+    ///
+    /// The anusvara (niggahita) family — `own3` / `on3` etc. (ုံ / ွံ) —
+    /// is intentionally omitted. Anusvara-terminated finals appear
+    /// frequently on Pali retroflex onsets (e.g. ဏံ declensions), so they
+    /// stay legal without a rarity penalty.
     private static let forbiddenVowelsOnPalaOnsets: Set<String> = [
         "own", "own:", "own.",
-        "ote", "ate", "ain", "ite", "ai",
+        "own2", "own2:", "own2.",
+        "ote", "ote2",
+        "ate", "ate2",
+        "ain", "ain:", "ain.",
+        "ain2", "ain2:", "ain2.",
+        "ite",
+        "ai", "ai:", "ai.",
     ]
 
     // MARK: - Connector Vowels
