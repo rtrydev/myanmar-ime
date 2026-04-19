@@ -331,6 +331,87 @@ public enum GrammarSuite {
             ctx.assertGreaterThan(result?.legalityScore ?? 0, 0)
         },
 
+        // MARK: - Asat Before Virama (Kinzi vs. Non-Kinzi Stacks)
+
+        // The only legal `U+103A U+1039` sequence in modern Burmese is
+        // kinzi: nga + asat + virama + lower. Any other base consonant
+        // producing `...U+103A U+1039...` is orthographically broken —
+        // the stack must use the virama-only encoding.
+
+        // Clean virama path exists via `th + a` + `n + virama` glued.
+        // After the fix the asat-preserving parse (သန်္ဒ) must lose to
+        // the virama-only form (သန္ဒ).
+        TestCase("parse_asatVirama_thanDa_prefersCleanVirama") { ctx in
+            let output = SyllableParser().parse("than+da").first?.output ?? ""
+            let scalars = output.unicodeScalars.map(\.value)
+            ctx.assertEqual(scalars, [0x101E, 0x1014, 0x1039, 0x1012])
+        },
+
+        TestCase("parse_asatVirama_mutTa_prefersCleanVirama") { ctx in
+            // The parser resolves "mu" to long U+1030 (roman "u"); short
+            // U+102F requires the explicit "u." disambiguator.
+            let output = SyllableParser().parse("mut+ta").first?.output ?? ""
+            let scalars = output.unicodeScalars.map(\.value)
+            ctx.assertEqual(scalars, [0x1019, 0x1030, 0x1010, 0x1039, 0x1010])
+        },
+
+        TestCase("parse_asatVirama_satTa_prefersCleanVirama") { ctx in
+            let output = SyllableParser().parse("sat+ta").first?.output ?? ""
+            let scalars = output.unicodeScalars.map(\.value)
+            ctx.assertEqual(scalars, [0x1005, 0x1010, 0x1039, 0x1010])
+        },
+
+        TestCase("parse_asatVirama_patTa_prefersCleanVirama") { ctx in
+            let output = SyllableParser().parse("pat+ta").first?.output ?? ""
+            let scalars = output.unicodeScalars.map(\.value)
+            ctx.assertEqual(scalars, [0x1015, 0x1010, 0x1039, 0x1010])
+        },
+
+        TestCase("parse_asatVirama_kanTar_prefersCleanVirama") { ctx in
+            let output = SyllableParser().parse("kan+tar").first?.output ?? ""
+            let scalars = output.unicodeScalars.map(\.value)
+            ctx.assertEqual(scalars, [0x1000, 0x1014, 0x1039, 0x1010, 0x102C])
+        },
+
+        // Kinzi case — nga is the single legal upper for `U+103A U+1039`.
+        // Must continue to surface the kinzi sequence.
+        TestCase("parse_asatVirama_minGa_keepsKinzi") { ctx in
+            let output = SyllableParser().parse("min+ga").first?.output ?? ""
+            let scalars = output.unicodeScalars.map(\.value)
+            ctx.assertEqual(scalars, [0x1019, 0x1004, 0x103A, 0x1039, 0x1002])
+        },
+
+        // `thate+ta` / `pate+ta` lack a clean-virama DP alternative, but
+        // the top parse must still avoid the illegal `U+103A U+1039` pair
+        // on a non-nga upper. (The legality of the winning surface is
+        // checked separately; here we only assert the absence of the
+        // forbidden adjacency.)
+        TestCase("parse_asatVirama_thateTa_noAsatBeforeVirama") { ctx in
+            let output = SyllableParser().parse("thate+ta").first?.output ?? ""
+            let scalars = output.unicodeScalars.map(\.value)
+            for i in 1..<scalars.count where scalars[i] == 0x1039 {
+                let prev = scalars[i - 1]
+                let twoBack = i >= 2 ? scalars[i - 2] : 0
+                ctx.assertFalse(
+                    prev == 0x103A && twoBack != 0x1004,
+                    detail: "thate+ta: asat before virama on non-nga upper — \(scalars.map { String(format: "%04X", $0) })"
+                )
+            }
+        },
+
+        TestCase("parse_asatVirama_pateTa_noAsatBeforeVirama") { ctx in
+            let output = SyllableParser().parse("pate+ta").first?.output ?? ""
+            let scalars = output.unicodeScalars.map(\.value)
+            for i in 1..<scalars.count where scalars[i] == 0x1039 {
+                let prev = scalars[i - 1]
+                let twoBack = i >= 2 ? scalars[i - 2] : 0
+                ctx.assertFalse(
+                    prev == 0x103A && twoBack != 0x1004,
+                    detail: "pate+ta: asat before virama on non-nga upper — \(scalars.map { String(format: "%04X", $0) })"
+                )
+            }
+        },
+
         // MARK: - Medial Canonical Order
 
         // Onset carries medial ha-htoe (U+103E) and the vowel starts with

@@ -102,6 +102,23 @@ public final class SyllableParser: Sendable {
     /// stack contexts with an integer compare rather than a string compare.
     private let viramaVowelId: Int32
 
+    /// Per-vowel: non-zero when the vowel's rendered Myanmar ends with
+    /// U+103A (asat) and contains at least two scalars; the value is the
+    /// scalar immediately preceding the trailing asat. Used by the
+    /// kinzi rule (`U+103A` is only legal before a virama when the
+    /// preceding base is nga, U+1004). Zero when the vowel does not
+    /// end with asat, or ends with a lone asat (the `*` vowel) — callers
+    /// fall through to the parent state's chunk in that case.
+    private let vowelPreAsatScalar: [UInt32]
+
+    /// Per-vowel: true iff the vowel's rendered Myanmar ends with U+103A.
+    private let vowelEndsWithAsat: [Bool]
+
+    /// Per-onset: the last scalar in the onset's rendered Myanmar. Used
+    /// to recover the base when a lone-asat vowel follows (`.onsetVowel`
+    /// with the `*` vowel), so the kinzi check has a base to inspect.
+    private let onsetLastScalar: [UInt32]
+
     /// Maximum onset key length for bounded search.
     public let maxOnsetLen: Int
 
@@ -268,6 +285,8 @@ public final class SyllableParser: Sendable {
 
         var vowelOnlyLegalities = [Int](repeating: 0, count: builtVowelTrie.terminals.count)
         var foundViramaId: Int32 = -1
+        var vowelEndsAsat = [Bool](repeating: false, count: builtVowelTrie.terminals.count)
+        var vowelPreAsat = [UInt32](repeating: 0, count: builtVowelTrie.terminals.count)
         for (idx, entry) in builtVowelTrie.terminals.enumerated() {
             vowelOnlyLegalities[idx] = Grammar.validateSyllable(
                 onset: nil,
@@ -277,9 +296,26 @@ public final class SyllableParser: Sendable {
             if foundViramaId < 0 && entry.canonicalRoman == "+" {
                 foundViramaId = entry.id
             }
+            let scalars = Array(entry.myanmar.unicodeScalars)
+            if let last = scalars.last, last.value == 0x103A {
+                vowelEndsAsat[idx] = true
+                if scalars.count >= 2 {
+                    vowelPreAsat[idx] = scalars[scalars.count - 2].value
+                }
+            }
         }
         self.vowelOnlyLegality = vowelOnlyLegalities
         self.viramaVowelId = foundViramaId
+        self.vowelEndsWithAsat = vowelEndsAsat
+        self.vowelPreAsatScalar = vowelPreAsat
+
+        var onsetLast = [UInt32](repeating: 0, count: builtOnsetTrie.terminals.count)
+        for (idx, entry) in builtOnsetTrie.terminals.enumerated() {
+            if let last = entry.myanmar.unicodeScalars.last {
+                onsetLast[idx] = last.value
+            }
+        }
+        self.onsetLastScalar = onsetLast
     }
 
     /// Compact a `[String: [Entry]]` map into an ASCII trie + flat terminal
@@ -658,7 +694,36 @@ public final class SyllableParser: Sendable {
                 }
 
                 for (vowelEnd, vowelEntry) in standaloneVowels where !vowelEntry.isPureMedial {
-                    let legality = vowelOnlyLegality[Int(vowelEntry.id)]
+                    var legality = vowelOnlyLegality[Int(vowelEntry.id)]
+
+                    // Kinzi rule: U+103A (asat) immediately before U+1039
+                    // (virama) is legal only when the character two positions
+                    // back is U+1004 (nga). Anything else is a stacking
+                    // artifact from the DP combining an asat-final vowel with
+                    // a virama vowel. Zero legality so the virama-only
+                    // alternative wins when the beam holds both.
+                    if vowelEntry.id == viramaVowelId {
+                        var prevTrailsAsat = false
+                        var prevPreAsat: UInt32 = 0
+                        switch previous.matchRef {
+                        case .onsetVowel(let onsetId, let vowelId):
+                            if vowelEndsWithAsat[Int(vowelId)] {
+                                prevTrailsAsat = true
+                                let pre = vowelPreAsatScalar[Int(vowelId)]
+                                prevPreAsat = pre != 0 ? pre : onsetLastScalar[Int(onsetId)]
+                            }
+                        case .vowelOnly(let vowelId):
+                            if vowelEndsWithAsat[Int(vowelId)] {
+                                prevTrailsAsat = true
+                                prevPreAsat = vowelPreAsatScalar[Int(vowelId)]
+                            }
+                        default:
+                            break
+                        }
+                        if prevTrailsAsat && prevPreAsat != 0x1004 {
+                            legality = 0
+                        }
+                    }
                     // Stacking a dependent vowel sign onto a syllable that
                     // already carries a vowel is orthographically unusual,
                     // but legal — the glyph exists and users occasionally
@@ -954,7 +1019,56 @@ public final class SyllableParser: Sendable {
                 reading.append(entry.canonicalRoman)
             }
         }
-        return (Self.canonicalizeMedialOrder(output), reading)
+        return (Self.stripSpuriousAsatBeforeVirama(Self.canonicalizeMedialOrder(output)), reading)
+    }
+
+    /// Strip U+103A (asat) immediately before U+1039 (virama) when the
+    /// scalar preceding the asat is not U+1004 (nga). Only kinzi
+    /// (nga + asat + virama + consonant) is a legal asat/virama
+    /// adjacency in Myanmar orthography; other bases must use the
+    /// virama-only stacked form without the visible asat. The DP
+    /// penalizes these parses but cannot avoid them when no
+    /// asat-free alternative exists in the beam (e.g. the "ate"
+    /// vowel always emits a trailing asat), so the surface is
+    /// sanitized here as a last step.
+    private static func stripSpuriousAsatBeforeVirama(_ text: String) -> String {
+        let scalars = Array(text.unicodeScalars)
+        guard scalars.count >= 3 else { return text }
+        var needsWork = false
+        var i = 0
+        while i + 1 < scalars.count {
+            if scalars[i].value == 0x103A && scalars[i + 1].value == 0x1039 {
+                let base = i >= 1 ? scalars[i - 1].value : 0
+                if base != 0x1004 {
+                    needsWork = true
+                    break
+                }
+            }
+            i += 1
+        }
+        guard needsWork else { return text }
+        var output: [Unicode.Scalar] = []
+        output.reserveCapacity(scalars.count)
+        i = 0
+        while i < scalars.count {
+            if i + 1 < scalars.count,
+               scalars[i].value == 0x103A,
+               scalars[i + 1].value == 0x1039 {
+                let base = i >= 1 ? scalars[i - 1].value : 0
+                if base != 0x1004 {
+                    i += 1
+                    continue
+                }
+            }
+            output.append(scalars[i])
+            i += 1
+        }
+        var result = ""
+        result.unicodeScalars.reserveCapacity(output.count)
+        for scalar in output {
+            result.unicodeScalars.append(scalar)
+        }
+        return result
     }
 
     /// Sort each run of consecutive medial scalars (U+103B..U+103E) into
