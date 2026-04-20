@@ -1033,11 +1033,12 @@ public final class SyllableParser: Sendable {
         return sortedFinal.prefix(limit).map { m in
             let adjusted = adjustLeadingVowel(m.output)
             let viramaClean = !Self.hasMalformedViramaStack(adjusted)
+            let asatClean = !Self.hasAsatWithoutConsonantBase(adjusted)
             return SyllableParse(
                 output: adjusted,
                 reading: m.reading,
                 aliasCost: m.state.aliasCost,
-                legalityScore: (m.state.isLegal && viramaClean) ? m.state.legalityScore : 0,
+                legalityScore: (m.state.isLegal && viramaClean && asatClean) ? m.state.legalityScore : 0,
                 score: m.state.score,
                 structureCost: m.state.structureCost,
                 syllableCount: m.state.syllableCount,
@@ -1070,6 +1071,34 @@ public final class SyllableParser: Sendable {
             let next = scalars[i + 1]
             let isConsonantBase = (next.value >= 0x1000 && next.value <= 0x1021)
                 || next.value == 0x103F
+            if !isConsonantBase { return true }
+        }
+        return false
+    }
+
+    /// Returns true if `output` contains a U+103A (asat) whose base does
+    /// not walk back to a base consonant. Asat silences a preceding
+    /// consonant, so its base — reached by skipping dependent vowel signs,
+    /// medials, tone marks, and anusvara — must be in the consonant range
+    /// (U+1000–U+1021, U+103F). Asat on an independent vowel, two
+    /// consecutive asats, or a leading asat with nothing to its left all
+    /// fail this check. Parses that contain such a sequence are demoted to
+    /// `legalityScore = 0`.
+    private static func hasAsatWithoutConsonantBase(_ output: String) -> Bool {
+        let scalars = Array(output.unicodeScalars)
+        for i in 0..<scalars.count where scalars[i].value == 0x103A {
+            var j = i - 1
+            while j >= 0 {
+                let v = scalars[j].value
+                let isSkippable = (v >= 0x102B && v <= 0x1032)
+                    || (v >= 0x1036 && v <= 0x1038)
+                    || (v >= 0x103B && v <= 0x103E)
+                if isSkippable { j -= 1 } else { break }
+            }
+            guard j >= 0 else { return true }
+            let baseValue = scalars[j].value
+            let isConsonantBase = (baseValue >= 0x1000 && baseValue <= 0x1021)
+                || baseValue == 0x103F
             if !isConsonantBase { return true }
         }
         return false

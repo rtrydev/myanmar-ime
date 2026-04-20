@@ -620,6 +620,72 @@ public enum GrammarSuite {
             )
         },
 
+        // MARK: - Asat Requires Consonant Base (task 02)
+        //
+        // Asat (U+103A) silences the preceding consonant. Its base must
+        // walk back — skipping dependent vowels, medials, and tone marks —
+        // to a base consonant (U+1000–U+1021 or U+103F). Asat on an
+        // independent vowel, two consecutive asats, or a leading asat
+        // with no consonant base are orthographic violations and must
+        // score as illegal.
+
+        TestCase("parse_asatOnIndependentVowel_ooStar_isIllegal") { ctx in
+            let result = SyllableParser().parseCandidates("oo*", maxResults: 1).first
+            ctx.assertEqual(result?.legalityScore ?? -1, 0,
+                "oo*: asat on independent vowel U+1029 must not score as legal")
+        },
+
+        TestCase("parse_asatOnIndependentVowel_iiStar_isIllegal") { ctx in
+            let result = SyllableParser().parseCandidates("ii*", maxResults: 1).first
+            ctx.assertEqual(result?.legalityScore ?? -1, 0,
+                "ii*: asat on independent vowel U+1024 must not score as legal")
+        },
+
+        TestCase("parse_asatOnIndependentVowel_u2Star_isIllegal") { ctx in
+            let result = SyllableParser().parseCandidates("u2*", maxResults: 1).first
+            ctx.assertEqual(result?.legalityScore ?? -1, 0,
+                "u2*: asat on independent vowel U+1026 must not score as legal")
+        },
+
+        TestCase("parse_asatOnIndependentVowel_ay2Star_isIllegal") { ctx in
+            let result = SyllableParser().parseCandidates("ay2*", maxResults: 1).first
+            ctx.assertEqual(result?.legalityScore ?? -1, 0,
+                "ay2*: asat on independent vowel U+1027 must not score as legal")
+        },
+
+        TestCase("parse_doubleAsat_kaStarStar_isIllegal") { ctx in
+            let result = SyllableParser().parseCandidates("ka**", maxResults: 1).first
+            ctx.assertEqual(result?.legalityScore ?? -1, 0,
+                "ka**: two consecutive asats must not score as legal")
+        },
+
+        TestCase("parse_leadingAsat_StarKa_isIllegal") { ctx in
+            let result = SyllableParser().parseCandidates("*ka", maxResults: 1).first
+            ctx.assertEqual(result?.legalityScore ?? -1, 0,
+                "*ka: leading asat with no consonant base must not score as legal")
+        },
+
+        TestCase("engine_bareAsat_producesNoCandidate") { ctx in
+            let engine = BurmeseEngine()
+            let result = engine.update(buffer: "*", context: [])
+            ctx.assertTrue(
+                result.candidates.isEmpty,
+                detail: "bare * must not produce any engine candidate; got \(result.candidates.count)"
+            )
+        },
+
+        TestCase("parse_asatOnConsonant_kaStar_isLegal") { ctx in
+            let result = SyllableParser().parseCandidates("ka*", maxResults: 1).first
+            ctx.assertGreaterThan(result?.legalityScore ?? 0, 0,
+                "ka*: asat on base consonant must remain legal")
+        },
+
+        TestCase("parse_asatOnConsonant_paStar_isLegal") { ctx in
+            let result = SyllableParser().parseCandidates("pa*", maxResults: 1).first
+            ctx.assertGreaterThan(result?.legalityScore ?? 0, 0,
+                "pa*: asat on base consonant must remain legal")
+        },
+
         // MARK: - Cross-Class Virama Stacks via Vowel Path (task 04)
         //
         // `Grammar.isValidStack` must apply regardless of whether the
