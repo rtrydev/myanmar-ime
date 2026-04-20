@@ -1048,11 +1048,13 @@ public final class SyllableParser: Sendable {
 
     /// Returns true if `output` contains a U+1039 (virama) whose left
     /// neighbour is not a base consonant and is not the asat-half of a
-    /// kinzi marker (U+1004 U+103A U+1039). Virama orthographically only
-    /// bonds consonant-to-consonant; attaching it to a vowel sign,
-    /// independent vowel, or anusvara produces a scalar run no Myanmar
-    /// shaper renders sensibly. Parses that contain such a sequence are
-    /// demoted to `legalityScore = 0` so cleaner alternatives win.
+    /// kinzi marker (U+1004 U+103A U+1039), or whose right neighbour is
+    /// not a base consonant. Virama orthographically only bonds
+    /// consonant-to-consonant; attaching it to a vowel sign, independent
+    /// vowel, anusvara, or leaving it dangling with no right-hand scalar
+    /// produces a scalar run no Myanmar shaper renders sensibly. Parses
+    /// that contain such a sequence are demoted to `legalityScore = 0` so
+    /// cleaner alternatives win.
     private static func hasMalformedViramaStack(_ output: String) -> Bool {
         let scalars = Array(output.unicodeScalars)
         for i in 0..<scalars.count where scalars[i].value == 0x1039 {
@@ -1061,11 +1063,14 @@ public final class SyllableParser: Sendable {
             if prev.value == 0x103A {
                 let twoBack = i >= 2 ? scalars[i - 2].value : 0
                 if twoBack != 0x1004 { return true }
-                continue
-            }
-            if Romanization.consonantToRoman[Character(prev)] == nil {
+            } else if Romanization.consonantToRoman[Character(prev)] == nil {
                 return true
             }
+            guard i + 1 < scalars.count else { return true }
+            let next = scalars[i + 1]
+            let isConsonantBase = (next.value >= 0x1000 && next.value <= 0x1021)
+                || next.value == 0x103F
+            if !isConsonantBase { return true }
         }
         return false
     }

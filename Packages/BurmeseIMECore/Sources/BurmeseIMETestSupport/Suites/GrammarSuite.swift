@@ -526,6 +526,100 @@ public enum GrammarSuite {
                 "than3+ka: virama after anusvara U+1036 must not score as legal")
         },
 
+        // MARK: - Virama Right-Side Validation (task 01)
+        //
+        // Virama (U+1039) must be followed by a consonant in the range
+        // U+1000–U+1021 (plus great sa U+103F). A virama attaching to a
+        // vowel sign, independent vowel, or anusvara to the right is
+        // orthographically broken and must not produce a legal candidate.
+
+        TestCase("parse_viramaBeforeVowelSign_pPlusAr_isIllegal") { ctx in
+            let result = SyllableParser().parseCandidates("p+ar", maxResults: 1).first
+            let scalars = result?.output.unicodeScalars.map(\.value) ?? []
+            let hasViramaBeforeNonConsonant = (0..<scalars.count).contains { i in
+                guard scalars[i] == 0x1039, i + 1 < scalars.count else { return false }
+                let next = scalars[i + 1]
+                let isConsonant = (next >= 0x1000 && next <= 0x1021) || next == 0x103F
+                return !isConsonant
+            }
+            ctx.assertFalse(
+                hasViramaBeforeNonConsonant && (result?.legalityScore ?? 0) > 0,
+                detail: "p+ar: virama before non-consonant must not score as legal — scalars=\(scalars.map { String(format: "%04X", $0) })"
+            )
+        },
+
+        TestCase("parse_viramaBeforeVowelSign_pPlusI_isIllegal") { ctx in
+            let result = SyllableParser().parseCandidates("p+i", maxResults: 1).first
+            let scalars = result?.output.unicodeScalars.map(\.value) ?? []
+            let hasViramaBeforeNonConsonant = (0..<scalars.count).contains { i in
+                guard scalars[i] == 0x1039, i + 1 < scalars.count else { return false }
+                let next = scalars[i + 1]
+                let isConsonant = (next >= 0x1000 && next <= 0x1021) || next == 0x103F
+                return !isConsonant
+            }
+            ctx.assertFalse(
+                hasViramaBeforeNonConsonant && (result?.legalityScore ?? 0) > 0,
+                detail: "p+i: virama before non-consonant must not score as legal — scalars=\(scalars.map { String(format: "%04X", $0) })"
+            )
+        },
+
+        TestCase("parse_viramaBeforeIndependentVowel_pPlusU_isIllegal") { ctx in
+            let result = SyllableParser().parseCandidates("p+u", maxResults: 1).first
+            let scalars = result?.output.unicodeScalars.map(\.value) ?? []
+            let hasViramaBeforeNonConsonant = (0..<scalars.count).contains { i in
+                guard scalars[i] == 0x1039, i + 1 < scalars.count else { return false }
+                let next = scalars[i + 1]
+                let isConsonant = (next >= 0x1000 && next <= 0x1021) || next == 0x103F
+                return !isConsonant
+            }
+            ctx.assertFalse(
+                hasViramaBeforeNonConsonant && (result?.legalityScore ?? 0) > 0,
+                detail: "p+u: virama before independent vowel must not score as legal — scalars=\(scalars.map { String(format: "%04X", $0) })"
+            )
+        },
+
+        TestCase("parse_viramaBeforeIndependentVowel_pPlusAy_isIllegal") { ctx in
+            let result = SyllableParser().parseCandidates("p+ay", maxResults: 1).first
+            let scalars = result?.output.unicodeScalars.map(\.value) ?? []
+            let hasViramaBeforeNonConsonant = (0..<scalars.count).contains { i in
+                guard scalars[i] == 0x1039, i + 1 < scalars.count else { return false }
+                let next = scalars[i + 1]
+                let isConsonant = (next >= 0x1000 && next <= 0x1021) || next == 0x103F
+                return !isConsonant
+            }
+            ctx.assertFalse(
+                hasViramaBeforeNonConsonant && (result?.legalityScore ?? 0) > 0,
+                detail: "p+ay: virama before independent vowel must not score as legal — scalars=\(scalars.map { String(format: "%04X", $0) })"
+            )
+        },
+
+        TestCase("engine_viramaBeforeVowelSign_pPlusAr_hasNoMalformedTop") { ctx in
+            let engine = BurmeseEngine()
+            let result = engine.update(buffer: "p+ar", context: [])
+            if let top = result.candidates.first {
+                let scalars = top.surface.unicodeScalars.map(\.value)
+                let hasViramaBeforeNonConsonant = (0..<scalars.count).contains { i in
+                    guard scalars[i] == 0x1039, i + 1 < scalars.count else { return false }
+                    let next = scalars[i + 1]
+                    let isConsonant = (next >= 0x1000 && next <= 0x1021) || next == 0x103F
+                    return !isConsonant
+                }
+                ctx.assertFalse(
+                    hasViramaBeforeNonConsonant,
+                    detail: "engine p+ar top-1 surface must not contain virama-before-non-consonant: \(scalars.map { String(format: "%04X", $0) })"
+                )
+            }
+        },
+
+        TestCase("engine_bareVirama_producesNoCandidate") { ctx in
+            let engine = BurmeseEngine()
+            let result = engine.update(buffer: "+", context: [])
+            ctx.assertTrue(
+                result.candidates.isEmpty,
+                detail: "bare + must not produce any engine candidate; got \(result.candidates.count)"
+            )
+        },
+
         // MARK: - Cross-Class Virama Stacks via Vowel Path (task 04)
         //
         // `Grammar.isValidStack` must apply regardless of whether the
