@@ -1,5 +1,31 @@
 import BurmeseIMECore
 
+/// Assert that typing `input` does not produce a legitimate kinzi
+/// candidate with `lower` as the subscript. The task allows two
+/// outcomes: (a) the kinzi surface is emitted but demoted to
+/// `legalityScore = 0`, or (b) a different non-kinzi parse wins.
+fileprivate func assertKinziIllegal(
+    _ ctx: TestContext,
+    input: String,
+    lower: UInt32,
+    file: StaticString = #file,
+    line: UInt = #line
+) {
+    let result = SyllableParser().parseCandidates(input, maxResults: 1).first
+    let scalars = result?.output.unicodeScalars.map(\.value) ?? []
+    let kinziForm: [UInt32] = [0x1019, 0x1004, 0x103A, 0x1039, lower]
+    let isKinziSurface = scalars == kinziForm
+    let legal = result?.legalityScore ?? -1
+    ctx.assertFalse(
+        isKinziSurface && legal > 0,
+        input,
+        detail: "\(input): kinzi+\(String(format: "%04X", lower)) must not be legitimate; "
+            + "got legal=\(legal) scalars=\(scalars.map { String(format: "%04X", $0) })",
+        file: file,
+        line: line
+    )
+}
+
 public enum GrammarSuite {
     public static let suite = TestSuite(name: "Grammar", cases: [
 
@@ -379,6 +405,56 @@ public enum GrammarSuite {
             let output = SyllableParser().parse("min+ga").first?.output ?? ""
             let scalars = output.unicodeScalars.map(\.value)
             ctx.assertEqual(scalars, [0x1019, 0x1004, 0x103A, 0x1039, 0x1002])
+        },
+
+        // MARK: - Kinzi Subscript Class (task 03)
+        //
+        // Kinzi is `U+1004 U+103A U+1039 <lower>`. The upper that
+        // determines stack class is nga (U+1004), not the base onset of
+        // the preceding syllable. Only velar-class lowers (က / ခ / ဂ /
+        // ဃ / င) are legitimate; non-velar kinzi subscripts like
+        // မင်္ယ / မင်္လ / မင်္သ are not well-formed Burmese.
+        //
+        // An illegal kinzi must either surface with `legalityScore = 0`
+        // or lose to a non-kinzi parse entirely — both outcomes keep
+        // the engine from offering a malformed kinzi as legitimate.
+
+        TestCase("parse_kinzi_velarKa_isLegal") { ctx in
+            let result = SyllableParser().parseCandidates("min+ka", maxResults: 1).first
+            ctx.assertGreaterThan(result?.legalityScore ?? 0, 0)
+            let scalars = result?.output.unicodeScalars.map(\.value) ?? []
+            ctx.assertEqual(scalars, [0x1019, 0x1004, 0x103A, 0x1039, 0x1000])
+        },
+
+        TestCase("parse_kinzi_velarGa_isLegal") { ctx in
+            let result = SyllableParser().parseCandidates("min+ga", maxResults: 1).first
+            ctx.assertGreaterThan(result?.legalityScore ?? 0, 0)
+            let scalars = result?.output.unicodeScalars.map(\.value) ?? []
+            ctx.assertEqual(scalars, [0x1019, 0x1004, 0x103A, 0x1039, 0x1002])
+        },
+
+        TestCase("parse_kinzi_semiVowelYa_isIllegal") { ctx in
+            assertKinziIllegal(ctx, input: "min+ya", lower: 0x101A)
+        },
+
+        TestCase("parse_kinzi_semiVowelRa_isIllegal") { ctx in
+            assertKinziIllegal(ctx, input: "min+ra", lower: 0x101B)
+        },
+
+        TestCase("parse_kinzi_semiVowelLa_isIllegal") { ctx in
+            assertKinziIllegal(ctx, input: "min+la", lower: 0x101C)
+        },
+
+        TestCase("parse_kinzi_semiVowelWa_isIllegal") { ctx in
+            assertKinziIllegal(ctx, input: "min+wa", lower: 0x101D)
+        },
+
+        TestCase("parse_kinzi_sibilantTha_isIllegal") { ctx in
+            assertKinziIllegal(ctx, input: "min+tha", lower: 0x101E)
+        },
+
+        TestCase("parse_kinzi_ha_isIllegal") { ctx in
+            assertKinziIllegal(ctx, input: "min+ha", lower: 0x101F)
         },
 
         // `thate+ta` / `pate+ta` lack a clean-virama DP alternative, but

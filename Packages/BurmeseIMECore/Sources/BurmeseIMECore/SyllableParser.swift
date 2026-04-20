@@ -598,11 +598,30 @@ public final class SyllableParser: Sendable {
                         viramaUpper = onsetTerminals[Int(onsetId)].onset
                     case let .vowelOnly(vowelId)
                         where vowelId == viramaVowelId && previous.parentIdx >= 0:
+                        // The "upper" in the stack is the scalar immediately
+                        // before the virama, not the parent syllable's onset.
+                        // For asat-ending parent vowels (kinzi `in`, `mut`,
+                        // `kan`, ...), that scalar is the consonant embedded
+                        // in the vowel's render, tracked as
+                        // `vowelPreAsatScalar`. For vowels without an asat
+                        // (inherent `a`), the upper is the onset itself.
                         switch arena[Int(previous.parentIdx)].matchRef {
                         case let .onsetOnly(onsetId):
                             viramaUpper = onsetTerminals[Int(onsetId)].onset
-                        case let .onsetVowel(onsetId, _):
-                            viramaUpper = onsetTerminals[Int(onsetId)].onset
+                        case let .onsetVowel(onsetId, parentVowelId):
+                            if vowelEndsWithAsat[Int(parentVowelId)] {
+                                let pre = vowelPreAsatScalar[Int(parentVowelId)]
+                                let scalar = pre != 0 ? pre : onsetLastScalar[Int(onsetId)]
+                                viramaUpper = Unicode.Scalar(scalar).map(Character.init)
+                            } else {
+                                viramaUpper = onsetTerminals[Int(onsetId)].onset
+                            }
+                        case let .vowelOnly(parentVowelId)
+                            where vowelEndsWithAsat[Int(parentVowelId)]:
+                            let pre = vowelPreAsatScalar[Int(parentVowelId)]
+                            viramaUpper = pre != 0
+                                ? Unicode.Scalar(pre).map(Character.init)
+                                : nil
                         default:
                             viramaUpper = nil
                         }
