@@ -954,17 +954,43 @@ public final class SyllableParser: Sendable {
             )
         }
         return sortedFinal.prefix(limit).map { m in
-            SyllableParse(
-                output: adjustLeadingVowel(m.output),
+            let adjusted = adjustLeadingVowel(m.output)
+            let viramaClean = !Self.hasMalformedViramaStack(adjusted)
+            return SyllableParse(
+                output: adjusted,
                 reading: m.reading,
                 aliasCost: m.state.aliasCost,
-                legalityScore: m.state.isLegal ? m.state.legalityScore : 0,
+                legalityScore: (m.state.isLegal && viramaClean) ? m.state.legalityScore : 0,
                 score: m.state.score,
                 structureCost: m.state.structureCost,
                 syllableCount: m.state.syllableCount,
-                rarityPenalty: rarityFor[adjustLeadingVowel(m.output)] ?? 0
+                rarityPenalty: rarityFor[adjusted] ?? 0
             )
         }
+    }
+
+    /// Returns true if `output` contains a U+1039 (virama) whose left
+    /// neighbour is not a base consonant and is not the asat-half of a
+    /// kinzi marker (U+1004 U+103A U+1039). Virama orthographically only
+    /// bonds consonant-to-consonant; attaching it to a vowel sign,
+    /// independent vowel, or anusvara produces a scalar run no Myanmar
+    /// shaper renders sensibly. Parses that contain such a sequence are
+    /// demoted to `legalityScore = 0` so cleaner alternatives win.
+    private static func hasMalformedViramaStack(_ output: String) -> Bool {
+        let scalars = Array(output.unicodeScalars)
+        for i in 0..<scalars.count where scalars[i].value == 0x1039 {
+            guard i >= 1 else { return true }
+            let prev = scalars[i - 1]
+            if prev.value == 0x103A {
+                let twoBack = i >= 2 ? scalars[i - 2].value : 0
+                if twoBack != 0x1004 { return true }
+                continue
+            }
+            if Romanization.consonantToRoman[Character(prev)] == nil {
+                return true
+            }
+        }
+        return false
     }
 
     /// Count rare-codepoint usages in an output surface so the final

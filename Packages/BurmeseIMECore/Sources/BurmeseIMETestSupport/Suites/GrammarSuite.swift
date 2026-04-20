@@ -412,6 +412,44 @@ public enum GrammarSuite {
             }
         },
 
+        // MARK: - Virama After Non-Consonant Scalars
+        //
+        // Virama (U+1039) only bonds a base consonant to a base consonant.
+        // Attaching it to a dependent vowel sign, independent vowel, or
+        // anusvara yields a scalar run no Myanmar shaper renders sensibly.
+        // The top parse for these inputs must have legalityScore = 0 so
+        // any fallback parse without the malformed stack wins.
+
+        TestCase("parse_viramaAfterAa_marTar_isIllegal") { ctx in
+            let result = SyllableParser().parseCandidates("mar+tar", maxResults: 1).first
+            ctx.assertEqual(result?.legalityScore ?? -1, 0,
+                "mar+tar: virama after U+102C must not score as legal")
+        },
+
+        TestCase("parse_viramaAfterAa_marPa_isIllegal") { ctx in
+            let result = SyllableParser().parseCandidates("mar+pa", maxResults: 1).first
+            ctx.assertEqual(result?.legalityScore ?? -1, 0,
+                "mar+pa: virama after U+102C must not score as legal")
+        },
+
+        TestCase("parse_viramaAfterIndependentVowel_mooPa_isIllegal") { ctx in
+            let result = SyllableParser().parseCandidates("moo+pa", maxResults: 1).first
+            ctx.assertEqual(result?.legalityScore ?? -1, 0,
+                "moo+pa: virama after independent vowel U+1029 must not score as legal")
+        },
+
+        TestCase("parse_viramaAfterAnusvara_thaan3Ka_isIllegal") { ctx in
+            let result = SyllableParser().parseCandidates("thaan3+ka", maxResults: 1).first
+            ctx.assertEqual(result?.legalityScore ?? -1, 0,
+                "thaan3+ka: virama after anusvara U+1036 must not score as legal")
+        },
+
+        TestCase("parse_viramaAfterAnusvara_than3Ka_isIllegal") { ctx in
+            let result = SyllableParser().parseCandidates("than3+ka", maxResults: 1).first
+            ctx.assertEqual(result?.legalityScore ?? -1, 0,
+                "than3+ka: virama after anusvara U+1036 must not score as legal")
+        },
+
         // MARK: - Medial Canonical Order
 
         // Onset carries medial ha-htoe (U+103E) and the vowel starts with
