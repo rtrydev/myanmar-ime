@@ -1041,7 +1041,9 @@ public final class SyllableParser: Sendable {
             let viramaClean = !Self.hasMalformedViramaStack(adjusted)
             let asatClean = !Self.hasAsatWithoutConsonantBase(adjusted)
             let indepVowelClean = !Self.hasDepSignAfterIndependentVowel(adjusted)
-            let legal = m.state.isLegal && viramaClean && asatClean && indepVowelClean
+            let stackDepthClean = !Self.hasTripleViramaStack(adjusted)
+            let legal = m.state.isLegal && viramaClean && asatClean
+                && indepVowelClean && stackDepthClean
             return SyllableParse(
                 output: adjusted,
                 reading: m.reading,
@@ -1122,6 +1124,30 @@ public final class SyllableParser: Sendable {
             return String(Unicode.Scalar(0x1021)!)
         }
         return output
+    }
+
+    /// Returns true if `output` contains a stack chain of three or more
+    /// consonants joined by virama (U+1039), or a kinzi marker
+    /// (U+1004 U+103A U+1039) that immediately precedes another stack.
+    /// Modern Burmese and mainstream Pali orthography never stack more
+    /// than a pair, and the kinzi already counts as the upper of a stack,
+    /// so chaining a second virama onto its lower is illegal. The scan
+    /// detects two viramas separated by exactly one consonant scalar:
+    /// `U+1039 <C> U+1039`.
+    private static func hasTripleViramaStack(_ output: String) -> Bool {
+        let scalars = Array(output.unicodeScalars)
+        guard scalars.count >= 3 else { return false }
+        let isConsonantBase: (UInt32) -> Bool = { v in
+            (v >= 0x1000 && v <= 0x1021) || v == 0x103F
+        }
+        for i in 0..<(scalars.count - 2) {
+            if scalars[i].value == 0x1039
+                && isConsonantBase(scalars[i + 1].value)
+                && scalars[i + 2].value == 0x1039 {
+                return true
+            }
+        }
+        return false
     }
 
     /// Returns true if `output` contains a U+103A (asat) whose base does

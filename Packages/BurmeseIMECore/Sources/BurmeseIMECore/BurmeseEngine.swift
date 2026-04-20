@@ -1522,6 +1522,26 @@ public final class BurmeseEngine: @unchecked Sendable {
         return sawVirama
     }
 
+    /// Returns true when `output` chains two viramas (U+1039) separated by
+    /// exactly one consonant scalar. This catches both literal triple
+    /// stacks (`<C> 1039 <C> 1039 <C>`) and a kinzi marker that
+    /// immediately precedes another stack
+    /// (`<nga> 103A 1039 <C> 1039 <C>`). Modern orthography never stacks
+    /// more than a pair, so the engine drops these even if each
+    /// individual stack pair is otherwise class-valid.
+    private static func hasTripleViramaStack(_ output: String) -> Bool {
+        let scalars = Array(output.unicodeScalars)
+        guard scalars.count >= 3 else { return false }
+        for i in 0..<(scalars.count - 2) {
+            guard scalars[i].value == 0x1039 else { continue }
+            let mid = scalars[i + 1].value
+            let isConsonantBase = (mid >= 0x1000 && mid <= 0x1021) || mid == 0x103F
+            guard isConsonantBase else { continue }
+            if scalars[i + 2].value == 0x1039 { return true }
+        }
+        return false
+    }
+
     private static func hasInterleavedLatin(_ output: String) -> Bool {
         let scalars = Array(output.unicodeScalars)
         var lastMyanmarIdx = -1
@@ -1542,6 +1562,7 @@ public final class BurmeseEngine: @unchecked Sendable {
     private static func isAcceptableParse(_ parse: SyllableParse) -> Bool {
         guard parse.legalityScore > 0 || hasOnlyCleanViramaStacks(parse) else { return false }
         guard !hasInterleavedLatin(parse.output) else { return false }
+        guard !hasTripleViramaStack(parse.output) else { return false }
         for reading in standaloneTallAaReadings where parse.reading.hasPrefix(reading) {
             return false
         }

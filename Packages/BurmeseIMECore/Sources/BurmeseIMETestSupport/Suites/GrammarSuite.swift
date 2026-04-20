@@ -862,6 +862,75 @@ public enum GrammarSuite {
                 "p+pa: direct labial+labial stack must remain legal")
         },
 
+        // MARK: - Stack Depth Limit (task 04)
+        //
+        // Triple stacks (`<C> 1039 <C> 1039 <C>`) and kinzi-followed-by-stack
+        // (`<nga> 103A 1039 <C> 1039 <C>`) are not used in modern Burmese or
+        // mainstream Pali. Both surface as two viramas separated by a single
+        // consonant — the parser must demote them to legality 0, and the
+        // engine must not silently rescue them via the clean-stacks path.
+
+        TestCase("parse_tripleViramaStack_pPlusPPlusPa_isIllegal") { ctx in
+            let result = SyllableParser().parseCandidates("p+p+pa", maxResults: 1).first
+            ctx.assertEqual(result?.legalityScore ?? -1, 0,
+                "p+p+pa: triple consonant stack must score 0")
+        },
+
+        TestCase("engine_tripleViramaStack_pPlusPPlusPa_noStackRescue") { ctx in
+            let engine = BurmeseEngine()
+            let top = engine.update(buffer: "p+p+pa", context: []).candidates.first?.surface ?? ""
+            let scalars = top.unicodeScalars.map(\.value)
+            // Must not contain `1039 <C> 1039` chained-stack pattern.
+            var hasChainedStack = false
+            if scalars.count >= 3 {
+                for i in 0..<(scalars.count - 2) where scalars[i] == 0x1039 {
+                    let mid = scalars[i + 1]
+                    let isConsonant = (mid >= 0x1000 && mid <= 0x1021) || mid == 0x103F
+                    if isConsonant && scalars[i + 2] == 0x1039 {
+                        hasChainedStack = true
+                        break
+                    }
+                }
+            }
+            ctx.assertFalse(hasChainedStack,
+                detail: "p+p+pa engine top must not chain two viramas; got '\(top)'")
+        },
+
+        TestCase("engine_kinziPlusStack_minPlusGaPlusGa_noKinziStackChain") { ctx in
+            let engine = BurmeseEngine()
+            let top = engine.update(buffer: "min+ga+ga", context: []).candidates.first?.surface ?? ""
+            let scalars = top.unicodeScalars.map(\.value)
+            // Must not contain `1039 <C> 1039` chained-stack pattern (the
+            // kinzi already counts as a stack; another virama would chain it).
+            var hasChainedStack = false
+            if scalars.count >= 3 {
+                for i in 0..<(scalars.count - 2) where scalars[i] == 0x1039 {
+                    let mid = scalars[i + 1]
+                    let isConsonant = (mid >= 0x1000 && mid <= 0x1021) || mid == 0x103F
+                    if isConsonant && scalars[i + 2] == 0x1039 {
+                        hasChainedStack = true
+                        break
+                    }
+                }
+            }
+            ctx.assertFalse(hasChainedStack,
+                detail: "min+ga+ga engine top must not chain a stack onto kinzi; got '\(top)'")
+        },
+
+        // Regression: a single legal stack must remain legal — the depth
+        // check only fires on chained viramas, not on every stack.
+        TestCase("parse_singleStack_pPlusPa_remainsLegal") { ctx in
+            let result = SyllableParser().parseCandidates("p+pa", maxResults: 1).first
+            ctx.assertGreaterThan(result?.legalityScore ?? 0, 0,
+                "p+pa: a single stack pair must remain legal after depth check")
+        },
+
+        TestCase("parse_kinziAlone_minPlusKa_remainsLegal") { ctx in
+            let result = SyllableParser().parseCandidates("min+ka", maxResults: 1).first
+            ctx.assertGreaterThan(result?.legalityScore ?? 0, 0,
+                "min+ka: lone kinzi+stack must remain legal after depth check")
+        },
+
         // MARK: - Medial Canonical Order
 
         // Onset carries medial ha-htoe (U+103E) and the vowel starts with
