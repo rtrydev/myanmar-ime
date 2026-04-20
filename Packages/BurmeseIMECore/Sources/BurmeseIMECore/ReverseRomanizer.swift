@@ -107,31 +107,37 @@ public enum ReverseRomanizer {
     /// Try to match an independent vowel at position.
     private static func matchIndependentVowel(_ scalars: [Unicode.Scalar], from start: Int) -> (String, Int)? {
         guard start < scalars.count else { return nil }
-        let s = scalars[start]
-
-        switch s.value {
-        case 0x1023: // ဣ short independent i
-            return ("ii.", 1)
-        case 0x1024: // ဤ long independent i
-            return ("ii", 1)
-        case 0x1025: // ဥ
-            return ("u2.", 1)
-        case 0x1026: // ဦ
-            // Check for ဦး (u2:)
-            if start + 1 < scalars.count && scalars[start + 1].value == 0x1038 {
-                return ("u2:", 2)
+        for entry in independentVowelPatterns {
+            guard entry.pattern.count <= scalars.count - start else { continue }
+            var matches = true
+            for k in 0..<entry.pattern.count {
+                if scalars[start + k].value != entry.pattern[k] {
+                    matches = false
+                    break
+                }
             }
-            return ("u2", 1)
-        case 0x1027: // ဧ
-            return ("ay2", 1)
-        case 0x1029: // ဩ
-            return ("oo", 1)
-        case 0x102A: // ဪ
-            return ("oo:", 1)
-        default:
-            return nil
+            if matches {
+                return (entry.roman, entry.pattern.count)
+            }
         }
+        return nil
     }
+
+    /// Independent-vowel entries (U+1023–U+102A) sourced from
+    /// `Romanization.vowels`. Sorted by pattern length descending so
+    /// multi-scalar forms like `ဦး` (u2:) match before their prefix `ဦ`.
+    private static let independentVowelPatterns: [VowelPattern] = {
+        var patterns: [VowelPattern] = []
+        for entry in Romanization.vowels {
+            guard entry.isStandalone else { continue }
+            let scalarValues = Array(entry.myanmar.unicodeScalars.map(\.value))
+            guard let first = scalarValues.first,
+                  first >= 0x1023 && first <= 0x102A else { continue }
+            patterns.append(VowelPattern(roman: entry.roman, pattern: scalarValues))
+        }
+        patterns.sort { $0.pattern.count > $1.pattern.count }
+        return patterns
+    }()
 
     /// Match a vowel/final sequence starting at position.
     /// Returns the roman key and number of scalars consumed.

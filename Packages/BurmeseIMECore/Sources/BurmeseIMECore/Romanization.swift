@@ -320,9 +320,6 @@ public enum Romanization {
         // -ut
         .init("ut", "\u{103D}\u{1010}\u{103A}"),    // ွတ်
 
-        // Standalone medial as vowel suffix (h as ha-htoe)
-        .init("h", "\u{103E}"),                      // ှ
-
         // Standalone symbols. No digit disambiguator: these keys don't collide
         // with any dependent-vowel sibling, and the alias-penalty from a "2"
         // form would let the onset+medial+vowel parse of "ywe" (ယွယ်) out-rank

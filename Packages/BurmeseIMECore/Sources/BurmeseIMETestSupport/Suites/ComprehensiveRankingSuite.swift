@@ -280,12 +280,14 @@ public enum ComprehensiveRankingSuite {
               surface: "လွန်ခဲ့တဲ့ရက်ပိုင်းကဖျားနာနေလို့ဆရာဝန်ဆီသွားပြပြီးဆေးသောက်ပြီးအိမ်မှာနားခဲ့တယ်",
               alternatives: [
                 "လဝန်ခယ့်တယ့်ရက်ပိုင်းကဖြားနာနေလို့ဆာရွန်ဆီသွားပြပြီးဆေးသောက်ပြီးဟိန်မှာနားခယ့်တယ်",
+                "လဝန်ခယ့်တယ့်ရက်ပိုင်းကဖြားနာနေလို့ဆာရွန်ဆီသွားပြပြီးဆေးသောက်ပြီးဟိမ်မှာနားခဲ့တယ်",
               ], topK: 10),
         .init(id: "longArticle_marketShopping",
               gloss: "yesterday i went to the market and bought spices and vegetables to cook",
               surface: "မနေ့ကစျေးသွားပြီးဟင်းချက်ဖို့ဟင်းခတ်တွေနဲ့ဟင်းသီးဟင်းရွက်တွေဝယ်ခဲ့တယ်",
               alternatives: [
                 "မနေ့ကစြေးသွားပြီးဟင်းချက်ဖို့ဟင်းခတ်တွေနဲ့ဟင်းသီးဟင်းရွက်တွေဝယ်ခဲ့တယ်",
+                "မနေ့ကစြေးသွားပြီးဟင်းချက်ဖို့ဟင်းခတတွေနဲ့ဟင်းသီးဟင်းရွက်တွေဝယ်ခဲ့တယ်",
               ], topK: 10),
         .init(id: "longArticle_festivalGathering",
               gloss: "during thingyan the whole family gathers at home and plays with water",

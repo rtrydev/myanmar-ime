@@ -634,11 +634,29 @@ public enum EngineSuite {
             ctx.assertEqual(state.candidates.first?.surface, "\u{1001}\u{103D}\u{1014}\u{103A}")
         },
 
-        TestCase("dedupeMedial_hOverlap_hmh") { ctx in
-            // Onset "hm" contributes U+103E; standalone vowel "h" is also U+103E.
-            // The duplicate must collapse.
-            let state = BurmeseEngine().update(buffer: "hmh", context: [])
-            ctx.assertEqual(state.candidates.first?.surface, "\u{1019}\u{103E}")
+        TestCase("loneH_producesConsonantHa") { ctx in
+            // `h` alone must parse as the consonant ha (U+101F). The old
+            // `h → U+103E` vowel-table entry has been removed so ha-htoe
+            // reaches the surface only via a medial attachment on an
+            // onset, never as a standalone syllable.
+            let state = BurmeseEngine().update(buffer: "h", context: [])
+            let top = state.candidates.first?.surface ?? ""
+            ctx.assertEqual(
+                top.unicodeScalars.map(\.value), [0x101F],
+                "`h` must render as ဟ only"
+            )
+        },
+
+        TestCase("loneH_noStandaloneMedialHa") { ctx in
+            // Stronger invariant: `h` must never surface as a bare medial
+            // ha-htoe (U+103E) floating without a consonant base.
+            let state = BurmeseEngine().update(buffer: "h", context: [])
+            for c in state.candidates {
+                ctx.assertFalse(
+                    c.surface.unicodeScalars.contains { $0.value == 0x103E },
+                    detail: "candidate '\(c.surface)' contains a stray U+103E"
+                )
+            }
         },
 
         TestCase("standardChar_greatSa_withVowel") { ctx in
