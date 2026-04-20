@@ -320,7 +320,7 @@ public final class BurmeseEngine: @unchecked Sendable {
         let composable: String
         let literalTail: String
         if burmesePunctuationEnabled {
-            let (kept, peeled) = Self.stripTrailingMappablePunctuation(rawComposable)
+            let (kept, peeled) = stripTrailingMappablePunctuation(rawComposable)
             composable = kept
             literalTail = peeled + rawLiteralTail
         } else {
@@ -429,9 +429,24 @@ public final class BurmeseEngine: @unchecked Sendable {
         // literal separators: letter runs between them still compose. Other
         // non-composing chars (punctuation) remain hard boundaries that keep
         // following letters literal.
-        let effectiveTail = tailStartsWithDigit(literalTail, dropped: droppedTail)
-            ? composeLetterRunsInTail(mappedEffectiveTail)
-            : mappedEffectiveTail
+        //
+        // When the right-shrink probe couldn't legalise the buffer's
+        // composable suffix (`droppedTail` non-empty) *and* the user typed
+        // an explicit separator (`+` or `.`), re-compose any letter runs
+        // in the tail as a best-effort fallback so the surface doesn't
+        // expose raw ASCII for letters the user expected to see converted.
+        // Pure letter tails without explicit separators pass through raw:
+        // the user hasn't signalled a boundary, and composing every growth
+        // step would reinterpret earlier letters and break anchor
+        // stability as the buffer grows.
+        let effectiveTail: String
+        let tailHasSeparator = rawEffectiveTail.contains("+") || rawEffectiveTail.contains(".")
+        if tailStartsWithDigit(literalTail, dropped: droppedTail)
+            || (!droppedTail.isEmpty && tailHasSeparator) {
+            effectiveTail = composeLetterRunsInTail(mappedEffectiveTail)
+        } else {
+            effectiveTail = mappedEffectiveTail
+        }
 
         // Prefix-stability anchor: when the new buffer extends a
         // previously-rendered one *and* that anchor is mature enough
@@ -1385,7 +1400,13 @@ public final class BurmeseEngine: @unchecked Sendable {
     /// in original order. Used to rescue trailing `.` from the composable
     /// buffer (it's in `Romanization.composingCharacters`) so it can be
     /// routed through the literal-tail mapping path.
-    private static func stripTrailingMappablePunctuation(_ s: String) -> (kept: String, stripped: String) {
+    ///
+    /// A trailing `.` is only re-added to `kept` when the preceding chars
+    /// actually accept it as a creaky-tone modifier (e.g. `mu.` → မု,
+    /// `mi.` → မိ). Otherwise the `.` stays peeled and is mapped to the
+    /// literal-tail substitution path — preventing inputs like `thar.`
+    /// from polluting the parse with a tone marker the base can't take.
+    private func stripTrailingMappablePunctuation(_ s: String) -> (kept: String, stripped: String) {
         var kept = s
         var stripped = ""
         while let last = kept.last, PunctuationMapper.isMappable(last) {
@@ -1393,10 +1414,25 @@ public final class BurmeseEngine: @unchecked Sendable {
             kept.removeLast()
         }
         if !kept.isEmpty, stripped.first == "." {
-            kept.append(".")
-            stripped.removeFirst()
+            if creakyToneAttachesTo(kept) {
+                kept.append(".")
+                stripped.removeFirst()
+            }
         }
         return (kept, stripped)
+    }
+
+    /// True when appending `.` to `prefix` improves the parser's top
+    /// legality — i.e. there is a creaky-tone reading that genuinely
+    /// extends the base. A bare comparison ("with-dot scores higher than
+    /// without") generalises across every creaky-tone rule in the table
+    /// without hard-coding the eligible bases here.
+    private func creakyToneAttachesTo(_ prefix: String) -> Bool {
+        let withDot = parser.parseCandidates(prefix + ".", maxResults: 1).first
+        guard let withDot, withDot.legalityScore > 0 else { return false }
+        let plain = parser.parseCandidates(prefix, maxResults: 1).first
+        let plainLegality = plain?.legalityScore ?? 0
+        return withDot.legalityScore >= plainLegality
     }
 
     private static func isAsciiDigit(_ ch: Character) -> Bool {
@@ -1445,10 +1481,81 @@ public final class BurmeseEngine: @unchecked Sendable {
     private func composedLetterRunSurface(_ run: String) -> String {
         let normalized = Self.normalizeForParser(run)
         guard !normalized.isEmpty else { return run }
-        guard let parse = parser.parseCandidates(normalized, maxResults: 1).first else {
-            return run
+        let parses = parser.parseCandidates(normalized, maxResults: 4)
+        guard !parses.isEmpty else { return run }
+        // Pick the highest-ranked parse whose surface is orthographically
+        // clean. We accept legality 0 here (the tail couldn't be DP-legal
+        // anyway, otherwise it wouldn't be in the dropped tail), but the
+        // surface itself must not contain malformed virama, chained
+        // virama, asat-without-base, or dep-sign-after-independent-vowel
+        // patterns — otherwise we'd silently splice broken Myanmar in
+        // place of the original ASCII run.
+        for parse in parses {
+            let s = Self.correctAaShape(parse.output)
+            if Self.tailFallbackOutputIsClean(s) { return s }
         }
-        return Self.correctAaShape(parse.output)
+        return ""
+    }
+
+    /// Orthographic check used by `composedLetterRunSurface` when picking
+    /// a fallback surface for a tail run. Stricter than legality scoring
+    /// because it inspects the rendered scalar sequence directly: rejects
+    /// any sign of malformed virama, chained virama (triple stack), asat
+    /// without a consonant base, and dep-vowel-sign after an independent
+    /// vowel. A fallback that fails any of these would smuggle illegal
+    /// Myanmar into the candidate panel.
+    private static func tailFallbackOutputIsClean(_ s: String) -> Bool {
+        guard !s.isEmpty else { return false }
+        let scalars = Array(s.unicodeScalars)
+        let isConsonantBase: (UInt32) -> Bool = { v in
+            (v >= 0x1000 && v <= 0x1021) || v == 0x103F
+        }
+        // No virama with a non-consonant left neighbour, asat-half not
+        // anchored to nga, or non-consonant right neighbour.
+        for i in 0..<scalars.count where scalars[i].value == 0x1039 {
+            guard i >= 1 else { return false }
+            let prev = scalars[i - 1].value
+            if prev == 0x103A {
+                let twoBack = i >= 2 ? scalars[i - 2].value : 0
+                if twoBack != 0x1004 { return false }
+            } else if !isConsonantBase(prev) {
+                return false
+            }
+            guard i + 1 < scalars.count else { return false }
+            if !isConsonantBase(scalars[i + 1].value) { return false }
+        }
+        // No two viramas within distance 2 (chained stack / kinzi+stack).
+        if scalars.count >= 3 {
+            for i in 0..<(scalars.count - 2) where scalars[i].value == 0x1039 {
+                if isConsonantBase(scalars[i + 1].value)
+                    && scalars[i + 2].value == 0x1039 {
+                    return false
+                }
+            }
+        }
+        // No asat (U+103A) whose base doesn't walk back to a consonant.
+        for i in 0..<scalars.count where scalars[i].value == 0x103A {
+            var j = i - 1
+            while j >= 0 {
+                let v = scalars[j].value
+                let isSkippable = (v >= 0x102B && v <= 0x1032)
+                    || (v >= 0x1036 && v <= 0x1038)
+                    || (v >= 0x103B && v <= 0x103E)
+                if isSkippable { j -= 1 } else { break }
+            }
+            guard j >= 0 else { return false }
+            if !isConsonantBase(scalars[j].value) { return false }
+        }
+        // No dep vowel sign after an independent vowel.
+        if scalars.count >= 2 {
+            for i in 0..<(scalars.count - 1) {
+                let v = scalars[i].value
+                guard v >= 0x1023 && v <= 0x102A else { continue }
+                let next = scalars[i + 1].value
+                if next >= 0x102B && next <= 0x1032 { return false }
+            }
+        }
+        return true
     }
 
     /// Replace ASCII digits (0-9) with Myanmar digits (U+1040–U+1049),

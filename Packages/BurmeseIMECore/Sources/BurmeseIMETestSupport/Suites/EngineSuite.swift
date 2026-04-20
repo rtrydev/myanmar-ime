@@ -751,5 +751,59 @@ public enum EngineSuite {
                 detail: "surfaces=\(state.candidates.map(\.surface))"
             )
         },
+
+        // MARK: - ASCII fallback cleanup (task 05)
+        //
+        // When the right-shrink probe gives up mid-buffer, the engine
+        // used to splice the un-converted tail straight into the surface,
+        // leaking ASCII letters into the candidate panel. Whenever the
+        // dropped portion is non-empty, the engine must re-compose any
+        // letter runs in the tail so the top candidate stays free of
+        // ASCII letters.
+
+        TestCase("engine_fallback_thar_myat_mhu_noLatinLeak") { ctx in
+            let state = BurmeseEngine().update(buffer: "thar.myat.mhu", context: [])
+            let top = state.candidates.first?.surface ?? ""
+            let leaked = top.unicodeScalars.contains { v in
+                let s = v.value
+                return (s >= 0x41 && s <= 0x5A) || (s >= 0x61 && s <= 0x7A)
+            }
+            ctx.assertFalse(
+                leaked,
+                detail: "thar.myat.mhu top must not contain ASCII letters; got '\(top)'"
+            )
+        },
+
+        TestCase("engine_fallback_pa_n_di_ta_noLatinLeak") { ctx in
+            let state = BurmeseEngine().update(buffer: "pa+n+di+ta", context: [])
+            let top = state.candidates.first?.surface ?? ""
+            let leaked = top.unicodeScalars.contains { v in
+                let s = v.value
+                return (s >= 0x41 && s <= 0x5A) || (s >= 0x61 && s <= 0x7A)
+            }
+            ctx.assertFalse(
+                leaked,
+                detail: "pa+n+di+ta top must not contain ASCII letters; got '\(top)'"
+            )
+        },
+
+        TestCase("engine_fallback_creakyTone_mu_dot_unchanged") { ctx in
+            let state = BurmeseEngine().update(buffer: "mu.", context: [])
+            let top = state.candidates.first?.surface ?? ""
+            let scalars = top.unicodeScalars.map(\.value)
+            ctx.assertEqual(scalars, [0x1019, 0x102F],
+                            "mu. must still produce မု (creaky tone preserved)")
+        },
+
+        TestCase("engine_fallback_minGalarpar_unchanged") { ctx in
+            let state = BurmeseEngine().update(buffer: "min+galarpar", context: [])
+            let top = state.candidates.first?.surface ?? ""
+            let leaked = top.unicodeScalars.contains { v in
+                let s = v.value
+                return (s >= 0x41 && s <= 0x5A) || (s >= 0x61 && s <= 0x7A)
+            }
+            ctx.assertFalse(leaked, detail: "min+galarpar top must remain ASCII-free; got '\(top)'")
+            ctx.assertFalse(top.isEmpty, detail: "min+galarpar must still produce a candidate")
+        },
     ])
 }
