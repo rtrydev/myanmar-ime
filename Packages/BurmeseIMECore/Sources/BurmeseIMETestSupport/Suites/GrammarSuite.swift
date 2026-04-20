@@ -526,6 +526,81 @@ public enum GrammarSuite {
                 "than3+ka: virama after anusvara U+1036 must not score as legal")
         },
 
+        // MARK: - Cross-Class Virama Stacks via Vowel Path (task 04)
+        //
+        // `Grammar.isValidStack` must apply regardless of whether the
+        // virama was reached through a direct onset+virama transition or
+        // through a vowel-bearing transition. Previously the DP walked
+        // `onsetOnly(X) → vowelOnly(plainV) → vowelOnly(+)` and the
+        // `viramaUpper` lookup terminated at `default: nil`, silently
+        // disabling the stack-class check. A labial+dental pair like
+        // `mar+ta` would then score with positive DP legality.
+
+        TestCase("parse_viramaViaVowelPath_marTa_crossClass_isIllegal") { ctx in
+            // m (labial) + aa + virama + t (dental) — cross-class stack.
+            let result = SyllableParser().parseCandidates("mar+ta", maxResults: 1).first
+            ctx.assertEqual(result?.legalityScore ?? -1, 0,
+                "mar+ta: labial+dental via vowel path must not score as legal")
+        },
+
+        TestCase("parse_viramaViaVowelPath_marSa_crossClass_isIllegal") { ctx in
+            // m (labial) + aa + virama + s (palatal) — cross-class stack.
+            let result = SyllableParser().parseCandidates("mar+sa", maxResults: 1).first
+            ctx.assertEqual(result?.legalityScore ?? -1, 0,
+                "mar+sa: labial+palatal via vowel path must not score as legal")
+        },
+
+        TestCase("parse_viramaViaVowelPath_karTa_crossClass_isIllegal") { ctx in
+            // k (velar) + aa + virama + t (dental) — cross-class stack.
+            let result = SyllableParser().parseCandidates("kar+ta", maxResults: 1).first
+            ctx.assertEqual(result?.legalityScore ?? -1, 0,
+                "kar+ta: velar+dental via vowel path must not score as legal")
+        },
+
+        TestCase("parse_viramaViaVowelPath_parTa_crossClass_isIllegal") { ctx in
+            // p (labial) + aa + virama + t (dental) — cross-class stack.
+            let result = SyllableParser().parseCandidates("par+ta", maxResults: 1).first
+            ctx.assertEqual(result?.legalityScore ?? -1, 0,
+                "par+ta: labial+dental via vowel path must not score as legal")
+        },
+
+        // Same-class virama via vowel path is still malformed because a
+        // virama cannot bond to a dependent vowel sign. This is task 02's
+        // territory but reconfirmed here: the DP must reject the stack
+        // transition outright rather than relying on post-hoc scrubbers.
+        TestCase("parse_viramaViaVowelPath_marPa_sameClassButMalformed_isIllegal") { ctx in
+            let result = SyllableParser().parseCandidates("mar+pa", maxResults: 1).first
+            ctx.assertEqual(result?.legalityScore ?? -1, 0,
+                "mar+pa: virama after dependent vowel sign must not score as legal")
+            // The DP must have rejected the transition — legality-zero paths
+            // accumulate a -10000 scoreMatch penalty. A residual positive
+            // score means the DP took a different path that dodged the
+            // virama; we only reject paths that actually form the stack.
+            if let out = result?.output,
+               out.unicodeScalars.map(\.value).contains(0x1039) {
+                ctx.assertTrue(
+                    (result?.score ?? 0) < -1000,
+                    detail: "mar+pa: DP must penalise the virama-after-vowel-sign path; "
+                        + "got score=\(result?.score ?? 0)"
+                )
+            }
+        },
+
+        TestCase("parse_viramaViaVowelPath_kinzi_minKa_legal") { ctx in
+            // The kinzi path must remain legal: asat-ending vowel `in`
+            // has preAsat = nga (U+1004), so the stack check is velar+velar.
+            let result = SyllableParser().parseCandidates("min+ka", maxResults: 1).first
+            ctx.assertGreaterThan(result?.legalityScore ?? 0, 0,
+                "min+ka: kinzi with velar subscript must remain legal")
+        },
+
+        TestCase("parse_viramaViaVowelPath_regression_directStack_isLegal") { ctx in
+            // Direct-path same-class stacks must continue to parse as legal.
+            let result = SyllableParser().parseCandidates("p+pa", maxResults: 1).first
+            ctx.assertGreaterThan(result?.legalityScore ?? 0, 0,
+                "p+pa: direct labial+labial stack must remain legal")
+        },
+
         // MARK: - Medial Canonical Order
 
         // Onset carries medial ha-htoe (U+103E) and the vowel starts with

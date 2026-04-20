@@ -588,54 +588,32 @@ public final class SyllableParser: Sendable {
                 // Cross-class stacks (e.g. က္ယ, က္ဝ, က္ဿ) fall outside the
                 // native subscript model; force their onset legality to 0
                 // so the resulting parse drops below the legality
-                // threshold. Two shapes reach here because the DP admits
-                // both a glued `.onsetVowel(upper, +)` and a split
-                // `.onsetOnly(upper)` → `.vowelOnly(+)` path.
-                let viramaUpper: Character?
-                if hasViramaInBuffer {
-                    switch previous.matchRef {
-                    case let .onsetVowel(onsetId, vowelId) where vowelId == viramaVowelId:
-                        viramaUpper = onsetTerminals[Int(onsetId)].onset
-                    case let .vowelOnly(vowelId)
-                        where vowelId == viramaVowelId && previous.parentIdx >= 0:
-                        // The "upper" in the stack is the scalar immediately
-                        // before the virama, not the parent syllable's onset.
-                        // For asat-ending parent vowels (kinzi `in`, `mut`,
-                        // `kan`, ...), that scalar is the consonant embedded
-                        // in the vowel's render, tracked as
-                        // `vowelPreAsatScalar`. For vowels without an asat
-                        // (inherent `a`), the upper is the onset itself.
-                        switch arena[Int(previous.parentIdx)].matchRef {
-                        case let .onsetOnly(onsetId):
-                            viramaUpper = onsetTerminals[Int(onsetId)].onset
-                        case let .onsetVowel(onsetId, parentVowelId):
-                            if vowelEndsWithAsat[Int(parentVowelId)] {
-                                let pre = vowelPreAsatScalar[Int(parentVowelId)]
-                                let scalar = pre != 0 ? pre : onsetLastScalar[Int(onsetId)]
-                                viramaUpper = Unicode.Scalar(scalar).map(Character.init)
-                            } else {
-                                viramaUpper = onsetTerminals[Int(onsetId)].onset
-                            }
-                        case let .vowelOnly(parentVowelId)
-                            where vowelEndsWithAsat[Int(parentVowelId)]:
-                            let pre = vowelPreAsatScalar[Int(parentVowelId)]
-                            viramaUpper = pre != 0
-                                ? Unicode.Scalar(pre).map(Character.init)
-                                : nil
-                        default:
-                            viramaUpper = nil
-                        }
-                    default:
-                        viramaUpper = nil
-                    }
-                } else {
-                    viramaUpper = nil
-                }
+                // threshold. The DP admits several DP shapes that reach
+                // the virama:
+                //   - `.onsetVowel(X, +)` — onset glued with virama
+                //   - `.onsetOnly(X) → .vowelOnly(+)` — split path, X is upper
+                //   - `.onsetVowel(X, asatV) → .vowelOnly(+)` — kinzi
+                //   - `.onsetVowel(X, plainV) → .vowelOnly(+)` — illegal:
+                //      virama cannot bond to a dependent vowel sign, so the
+                //      transition must be rejected outright regardless of
+                //      whether X happens to be same-class as the lower.
+                //   - `.vowelOnly(asatV) → .vowelOnly(+)` — kinzi via split
+                //   - `.vowelOnly(plainV) → .vowelOnly(+)` — illegal: same
+                //      reason as above.
+                let viramaCtx = hasViramaInBuffer
+                    ? viramaContext(previous: previous, arena: arena)
+                    : .none
 
                 for (onsetEnd, onsetEntry) in onsetMatches {
-                    let stackLegal = viramaUpper.map {
-                        Grammar.isValidStack(upper: $0, lower: onsetEntry.onset)
-                    } ?? true
+                    let stackLegal: Bool
+                    switch viramaCtx {
+                    case .upper(let upper):
+                        stackLegal = Grammar.isValidStack(upper: upper, lower: onsetEntry.onset)
+                    case .reject:
+                        stackLegal = false
+                    case .none:
+                        stackLegal = true
+                    }
                     let onsetLegality = stackLegal
                         ? onsetBareLegality[Int(onsetEntry.id)]
                         : 0
@@ -780,6 +758,86 @@ public final class SyllableParser: Sendable {
         }
 
         return (arena, dp)
+    }
+
+    // MARK: - Virama Context
+
+    /// Outcome of inspecting a DP state that may precede a virama (`+`)
+    /// transition. Drives the stack-class check on the following onset.
+    private enum ViramaContext {
+        /// Previous state ended with a virama; the given character is the
+        /// upper consonant of the stack. Run `isValidStack` against the
+        /// lower onset.
+        case upper(Character)
+        /// Previous state ended with a virama glued to a scalar that
+        /// cannot serve as a stack upper (dependent vowel sign,
+        /// independent vowel, anusvara, asat on a non-nga base, ...).
+        /// The following onset must be treated as illegal regardless of
+        /// its class.
+        case reject
+        /// Previous state did not end with a virama; no stack check.
+        case none
+    }
+
+    /// Derive the stack-upper for a potential virama transition. The upper
+    /// sits *immediately* above the virama scalar — not necessarily the
+    /// current syllable's onset. Three structural cases reach the virama:
+    ///
+    ///   1. `onsetVowel(X, +)` — onset glued to virama in one match.
+    ///   2. `onsetOnly(X) → vowelOnly(+)` — onset followed by standalone
+    ///      virama. No intervening vowel, so upper = onset.
+    ///   3. `...Vowel(V) → vowelOnly(+)` — a vowel sign sits between the
+    ///      onset and the virama. This is legal only for kinzi, where the
+    ///      vowel is asat-ending (e.g. `in` renders as U+1004 U+103A) and
+    ///      the real upper is the scalar embedded in the vowel's render
+    ///      (tracked as `vowelPreAsatScalar`). Any plain dependent vowel,
+    ///      independent vowel, or anusvara before a virama is malformed
+    ///      Burmese — reject the transition outright.
+    private func viramaContext(
+        previous: ParseState,
+        arena: [ParseState]
+    ) -> ViramaContext {
+        switch previous.matchRef {
+        case let .onsetVowel(onsetId, vowelId) where vowelId == viramaVowelId:
+            return .upper(onsetTerminals[Int(onsetId)].onset)
+
+        case let .vowelOnly(vowelId)
+            where vowelId == viramaVowelId && previous.parentIdx >= 0:
+            switch arena[Int(previous.parentIdx)].matchRef {
+            case let .onsetOnly(onsetId):
+                return .upper(onsetTerminals[Int(onsetId)].onset)
+
+            case let .onsetVowel(onsetId, parentVowelId):
+                guard vowelEndsWithAsat[Int(parentVowelId)] else {
+                    return .reject
+                }
+                let pre = vowelPreAsatScalar[Int(parentVowelId)]
+                let scalar = pre != 0 ? pre : onsetLastScalar[Int(onsetId)]
+                guard let ch = Unicode.Scalar(scalar).map(Character.init) else {
+                    return .reject
+                }
+                return .upper(ch)
+
+            case let .vowelOnly(parentVowelId):
+                guard vowelEndsWithAsat[Int(parentVowelId)] else {
+                    return .reject
+                }
+                let pre = vowelPreAsatScalar[Int(parentVowelId)]
+                guard pre != 0,
+                      let ch = Unicode.Scalar(pre).map(Character.init) else {
+                    return .reject
+                }
+                return .upper(ch)
+
+            default:
+                // `seed`, `skip`, or any other unexpected parent means the
+                // virama has no real consonant above it.
+                return .reject
+            }
+
+        default:
+            return .none
+        }
     }
 
     // MARK: - Matching
