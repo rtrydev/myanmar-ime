@@ -652,5 +652,104 @@ public enum EngineSuite {
                 detail: "surfaces=\(state.candidates.map(\.surface))"
             )
         },
+
+        // MARK: - Virama Stack Defence-in-Depth (task 05)
+        //
+        // The DP rejects malformed virama transitions by returning
+        // `legalityScore = 0`. The engine's `hasOnlyCleanViramaStacks`
+        // rescue path keeps legal-zero candidates alive when the virama
+        // sequence is still well-formed (needed for clean stack shapes
+        // that happen to score zero for unrelated reasons). That rescue
+        // must not itself admit malformed stacks.
+        //
+        // For each illegal input below no engine candidate may carry the
+        // malformed scalar sequence.
+
+        TestCase("engine_viramaAfterAa_marPa_rejectsMalformed") { ctx in
+            let state = BurmeseEngine().update(buffer: "mar+pa", context: [])
+            let bad: [UInt32] = [0x1019, 0x102C, 0x1039, 0x1015]
+            ctx.assertFalse(
+                state.candidates.contains { $0.surface.unicodeScalars.map(\.value) == bad },
+                "mar+pa_noMalformed",
+                detail: "surfaces=\(state.candidates.map(\.surface))"
+            )
+        },
+
+        TestCase("engine_viramaAfterIndependentVowel_mooPa_rejectsMalformed") { ctx in
+            let state = BurmeseEngine().update(buffer: "moo+pa", context: [])
+            ctx.assertFalse(
+                state.candidates.contains { cand in
+                    let s = cand.surface.unicodeScalars.map(\.value)
+                    // Any independent vowel (0x1021-0x102A) immediately before virama.
+                    for i in 1..<s.count where s[i] == 0x1039 {
+                        let prev = s[i - 1]
+                        if prev >= 0x1021 && prev <= 0x102A { return true }
+                    }
+                    return false
+                },
+                "moo+pa_noIndependentVowelBeforeVirama",
+                detail: "surfaces=\(state.candidates.map(\.surface))"
+            )
+        },
+
+        TestCase("engine_viramaAfterAnusvara_thaan3Ka_rejectsMalformed") { ctx in
+            let state = BurmeseEngine().update(buffer: "thaan3+ka", context: [])
+            ctx.assertFalse(
+                state.candidates.contains { cand in
+                    let s = cand.surface.unicodeScalars.map(\.value)
+                    for i in 1..<s.count where s[i] == 0x1039 {
+                        if s[i - 1] == 0x1036 { return true }
+                    }
+                    return false
+                },
+                "thaan3+ka_noAnusvaraBeforeVirama",
+                detail: "surfaces=\(state.candidates.map(\.surface))"
+            )
+        },
+
+        TestCase("engine_crossClassStack_pTa_rejectsMalformed") { ctx in
+            // Parser returns legal=0; the rescue path must not let the
+            // labial+dental (`1015 1039 1010`) surface through.
+            let state = BurmeseEngine().update(buffer: "p+ta", context: [])
+            let bad: [UInt32] = [0x1015, 0x1039, 0x1010]
+            ctx.assertFalse(
+                state.candidates.contains { $0.surface.unicodeScalars.map(\.value) == bad },
+                "p+ta_noCrossClassStack",
+                detail: "surfaces=\(state.candidates.map(\.surface))"
+            )
+        },
+
+        TestCase("engine_illegalKinzi_minYa_rejectsMalformed") { ctx in
+            // Kinzi requires a velar lower. `ya` (U+101A) is classless.
+            let state = BurmeseEngine().update(buffer: "min+ya", context: [])
+            let bad: [UInt32] = [0x1019, 0x1004, 0x103A, 0x1039, 0x101A]
+            ctx.assertFalse(
+                state.candidates.contains { $0.surface.unicodeScalars.map(\.value) == bad },
+                "min+ya_noIllegalKinzi",
+                detail: "surfaces=\(state.candidates.map(\.surface))"
+            )
+        },
+
+        TestCase("engine_legitimateStack_kKa_survives") { ctx in
+            // Regression: the rescue path must still admit well-formed
+            // legal=0 stack candidates that don't raise any issue.
+            let state = BurmeseEngine().update(buffer: "k+ka", context: [])
+            let expected: [UInt32] = [0x1000, 0x1039, 0x1000]
+            ctx.assertTrue(
+                state.candidates.contains { $0.surface.unicodeScalars.map(\.value) == expected },
+                "k+ka_hasLegalStack",
+                detail: "surfaces=\(state.candidates.map(\.surface))"
+            )
+        },
+
+        TestCase("engine_legitimateKinzi_minKa_survives") { ctx in
+            let state = BurmeseEngine().update(buffer: "min+ka", context: [])
+            let expected: [UInt32] = [0x1019, 0x1004, 0x103A, 0x1039, 0x1000]
+            ctx.assertTrue(
+                state.candidates.contains { $0.surface.unicodeScalars.map(\.value) == expected },
+                "min+ka_hasKinzi",
+                detail: "surfaces=\(state.candidates.map(\.surface))"
+            )
+        },
     ])
 }

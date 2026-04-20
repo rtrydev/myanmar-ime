@@ -1477,6 +1477,21 @@ public final class BurmeseEngine: @unchecked Sendable {
         String(input.lowercased().filter { Romanization.composingCharacters.contains($0) })
     }
 
+    /// Defence-in-depth gate for virama-stack surfaces. The DP already
+    /// penalises malformed virama transitions with `legalityScore = 0`;
+    /// this rescue path lets such candidates survive when the emitted
+    /// scalar sequence is nonetheless orthographically clean. "Clean"
+    /// means every `U+1039` is framed by scalars that can actually form
+    /// a native subscript:
+    ///
+    ///   - Upper must be a stackable base consonant, or the asat half
+    ///     of a kinzi marker (`U+1004 U+103A`).
+    ///   - Lower must be a stackable base consonant whose class matches
+    ///     the upper's (for kinzi the upper is nga → velar class).
+    ///
+    /// Anything else — virama after a dependent vowel sign, independent
+    /// vowel, anusvara; asat-before-virama on a non-nga base; or a
+    /// cross-class pair — fails the gate so the engine drops the parse.
     private static func hasOnlyCleanViramaStacks(_ parse: SyllableParse) -> Bool {
         guard parse.reading.contains("+") else { return false }
         let scalars = parse.output.unicodeScalars.map(\.value)
@@ -1485,7 +1500,22 @@ public final class BurmeseEngine: @unchecked Sendable {
             sawVirama = true
             let prev = i >= 1 ? scalars[i - 1] : 0
             let twoBack = i >= 2 ? scalars[i - 2] : 0
-            if prev == 0x103A && twoBack != 0x1004 {
+            let nextScalar = i + 1 < scalars.count ? scalars[i + 1] : 0
+            guard let nextCh = Unicode.Scalar(nextScalar).map(Character.init) else {
+                return false
+            }
+            let upper: Character
+            if prev == 0x103A {
+                guard twoBack == 0x1004 else { return false }
+                upper = Character(Unicode.Scalar(0x1004)!)
+            } else {
+                guard let ch = Unicode.Scalar(prev).map(Character.init),
+                      Grammar.stackableConsonants.contains(ch) else {
+                    return false
+                }
+                upper = ch
+            }
+            guard Grammar.isValidStack(upper: upper, lower: nextCh) else {
                 return false
             }
         }
