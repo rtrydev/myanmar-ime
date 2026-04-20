@@ -823,5 +823,59 @@ public enum EngineSuite {
             ctx.assertFalse(leaked, detail: "min+galarpar top must remain ASCII-free; got '\(top)'")
             ctx.assertFalse(top.isEmpty, detail: "min+galarpar must still produce a candidate")
         },
+
+        // MARK: - Disambiguation UX (task 07)
+        //
+        // Three cases where the parser silently collapses an ambiguous
+        // input into a single interpretation. Each expects a visible
+        // alternative in the candidate panel.
+
+        TestCase("engine_disambig_yka_exposesStrippedAlternative") { ctx in
+            let state = BurmeseEngine().update(buffer: "yka", context: [])
+            let surfaces = state.candidates.map(\.surface)
+            ctx.assertTrue(surfaces.contains("\u{101A}\u{1000}"),
+                           detail: "top promoted form ယက must remain; got \(surfaces)")
+            ctx.assertTrue(surfaces.contains("\u{1000}"),
+                           detail: "stripped alternative က must appear; got \(surfaces)")
+        },
+
+        TestCase("engine_disambig_lla_retroflexAmongTop3") { ctx in
+            let state = BurmeseEngine().update(buffer: "lla", context: [])
+            let top3 = state.candidates.prefix(3).map(\.surface)
+            ctx.assertTrue(top3.contains("\u{1020}"),
+                           detail: "retroflex ဠ must appear in top 3 for lla; got \(top3)")
+        },
+
+        TestCase("engine_disambig_ninPlusKa_hasNonKinziAlternative") { ctx in
+            let state = BurmeseEngine().update(buffer: "nin+ka", context: [])
+            let kinziMarker: [UInt32] = [0x1004, 0x103A, 0x1039]
+            let hasNonKinzi = state.candidates.contains { c in
+                let scalars = c.surface.unicodeScalars.map(\.value)
+                for i in 0...(max(0, scalars.count - kinziMarker.count)) {
+                    if Array(scalars[i..<(i + kinziMarker.count)]) == kinziMarker {
+                        return false
+                    }
+                }
+                return !scalars.isEmpty
+            }
+            ctx.assertTrue(hasNonKinzi,
+                           detail: "nin+ka must expose at least one non-kinzi candidate; got \(state.candidates.map(\.surface))")
+        },
+
+        TestCase("engine_disambig_minPlusKa_kinziStaysRank1") { ctx in
+            let state = BurmeseEngine().update(buffer: "min+ka", context: [])
+            let top = state.candidates.first?.surface ?? ""
+            ctx.assertEqual(top.unicodeScalars.map(\.value),
+                            [0x1019, 0x1004, 0x103A, 0x1039, 0x1000],
+                            "min+ka must still produce မင်္က at rank 1")
+        },
+
+        TestCase("engine_disambig_kinPlusGa_kinziStaysRank1") { ctx in
+            let state = BurmeseEngine().update(buffer: "kin+ga", context: [])
+            let top = state.candidates.first?.surface ?? ""
+            ctx.assertEqual(top.unicodeScalars.map(\.value),
+                            [0x1000, 0x1004, 0x103A, 0x1039, 0x1002],
+                            "kin+ga must still produce ကင်္ဂ at rank 1")
+        },
     ])
 }

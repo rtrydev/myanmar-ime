@@ -142,6 +142,12 @@ public enum Romanization {
         .init(roman: "gyw", consonant: Myanmar.ga,  medials: [Myanmar.medialYa, Myanmar.medialWa]),
         .init(roman: "sh",  consonant: Myanmar.ra,  medials: [Myanmar.medialHa]),
         .init(roman: "shw", consonant: Myanmar.ra,  medials: [Myanmar.medialHa, Myanmar.medialWa]),
+        // Doubled consonant shortcut: `ll` surfaces ဠ (retroflex la) as
+        // an alternative to the rank-1 `la la` literal pair. Users who
+        // type `lla` expecting a single retroflex consonant then pick
+        // it from the panel; user-history promotes it over the literal
+        // pair after that first pick.
+        .init(roman: "ll",  consonant: Myanmar.lla, medials: []),
     ]
 
     /// Lookup: roman → medial character.

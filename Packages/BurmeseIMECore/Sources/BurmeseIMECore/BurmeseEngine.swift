@@ -675,6 +675,48 @@ public final class BurmeseEngine: @unchecked Sendable {
         grammarCandidates = pruneByLmMargin(grammarCandidates, keyPath: \.lmLogProb)
         grammarCandidates = promoteAliasAlternate(grammarCandidates)
 
+        // Expose disambiguation alternatives that the DP never emits
+        // once the primary parse dominates:
+        //
+        //   * `<C>in+<C>` is a kinzi signal from the user, so the kinzi
+        //     parse stays at rank 1 but the non-kinzi segmentation
+        //     (`<C>in` + `<C>`) is injected as a lower-ranked option.
+        //   * `<y|w|r|h><C>` promotes the leading medial-letter into
+        //     an onset consonant silently; inject the buffer-minus-
+        //     leading-letter parse so the user sees the "medial
+        //     stranded" alternative.
+        if !effectiveWindowed {
+            let existingSurfaces = Set(grammarCandidates.map { $0.candidate.surface })
+            var altInputs: [String] = []
+            if let dropped = Self.dropKinziPlus(effectiveParseInput) { altInputs.append(dropped) }
+            if let stripped = Self.stripLeadingMedialPromotion(effectiveParseInput) {
+                altInputs.append(stripped)
+            }
+            var seenExtras = existingSurfaces
+            for alt in altInputs {
+                let altParses = parser.parseCandidates(alt, maxResults: 2)
+                for parse in altParses where !Self.hasInterleavedLatin(parse.output)
+                    && !seenExtras.contains(parse.output) {
+                    seenExtras.insert(parse.output)
+                    grammarCandidates.append(RankedGrammarCandidate(
+                        candidate: Candidate(
+                            surface: parse.output,
+                            reading: parse.reading,
+                            source: .grammar,
+                            score: Double(parse.score)
+                        ),
+                        legalityScore: parse.legalityScore,
+                        aliasCost: parse.aliasCost,
+                        parserScore: parse.score,
+                        structureCost: parse.structureCost,
+                        syllableCount: parse.syllableCount,
+                        rarityPenalty: parse.rarityPenalty,
+                        lmLogProb: scoreSurfaceCached(parse.output, context: context, cache: &lmCache)
+                    ))
+                }
+            }
+        }
+
         // Skip lexicon lookup entirely when a frozen prefix is in play:
         // multi-word lexicon hits past the window boundary aren't useful,
         // and the prefix lookup would be dominated by the cached output.
@@ -1647,6 +1689,40 @@ public final class BurmeseEngine: @unchecked Sendable {
             if scalars[i + 2].value == 0x1039 { return true }
         }
         return false
+    }
+
+    /// Return `input` with the leading `y`/`w`/`r`/`h` dropped when it
+    /// is immediately followed by a non-vowel letter (i.e. the parser
+    /// promoted a stranded medial letter into an onset consonant
+    /// without a separating `a`). Returns nil when the leading letter
+    /// is safely paired with a vowel, so established parses like
+    /// `hmar` → မှာ are untouched.
+    private static func stripLeadingMedialPromotion(_ input: String) -> String? {
+        let chars = Array(input)
+        guard chars.count >= 2 else { return nil }
+        let lead = chars[0]
+        guard lead == "y" || lead == "w" || lead == "r" || lead == "h" else { return nil }
+        let next = chars[1]
+        let vowelChars: Set<Character> = ["a", "e", "i", "o", "u"]
+        guard next.isLetter, !vowelChars.contains(next) else { return nil }
+        return String(chars.dropFirst())
+    }
+
+    /// Return `input` with the first kinzi-forming `+` removed, or nil if
+    /// the input has no such `+`. A kinzi-forming `+` is preceded by
+    /// `in` (i.e. the kinzi-vowel reading) and followed by a
+    /// consonant-starting letter, matching the `<...>in+<C>` shape.
+    private static func dropKinziPlus(_ input: String) -> String? {
+        let chars = Array(input)
+        guard chars.count >= 4 else { return nil }
+        for i in 2..<chars.count - 1 {
+            guard chars[i] == "+" else { continue }
+            guard chars[i - 2] == "i", chars[i - 1] == "n" else { continue }
+            let next = chars[i + 1]
+            guard next.isLetter else { continue }
+            return String(chars[..<i] + chars[(i + 1)...])
+        }
+        return nil
     }
 
     private static func hasInterleavedLatin(_ output: String) -> Bool {
