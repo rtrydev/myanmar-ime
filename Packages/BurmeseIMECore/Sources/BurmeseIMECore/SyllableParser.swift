@@ -1030,21 +1030,38 @@ public final class SyllableParser: Sendable {
                 markerPenalty: markerPenaltyForReading[rhs.reading] ?? Int.max
             )
         }
-        return sortedFinal.prefix(limit).map { m in
-            let adjusted = adjustLeadingVowel(m.output)
+        // Materialize SyllableParse for the top window (oversampled so a
+        // post-DP legality demotion — virama/asat/indep-vowel checks below
+        // — can still surface a clean alternative when the score-best
+        // parse is illegal after demotion).
+        let demotionWindow = max(limit, 4)
+        let mapped: [SyllableParse] = sortedFinal.prefix(demotionWindow).map { m in
+            let adjustedRaw = adjustLeadingVowel(m.output)
+            let adjusted = Self.remapEmptyToInherent(adjustedRaw)
             let viramaClean = !Self.hasMalformedViramaStack(adjusted)
             let asatClean = !Self.hasAsatWithoutConsonantBase(adjusted)
+            let indepVowelClean = !Self.hasDepSignAfterIndependentVowel(adjusted)
+            let legal = m.state.isLegal && viramaClean && asatClean && indepVowelClean
             return SyllableParse(
                 output: adjusted,
                 reading: m.reading,
                 aliasCost: m.state.aliasCost,
-                legalityScore: (m.state.isLegal && viramaClean && asatClean) ? m.state.legalityScore : 0,
+                legalityScore: legal ? m.state.legalityScore : 0,
                 score: m.state.score,
                 structureCost: m.state.structureCost,
                 syllableCount: m.state.syllableCount,
                 rarityPenalty: rarityFor[adjusted] ?? 0
             )
         }
+        // Stable re-sort: legal parses (legalityScore > 0) outrank demoted
+        // ones; original DP-rank order is preserved within each tier.
+        let legalFirst = mapped.enumerated().sorted { lhs, rhs in
+            let lhsLegal = lhs.element.legalityScore > 0
+            let rhsLegal = rhs.element.legalityScore > 0
+            if lhsLegal != rhsLegal { return lhsLegal }
+            return lhs.offset < rhs.offset
+        }.map { $0.element }
+        return Array(legalFirst.prefix(limit))
     }
 
     /// Returns true if `output` contains a U+1039 (virama) whose left
@@ -1074,6 +1091,37 @@ public final class SyllableParser: Sendable {
             if !isConsonantBase { return true }
         }
         return false
+    }
+
+    /// Returns true if `output` contains an independent vowel
+    /// (U+1023–U+102A) immediately followed by a dependent vowel sign
+    /// (U+102B–U+1032). Independent vowels already encode a full vowel
+    /// cluster, so attaching another dependent vowel on top is
+    /// orthographically invalid. Tone marks (U+1037/U+1038) and anusvara
+    /// (U+1036) remain valid suffixes and are intentionally not matched.
+    /// A second independent vowel is allowed because it represents a new
+    /// syllable (e.g. ဪဤ across a tone-marked boundary).
+    private static func hasDepSignAfterIndependentVowel(_ output: String) -> Bool {
+        let scalars = Array(output.unicodeScalars)
+        guard scalars.count >= 2 else { return false }
+        for i in 0..<(scalars.count - 1) {
+            let v = scalars[i].value
+            guard v >= 0x1023 && v <= 0x102A else { continue }
+            let next = scalars[i + 1].value
+            if next >= 0x102B && next <= 0x1032 { return true }
+        }
+        return false
+    }
+
+    /// If `output` is empty, returns U+1021 (`အ`) so a bare-vowel reading
+    /// like `a` / `aa` / `aaa` produces a visible inherent-consonant
+    /// candidate instead of an empty surface. Empty surfaces would
+    /// otherwise reach the candidate panel as blank entries.
+    private static func remapEmptyToInherent(_ output: String) -> String {
+        if output.isEmpty {
+            return String(Unicode.Scalar(0x1021)!)
+        }
+        return output
     }
 
     /// Returns true if `output` contains a U+103A (asat) whose base does

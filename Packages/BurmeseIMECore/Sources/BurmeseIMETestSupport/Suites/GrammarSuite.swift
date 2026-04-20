@@ -686,6 +686,107 @@ public enum GrammarSuite {
                 "pa*: asat on base consonant must remain legal")
         },
 
+        // MARK: - Independent Vowel Finality (task 03)
+        //
+        // Independent vowels (U+1023–U+102A) already encode a full vowel
+        // cluster. A dependent vowel sign (U+102B–U+1032) immediately after
+        // one is orthographically invalid. Tone marks (U+1037/U+1038) and
+        // anusvara (U+1036) are allowed. A second independent vowel is
+        // permitted because it begins a new syllable (e.g. ဪဤ).
+
+        TestCase("parse_indepVowelPlusVowelSign_ay2i_isIllegal") { ctx in
+            let result = SyllableParser().parseCandidates("ay2i", maxResults: 1).first
+            let scalars = result?.output.unicodeScalars.map(\.value) ?? []
+            if scalars.count >= 2,
+               scalars[0] >= 0x1023 && scalars[0] <= 0x102A,
+               scalars[1] >= 0x102B && scalars[1] <= 0x1032 {
+                ctx.assertEqual(result?.legalityScore ?? -1, 0,
+                    "ay2i: dependent vowel after independent vowel must score 0")
+            } else {
+                ctx.assertTrue(true)
+            }
+        },
+
+        TestCase("parse_indepVowelPlusVowelSign_u2i_isIllegal") { ctx in
+            let result = SyllableParser().parseCandidates("u2i", maxResults: 1).first
+            let scalars = result?.output.unicodeScalars.map(\.value) ?? []
+            if scalars.count >= 2,
+               scalars[0] >= 0x1023 && scalars[0] <= 0x102A,
+               scalars[1] >= 0x102B && scalars[1] <= 0x1032 {
+                ctx.assertEqual(result?.legalityScore ?? -1, 0,
+                    "u2i: dependent vowel after independent vowel must score 0")
+            } else {
+                ctx.assertTrue(true)
+            }
+        },
+
+        TestCase("parse_indepVowelPlusVowelSign_ay2u_isIllegal") { ctx in
+            let result = SyllableParser().parseCandidates("ay2u", maxResults: 1).first
+            let scalars = result?.output.unicodeScalars.map(\.value) ?? []
+            if scalars.count >= 2,
+               scalars[0] >= 0x1023 && scalars[0] <= 0x102A,
+               scalars[1] >= 0x102B && scalars[1] <= 0x1032 {
+                ctx.assertEqual(result?.legalityScore ?? -1, 0,
+                    "ay2u: dependent vowel after independent vowel must score 0")
+            } else {
+                ctx.assertTrue(true)
+            }
+        },
+
+        TestCase("engine_bareA_remapsToInherentConsonant") { ctx in
+            let engine = BurmeseEngine()
+            let result = engine.update(buffer: "a", context: [])
+            ctx.assertFalse(result.candidates.isEmpty,
+                            detail: "bare 'a' must produce at least one candidate")
+            for c in result.candidates {
+                ctx.assertFalse(c.surface.isEmpty,
+                    detail: "bare 'a' must not produce empty-surface candidate")
+            }
+            let top = result.candidates.first?.surface ?? ""
+            let scalars = top.unicodeScalars.map(\.value)
+            ctx.assertEqual(scalars, [0x1021],
+                            "bare 'a' top candidate must be inherent consonant အ (U+1021)")
+        },
+
+        TestCase("engine_bareAa_remapsToInherentConsonant") { ctx in
+            let engine = BurmeseEngine()
+            let result = engine.update(buffer: "aa", context: [])
+            ctx.assertFalse(result.candidates.isEmpty,
+                            detail: "bare 'aa' must produce at least one candidate")
+            for c in result.candidates {
+                ctx.assertFalse(c.surface.isEmpty,
+                    detail: "bare 'aa' must not produce empty-surface candidate")
+            }
+        },
+
+        TestCase("engine_bareAaa_remapsToInherentConsonant") { ctx in
+            let engine = BurmeseEngine()
+            let result = engine.update(buffer: "aaa", context: [])
+            ctx.assertFalse(result.candidates.isEmpty,
+                            detail: "bare 'aaa' must produce at least one candidate")
+            for c in result.candidates {
+                ctx.assertFalse(c.surface.isEmpty,
+                    detail: "bare 'aaa' must not produce empty-surface candidate")
+            }
+        },
+
+        // Regression: tone-only modifiers after an independent vowel stay legal.
+        TestCase("parse_indepVowelPlusToneMark_u2Tone_isLegal") { ctx in
+            let result = SyllableParser().parseCandidates("u2:", maxResults: 1).first
+            ctx.assertGreaterThan(result?.legalityScore ?? 0, 0,
+                "u2: must remain legal — tone mark after independent vowel is allowed")
+            let scalars = result?.output.unicodeScalars.map(\.value) ?? []
+            ctx.assertEqual(scalars, [0x1026, 0x1038])
+        },
+
+        TestCase("parse_indepVowelVariant_ooTone_isLegal") { ctx in
+            let result = SyllableParser().parseCandidates("oo:", maxResults: 1).first
+            ctx.assertGreaterThan(result?.legalityScore ?? 0, 0,
+                "oo: must remain legal")
+            let scalars = result?.output.unicodeScalars.map(\.value) ?? []
+            ctx.assertEqual(scalars, [0x102A])
+        },
+
         // MARK: - Cross-Class Virama Stacks via Vowel Path (task 04)
         //
         // `Grammar.isValidStack` must apply regardless of whether the
