@@ -14,7 +14,6 @@ public final class BurmeseEngine: @unchecked Sendable {
         var candidate: Candidate
         let legalityScore: Int
         let aliasCost: Int
-        let explicitMarkerPenalty: Int
         let parserScore: Int
         let structureCost: Int
         let syllableCount: Int
@@ -423,9 +422,16 @@ public final class BurmeseEngine: @unchecked Sendable {
         // instead of forcing an early commit. Mapping touches only the
         // exact five ASCII punctuation chars — letters the parser dropped
         // into `droppedTail` pass through unchanged.
-        let effectiveTail = burmesePunctuationEnabled
+        let mappedEffectiveTail = burmesePunctuationEnabled
             ? Self.mapPunctuation(rawEffectiveTail)
             : rawEffectiveTail
+        // When the tail begins with an ASCII digit, digits act as transparent
+        // literal separators: letter runs between them still compose. Other
+        // non-composing chars (punctuation) remain hard boundaries that keep
+        // following letters literal.
+        let effectiveTail = tailStartsWithDigit(literalTail, dropped: droppedTail)
+            ? composeLetterRunsInTail(mappedEffectiveTail)
+            : mappedEffectiveTail
 
         // Prefix-stability anchor: when the new buffer extends a
         // previously-rendered one *and* that anchor is mature enough
@@ -484,7 +490,6 @@ public final class BurmeseEngine: @unchecked Sendable {
                     || Romanization.composeLookupKey($0.reading) == preComposeKey
             }
         }()
-        let hasExplicitAliasMarkers = normalized.contains(where: { Romanization.isNumericAliasMarker($0) })
         // Only use anchor-based parse splitting for long buffers where the
         // sliding window is needed. For short buffers (below compositionWindowSize),
         // always do a full-buffer parse so that syllable boundaries can be
@@ -495,7 +500,6 @@ public final class BurmeseEngine: @unchecked Sendable {
         let anchorApplies = priorAnchor != nil
             && !hasExactLexiconMatch
             && normalized.count > compositionWindowSize
-            && !hasExplicitAliasMarkers
         // Latest (deepest) anchor, regardless of tail-parseability. Used
         // during window-fallback to promote candidates that preserve the
         // full committed surface on screen.
@@ -525,7 +529,7 @@ public final class BurmeseEngine: @unchecked Sendable {
             )]
             parseInput = String(normalized.suffix(normalized.count - anchor.normalized.count))
             windowed = true
-        } else if normalized.count > compositionWindowSize && !hasExplicitAliasMarkers {
+        } else if normalized.count > compositionWindowSize {
             // Prefer reusing a previously chosen frozen prefix so the
             // "committed" portion the user sees doesn't shift as they
             // type. The cached prefix is reused verbatim when it is
@@ -604,10 +608,6 @@ public final class BurmeseEngine: @unchecked Sendable {
                         ),
                         legalityScore: parse.legalityScore,
                         aliasCost: parse.aliasCost,
-                        explicitMarkerPenalty: Self.explicitMarkerPenalty(
-                            requested: effectiveParseInput,
-                            candidate: parse.reading
-                        ),
                         parserScore: parse.score,
                         structureCost: parse.structureCost,
                         syllableCount: parse.syllableCount,
@@ -627,10 +627,6 @@ public final class BurmeseEngine: @unchecked Sendable {
                     ),
                     legalityScore: parse.legalityScore,
                     aliasCost: parse.aliasCost,
-                    explicitMarkerPenalty: Self.explicitMarkerPenalty(
-                        requested: effectiveParseInput,
-                        candidate: parse.reading
-                    ),
                     parserScore: parse.score,
                     structureCost: parse.structureCost,
                     syllableCount: parse.syllableCount,
@@ -911,31 +907,16 @@ public final class BurmeseEngine: @unchecked Sendable {
         }
 
         // Attach digit prefix and literal tail to each candidate surface.
-        // Numeric alias markers admitted into the composable prefix are
-        // stripped by `Romanization.normalize`; if the winning candidate's
-        // canonical reading does not actually use a trailing marker, reattach
-        // that raw suffix so legacy literal-digit behavior (e.g. `thar2`) stays
-        // intact.
-        let hasAffixes = !digitPrefix.isEmpty
-            || !effectiveTail.isEmpty
-            || !Self.trailingNumericAliasMarkers(in: composable).isEmpty
+        let hasAffixes = !digitPrefix.isEmpty || !effectiveTail.isEmpty
         let mergedWithAffixes: [Candidate]
         if !hasAffixes {
             mergedWithAffixes = merged
         } else {
             let burmesePrefix = Self.arabicToBurmeseDigits(digitPrefix)
-            var aliasSurfaceCache: [String: String?] = [:]
             var expanded: [Candidate] = []
             var seen: Set<String> = []
             for candidate in merged {
-                let candidateTail =
-                    preservedTrailingNumericAliasMarkers(
-                        from: composable,
-                        reading: candidate.reading,
-                        surface: candidate.surface,
-                        aliasSurfaceCache: &aliasSurfaceCache
-                    )
-                    + effectiveTail
+                let candidateTail = effectiveTail
                 let hasDigitAffixes = Self.containsDigit(digitPrefix) || Self.containsDigit(candidateTail)
                 if digitPrefix.isEmpty && candidateTail.isEmpty {
                     if seen.insert(candidate.surface).inserted {
@@ -1396,16 +1377,7 @@ public final class BurmeseEngine: @unchecked Sendable {
         }
         let topParse = parser.parseCandidates(probe, maxResults: 1).first
         let output = topParse?.output ?? probe
-        var aliasSurfaceCache: [String: String?] = [:]
-        let preservedAliasTail = topParse.map {
-            preservedTrailingNumericAliasMarkers(
-                from: composable,
-                reading: $0.reading,
-                surface: output,
-                aliasSurfaceCache: &aliasSurfaceCache
-            )
-        } ?? ""
-        return digitPart + output + preservedAliasTail + dropped + literal
+        return digitPart + output + dropped + literal
     }
 
     /// Strip trailing mapped-punctuation characters (`.`, `,`, `!`, `?`, `;`)
@@ -1425,6 +1397,58 @@ public final class BurmeseEngine: @unchecked Sendable {
             stripped.removeFirst()
         }
         return (kept, stripped)
+    }
+
+    private static func isAsciiDigit(_ ch: Character) -> Bool {
+        guard let scalar = ch.unicodeScalars.first, ch.unicodeScalars.count == 1 else {
+            return false
+        }
+        return scalar.value >= 0x30 && scalar.value <= 0x39
+    }
+
+    /// True when the tail begins with an ASCII digit. Digits at the very
+    /// start of the tail signal "digit-separator mode" — letter runs
+    /// sandwiched between digits should still compose. Other punctuation
+    /// at the tail head means the user has committed to a literal tail
+    /// and any following letters stay verbatim.
+    private func tailStartsWithDigit(_ literalTail: String, dropped droppedTail: String) -> Bool {
+        if let first = droppedTail.first { return Self.isAsciiDigit(first) }
+        if let first = literalTail.first { return Self.isAsciiDigit(first) }
+        return false
+    }
+
+    /// Compose any letter-runs embedded in the tail via single-best parse.
+    /// Non-letter characters (digits, already-mapped punctuation) pass
+    /// through unchanged; the caller handles digit→Myanmar conversion on
+    /// the primary candidate variant.
+    private func composeLetterRunsInTail(_ tail: String) -> String {
+        guard !tail.isEmpty else { return tail }
+        var result = ""
+        var letterRun = ""
+        for ch in tail {
+            if Romanization.composingCharacters.contains(ch) {
+                letterRun.append(ch)
+            } else {
+                if !letterRun.isEmpty {
+                    result += composedLetterRunSurface(letterRun)
+                    letterRun = ""
+                }
+                result.append(ch)
+            }
+        }
+        if !letterRun.isEmpty {
+            result += composedLetterRunSurface(letterRun)
+        }
+        return result
+    }
+
+    private func composedLetterRunSurface(_ run: String) -> String {
+        let normalized = Self.normalizeForParser(run)
+        guard !normalized.isEmpty else { return run }
+        guard let parse = parser.parseCandidates(normalized, maxResults: 1).first else {
+            return run
+        }
+        return Self.correctAaShape(parse.output)
     }
 
     /// Replace ASCII digits (0-9) with Myanmar digits (U+1040–U+1049),
@@ -1449,77 +1473,8 @@ public final class BurmeseEngine: @unchecked Sendable {
         return (buffer, "")
     }
 
-    private static func trailingNumericAliasMarkers(in input: String) -> String {
-        var suffix = ""
-        var cursor = input.endIndex
-        while cursor > input.startIndex {
-            let previous = input.index(before: cursor)
-            let character = input[previous]
-            guard Romanization.isNumericAliasMarker(character) else { break }
-            suffix = String(character) + suffix
-            cursor = previous
-        }
-        return suffix
-    }
-
     private static func normalizeForParser(_ input: String) -> String {
-        String(input.lowercased().filter {
-            Romanization.composingCharacters.contains($0) || Romanization.isNumericAliasMarker($0)
-        })
-    }
-
-    private struct NumericMarkerPlacement: Hashable {
-        let offset: Int
-        let marker: Character
-    }
-
-    private static func numericMarkerPlacements(in reading: String) -> Set<NumericMarkerPlacement> {
-        var placements: Set<NumericMarkerPlacement> = []
-        var offset = 0
-        for character in reading {
-            if Romanization.isNumericAliasMarker(character) {
-                placements.insert(NumericMarkerPlacement(offset: offset, marker: character))
-            } else {
-                offset += 1
-            }
-        }
-        return placements
-    }
-
-    private static func explicitMarkerPenalty(requested: String, candidate: String) -> Int {
-        guard requested.contains(where: { Romanization.isNumericAliasMarker($0) }) else {
-            return 0
-        }
-        let requestedPlacements = numericMarkerPlacements(in: requested)
-        let candidatePlacements = numericMarkerPlacements(in: candidate)
-        return requestedPlacements.symmetricDifference(candidatePlacements).count
-    }
-
-    private func preservedTrailingNumericAliasMarkers(
-        from rawComposable: String,
-        reading: String,
-        surface: String,
-        aliasSurfaceCache: inout [String: String?]
-    ) -> String {
-        let rawSuffix = Self.trailingNumericAliasMarkers(in: rawComposable)
-        guard !rawSuffix.isEmpty else { return "" }
-        let readingSuffix = Self.trailingNumericAliasMarkers(in: reading)
-        if rawSuffix != readingSuffix {
-            return rawSuffix
-        }
-
-        let aliasReading = Romanization.aliasReading(reading)
-        guard aliasReading != reading else { return "" }
-
-        if let cached = aliasSurfaceCache[aliasReading] {
-            return cached == surface ? rawSuffix : ""
-        }
-
-        let aliasSurface = parser.parseCandidates(aliasReading, maxResults: 1).first.map {
-            Self.correctAaShape($0.output)
-        }
-        aliasSurfaceCache[aliasReading] = aliasSurface
-        return aliasSurface == surface ? rawSuffix : ""
+        String(input.lowercased().filter { Romanization.composingCharacters.contains($0) })
     }
 
     private static func hasOnlyCleanViramaStacks(_ parse: SyllableParse) -> Bool {
@@ -1564,16 +1519,13 @@ public final class BurmeseEngine: @unchecked Sendable {
     }
 
     /// Split a buffer into its leading run of composing characters and the
-    /// remainder (starting at the first non-composing character). Numeric
-    /// alias markers (`2`/`3`) are admitted into the provisional composing
-    /// run even though `Romanization.normalize` strips them later; this keeps
-    /// digit-disambiguated keys available to the parser long enough to pick
-    /// the intended canonical reading before any unused trailing marker is
-    /// reattached as literal text.
+    /// remainder (starting at the first non-composing character). ASCII
+    /// digits peel off as literal tail — they are never consumed as
+    /// variant-disambiguation markers on the user→parser path. Variants
+    /// that share a reading are selected from the candidate panel.
     private static func splitComposablePrefix(_ buffer: String) -> (composable: String, literal: String) {
         if let firstNonComposing = buffer.firstIndex(where: {
             !Romanization.composingCharacters.contains($0)
-                && !Romanization.isNumericAliasMarker($0)
         }) {
             return (String(buffer[..<firstNonComposing]), String(buffer[firstNonComposing...]))
         }
@@ -1602,9 +1554,6 @@ public final class BurmeseEngine: @unchecked Sendable {
         // expects as top-1. Anchor stability depends on this.
         if lhs.syllableCount != rhs.syllableCount {
             return lhs.syllableCount < rhs.syllableCount
-        }
-        if lhs.explicitMarkerPenalty != rhs.explicitMarkerPenalty {
-            return lhs.explicitMarkerPenalty < rhs.explicitMarkerPenalty
         }
         if lhs.legalityScore != rhs.legalityScore {
             return lhs.legalityScore > rhs.legalityScore

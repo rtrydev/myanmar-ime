@@ -74,6 +74,24 @@ Users type a base reading (`kyar`, `thar`) and choose among grammar and
 lexicon candidates such as `ကြား` / `ကျား` or `သာ` / `သါ` from the
 candidate panel.
 
+Several Burmese letters share a reading — တ/ဋ both sound as `t`,
+လ/ဠ as `l`, ဥ/ဦ as `oo`, ပ/ဋ as `p`, ထ/ဌ as `ht`, သ/ဿ as `th`, and so
+on. **The user types the digit-less reading;** both (or all) variants
+appear as separate entries in the candidate panel, ranked by lexicon
+frequency and LM context. Typing `ta` surfaces တာ as the top candidate
+and ဋ as an alternate; the user picks whichever fits. Commits are
+remembered per alias key so the next same-reading input promotes the
+previous pick.
+
+ASCII digits typed by the user are never variant selectors — they are
+literal digits. `min+galar2par2` renders as `မင်္ဂလာ၂ပါ၂`, with
+Burmese digit `၂` inserted at the positions the user typed `2` (and
+the digit-less ASCII form offered as an alternate candidate). The
+`2` / `3` suffixes visible in internal rule tables (`t2`, `p2`, `oo2`, …)
+are code-internal keys used to distinguish variants that share a
+reading; they are **not** part of the romanization scheme exposed to
+the user.
+
 ### Hybrid Burmese Romanization
 The romanization scheme maps 33 base consonants × medial combinations ×
 97 vowel/final tokens. The structural encoding follows the pattern:

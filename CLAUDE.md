@@ -256,6 +256,46 @@ combines: orthographic legality (hard filter) → alias cost → LM log-prob →
 parser tie-breaker. The LM `.bin` and the SQLite lexicon are produced in
 one pass by `Packages/BurmeseIMECore/Tools/corpus_builder/` so their vocabularies stay aligned.
 
+### Variant disambiguation and the `2` / `3` suffixes
+
+Several Burmese consonants and vowels share a spoken reading — e.g.
+တ/ဋ both read as `t`, ပ/ဋ both read as `p`, လ/ဠ both read as `l`,
+ဥ/ဦ both read as `oo`, အ/ဧ both read as `a`. `Romanization.swift`
+disambiguates these **internally** by giving the variant entries a
+numeric suffix in the rule key:
+
+| Digit-less key | Myanmar | Suffixed key | Myanmar (variant) |
+|---|---|---|---|
+| `t` | တ | `t2` | ဋ |
+| `p` | ပ | `p2` | ဋ |
+| `l` | လ | `l2` | ဠ |
+| `oo` | ဥ | `oo2` | ဦ |
+| `aa` | အာ | `aa2` | အါ |
+
+These suffixes are **not part of the user-facing romanization scheme.**
+Users type without digits (`ta`, `pa`, `loo`, …), and both variants
+appear in the candidate panel — the common one on top, the rare one
+below, ranked by LM + lexicon frequency. Picking the variant from the
+panel is how the user selects it; on commit, the engine writes the
+surface of the chosen candidate, and `SQLiteUserHistoryStore` records
+the pick so the learned history promotes it next time the same
+digitless reading is typed.
+
+ASCII digits in the user-input buffer are always literal. Typing `2`
+produces Myanmar digit `၂` (with ASCII `2` as an alternate). Typing
+`min+galar2par2` produces `မင်္ဂလာ၂ပါ၂` — the two `၂`s at the
+positions the user typed `2`, not variant disambiguators. The numeric
+suffixes appear only inside:
+
+- `Romanization.consonantRules` / `vowelRules` rule keys (internal)
+- `ReverseRomanizer` output when there is no canonical digit-less
+  reading for an irregular form (used by `LexiconBuilder` to populate
+  `reading_alias_index`)
+- SQLite `reading_alias_index.alias_reading` rows compiled from
+  reverse-romanized readings
+
+The user→parser path must never interpret a digit as a variant selector.
+
 ## Working in this repo
 
 - Core engine changes: edit under `Packages/BurmeseIMECore/Sources/BurmeseIMECore/`,

@@ -244,6 +244,39 @@ public enum EngineSuite {
                            "hasArabicVariant")
         },
 
+        // Digits in user input are literal at the position typed, regardless
+        // of whether they happen to align with an internal alias key. See
+        // tasks/01-digits-must-be-literal-in-user-input.md.
+        TestCase("digits_midBuffer_areLiteralNotAliasDisambiguators") { ctx in
+            let engine = BurmeseEngine()
+            let state = engine.update(buffer: "min+galar2par2", context: [])
+            ctx.assertEqual(
+                state.candidates.first?.surface ?? "",
+                "\u{1019}\u{1004}\u{103A}\u{1039}\u{1002}\u{101C}\u{102C}\u{1042}\u{1015}\u{102B}\u{1042}",
+                "min+galar2par2_top"
+            )
+        },
+
+        TestCase("digits_noOpAliasKeyStillRenderedAsLiteralDigit") { ctx in
+            let engine = BurmeseEngine()
+            let state = engine.update(buffer: "pa2", context: [])
+            ctx.assertEqual(
+                state.candidates.first?.surface ?? "",
+                "\u{1015}\u{1042}",
+                "pa2_top"
+            )
+        },
+
+        TestCase("digits_trailingLiteralAfterLexiconMatch") { ctx in
+            let engine = BurmeseEngine()
+            let state = engine.update(buffer: "min+galarpar2", context: [])
+            ctx.assertEqual(
+                state.candidates.first?.surface ?? "",
+                "\u{1019}\u{1004}\u{103A}\u{1039}\u{1002}\u{101C}\u{102C}\u{1015}\u{102B}\u{1042}",
+                "min+galarpar2_top"
+            )
+        },
+
         TestCase("commit_preservesTrailingDigits") { ctx in
             let engine = BurmeseEngine()
             let state = engine.update(buffer: "min:123", context: [])
@@ -256,16 +289,6 @@ public enum EngineSuite {
                            detail: "Got: \(committed)")
             ctx.assertTrue(state.candidates.contains { $0.surface.hasSuffix("123") },
                            "arabicVariant")
-        },
-
-        TestCase("digitDisambiguator_beforeStackDoesNotBreakComposablePrefix") { ctx in
-            let state = BurmeseEngine().update(buffer: "thate2+pa", context: [])
-            let top = state.candidates.first?.surface ?? ""
-            ctx.assertEqual(
-                top,
-                "\u{101E}\u{102D}\u{1015}\u{1039}\u{1015}",
-                "thate2+pa_topSurface"
-            )
         },
 
         TestCase("update_candidatesIncludeTrailingDigits") { ctx in

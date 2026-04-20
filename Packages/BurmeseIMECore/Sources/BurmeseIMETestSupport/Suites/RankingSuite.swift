@@ -233,29 +233,28 @@ public enum RankingSuite {
             )
         })
 
-        // MARK: - Issue D: digit-disambiguated independent vowels
+        // MARK: - Issue D: standalone independent vowels from digitless input
+        //
+        // Digits are literal in user input (see tasks/01). Users type the
+        // digitless form and the engine's grammar-legality filter promotes
+        // the standalone-vowel variant (internally keyed `u2`, `u2.`,
+        // `ay2`) to top-1 because the base rule produces a medial form
+        // that is illegal standalone.
 
-        cases.append(TestCase("issueD_parserStandaloneIndependentVowelsMatchEngineTop") { ctx in
-            let parser = SyllableParser()
+        cases.append(TestCase("issueD_engineTopSurfacesLegalStandaloneVowel") { ctx in
             let engine = BurmeseEngine()
             let expectations: [(key: String, expected: String)] = [
-                ("u2.", "ဥ"),
-                ("u2", "ဦ"),
-                ("ay2", "ဧ"),
+                ("u.", "ဥ"),
+                ("u", "ဦ"),
+                ("ay", "ဧ"),
             ]
 
             for expectation in expectations {
-                let parserTop = parser.parseCandidates(expectation.key, maxResults: 3).first?.output
                 let engineTop = engine.update(buffer: expectation.key, context: []).candidates.first?.surface
                 ctx.assertEqual(
-                    parserTop ?? "",
-                    expectation.expected,
-                    "parserTop.\(expectation.key)"
-                )
-                ctx.assertEqual(
-                    parserTop ?? "",
                     engineTop ?? "",
-                    "parserMatchesEngine.\(expectation.key)"
+                    expectation.expected,
+                    "engineTop.\(expectation.key)"
                 )
             }
         })
