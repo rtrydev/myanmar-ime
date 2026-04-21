@@ -493,37 +493,59 @@ public enum GrammarSuite {
         // Virama (U+1039) only bonds a base consonant to a base consonant.
         // Attaching it to a dependent vowel sign, independent vowel, or
         // anusvara yields a scalar run no Myanmar shaper renders sensibly.
-        // The top parse for these inputs must have legalityScore = 0 so
-        // any fallback parse without the malformed stack wins.
+        // The top parse must either score as illegal (legalityScore = 0)
+        // or surface without the malformed stack — under Option B the `+`
+        // can degrade to a syllable-break hint when stacking is impossible,
+        // producing a clean non-stacked parse.
 
-        TestCase("parse_viramaAfterAa_marTar_isIllegal") { ctx in
+        TestCase("parse_viramaAfterAa_marTar_noMalformedStack") { ctx in
             let result = SyllableParser().parseCandidates("mar+tar", maxResults: 1).first
-            ctx.assertEqual(result?.legalityScore ?? -1, 0,
-                "mar+tar: virama after U+102C must not score as legal")
+            let scalars = result?.output.unicodeScalars.map(\.value) ?? []
+            let legal = result?.legalityScore ?? -1
+            ctx.assertFalse(
+                scalars.contains(0x1039) && legal > 0,
+                "mar+tar: virama after U+102C must not appear in a legal top parse — scalars=\(scalars.map { String(format: "%04X", $0) }) legal=\(legal)"
+            )
         },
 
-        TestCase("parse_viramaAfterAa_marPa_isIllegal") { ctx in
+        TestCase("parse_viramaAfterAa_marPa_noMalformedStack") { ctx in
             let result = SyllableParser().parseCandidates("mar+pa", maxResults: 1).first
-            ctx.assertEqual(result?.legalityScore ?? -1, 0,
-                "mar+pa: virama after U+102C must not score as legal")
+            let scalars = result?.output.unicodeScalars.map(\.value) ?? []
+            let legal = result?.legalityScore ?? -1
+            ctx.assertFalse(
+                scalars.contains(0x1039) && legal > 0,
+                "mar+pa: virama after U+102C must not appear in a legal top parse — scalars=\(scalars.map { String(format: "%04X", $0) }) legal=\(legal)"
+            )
         },
 
-        TestCase("parse_viramaAfterIndependentVowel_mooPa_isIllegal") { ctx in
+        TestCase("parse_viramaAfterIndependentVowel_mooPa_noMalformedStack") { ctx in
             let result = SyllableParser().parseCandidates("moo+pa", maxResults: 1).first
-            ctx.assertEqual(result?.legalityScore ?? -1, 0,
-                "moo+pa: virama after independent vowel U+1029 must not score as legal")
+            let scalars = result?.output.unicodeScalars.map(\.value) ?? []
+            let legal = result?.legalityScore ?? -1
+            ctx.assertFalse(
+                scalars.contains(0x1039) && legal > 0,
+                "moo+pa: virama after independent vowel U+1029 must not appear in a legal top parse — scalars=\(scalars.map { String(format: "%04X", $0) }) legal=\(legal)"
+            )
         },
 
-        TestCase("parse_viramaAfterAnusvara_thaan3Ka_isIllegal") { ctx in
+        TestCase("parse_viramaAfterAnusvara_thaan3Ka_noMalformedStack") { ctx in
             let result = SyllableParser().parseCandidates("thaan3+ka", maxResults: 1).first
-            ctx.assertEqual(result?.legalityScore ?? -1, 0,
-                "thaan3+ka: virama after anusvara U+1036 must not score as legal")
+            let scalars = result?.output.unicodeScalars.map(\.value) ?? []
+            let legal = result?.legalityScore ?? -1
+            ctx.assertFalse(
+                scalars.contains(0x1039) && legal > 0,
+                "thaan3+ka: virama after anusvara U+1036 must not appear in a legal top parse — scalars=\(scalars.map { String(format: "%04X", $0) }) legal=\(legal)"
+            )
         },
 
-        TestCase("parse_viramaAfterAnusvara_than3Ka_isIllegal") { ctx in
+        TestCase("parse_viramaAfterAnusvara_than3Ka_noMalformedStack") { ctx in
             let result = SyllableParser().parseCandidates("than3+ka", maxResults: 1).first
-            ctx.assertEqual(result?.legalityScore ?? -1, 0,
-                "than3+ka: virama after anusvara U+1036 must not score as legal")
+            let scalars = result?.output.unicodeScalars.map(\.value) ?? []
+            let legal = result?.legalityScore ?? -1
+            ctx.assertFalse(
+                scalars.contains(0x1039) && legal > 0,
+                "than3+ka: virama after anusvara U+1036 must not appear in a legal top parse — scalars=\(scalars.map { String(format: "%04X", $0) }) legal=\(legal)"
+            )
         },
 
         // MARK: - Virama Right-Side Validation (task 01)
@@ -796,55 +818,69 @@ public enum GrammarSuite {
         // `viramaUpper` lookup terminated at `default: nil`, silently
         // disabling the stack-class check. A labial+dental pair like
         // `mar+ta` would then score with positive DP legality.
+        //
+        // Option B (stack-chain task) repurposes the `+` after a plain
+        // vowel as a syllable-break hint when the stack would be
+        // illegal, so the top parse may now score as legal — but the
+        // malformed cross-class virama stack itself must never appear.
 
-        TestCase("parse_viramaViaVowelPath_marTa_crossClass_isIllegal") { ctx in
+        TestCase("parse_viramaViaVowelPath_marTa_crossClass_noMalformedStack") { ctx in
             // m (labial) + aa + virama + t (dental) — cross-class stack.
             let result = SyllableParser().parseCandidates("mar+ta", maxResults: 1).first
-            ctx.assertEqual(result?.legalityScore ?? -1, 0,
-                "mar+ta: labial+dental via vowel path must not score as legal")
+            let scalars = result?.output.unicodeScalars.map(\.value) ?? []
+            let legal = result?.legalityScore ?? -1
+            ctx.assertFalse(
+                scalars.contains(0x1039) && legal > 0,
+                "mar+ta: labial+dental cross-class stack must not appear in a legal top parse — scalars=\(scalars.map { String(format: "%04X", $0) }) legal=\(legal)"
+            )
         },
 
-        TestCase("parse_viramaViaVowelPath_marSa_crossClass_isIllegal") { ctx in
+        TestCase("parse_viramaViaVowelPath_marSa_crossClass_noMalformedStack") { ctx in
             // m (labial) + aa + virama + s (palatal) — cross-class stack.
             let result = SyllableParser().parseCandidates("mar+sa", maxResults: 1).first
-            ctx.assertEqual(result?.legalityScore ?? -1, 0,
-                "mar+sa: labial+palatal via vowel path must not score as legal")
+            let scalars = result?.output.unicodeScalars.map(\.value) ?? []
+            let legal = result?.legalityScore ?? -1
+            ctx.assertFalse(
+                scalars.contains(0x1039) && legal > 0,
+                "mar+sa: labial+palatal cross-class stack must not appear in a legal top parse — scalars=\(scalars.map { String(format: "%04X", $0) }) legal=\(legal)"
+            )
         },
 
-        TestCase("parse_viramaViaVowelPath_karTa_crossClass_isIllegal") { ctx in
+        TestCase("parse_viramaViaVowelPath_karTa_crossClass_noMalformedStack") { ctx in
             // k (velar) + aa + virama + t (dental) — cross-class stack.
             let result = SyllableParser().parseCandidates("kar+ta", maxResults: 1).first
-            ctx.assertEqual(result?.legalityScore ?? -1, 0,
-                "kar+ta: velar+dental via vowel path must not score as legal")
+            let scalars = result?.output.unicodeScalars.map(\.value) ?? []
+            let legal = result?.legalityScore ?? -1
+            ctx.assertFalse(
+                scalars.contains(0x1039) && legal > 0,
+                "kar+ta: velar+dental cross-class stack must not appear in a legal top parse — scalars=\(scalars.map { String(format: "%04X", $0) }) legal=\(legal)"
+            )
         },
 
-        TestCase("parse_viramaViaVowelPath_parTa_crossClass_isIllegal") { ctx in
+        TestCase("parse_viramaViaVowelPath_parTa_crossClass_noMalformedStack") { ctx in
             // p (labial) + aa + virama + t (dental) — cross-class stack.
             let result = SyllableParser().parseCandidates("par+ta", maxResults: 1).first
-            ctx.assertEqual(result?.legalityScore ?? -1, 0,
-                "par+ta: labial+dental via vowel path must not score as legal")
+            let scalars = result?.output.unicodeScalars.map(\.value) ?? []
+            let legal = result?.legalityScore ?? -1
+            ctx.assertFalse(
+                scalars.contains(0x1039) && legal > 0,
+                "par+ta: labial+dental cross-class stack must not appear in a legal top parse — scalars=\(scalars.map { String(format: "%04X", $0) }) legal=\(legal)"
+            )
         },
 
         // Same-class virama via vowel path is still malformed because a
-        // virama cannot bond to a dependent vowel sign. This is task 02's
-        // territory but reconfirmed here: the DP must reject the stack
-        // transition outright rather than relying on post-hoc scrubbers.
-        TestCase("parse_viramaViaVowelPath_marPa_sameClassButMalformed_isIllegal") { ctx in
+        // virama cannot bond to a dependent vowel sign. Under Option B
+        // the `+` degrades to a syllable-break hint, so the top parse
+        // may surface as a legal multi-syllable sequence — but the
+        // malformed stack itself must never appear in a legal output.
+        TestCase("parse_viramaViaVowelPath_marPa_sameClassButMalformed_noMalformedStack") { ctx in
             let result = SyllableParser().parseCandidates("mar+pa", maxResults: 1).first
-            ctx.assertEqual(result?.legalityScore ?? -1, 0,
-                "mar+pa: virama after dependent vowel sign must not score as legal")
-            // The DP must have rejected the transition — legality-zero paths
-            // accumulate a -10000 scoreMatch penalty. A residual positive
-            // score means the DP took a different path that dodged the
-            // virama; we only reject paths that actually form the stack.
-            if let out = result?.output,
-               out.unicodeScalars.map(\.value).contains(0x1039) {
-                ctx.assertTrue(
-                    (result?.score ?? 0) < -1000,
-                    detail: "mar+pa: DP must penalise the virama-after-vowel-sign path; "
-                        + "got score=\(result?.score ?? 0)"
-                )
-            }
+            let scalars = result?.output.unicodeScalars.map(\.value) ?? []
+            let legal = result?.legalityScore ?? -1
+            ctx.assertFalse(
+                scalars.contains(0x1039) && legal > 0,
+                "mar+pa: virama after dependent vowel sign must not appear in a legal top parse — scalars=\(scalars.map { String(format: "%04X", $0) }) legal=\(legal)"
+            )
         },
 
         TestCase("parse_viramaViaVowelPath_kinzi_minKa_legal") { ctx in
@@ -1077,6 +1113,70 @@ public enum GrammarSuite {
                     previous = v
                 }
             }
+        },
+
+        // MARK: - Stack Chain Truncation
+        //
+        // Burmese orthography caps virama stacks at two consonants, so
+        // chains like `ka+ta+pa` cannot surface as a single stacked
+        // cluster. The engine must nevertheless produce a candidate that
+        // covers the whole buffer rather than truncating to the first
+        // consonant. When `+` can't legally stack, it degrades to a
+        // syllable-break hint so the tail still composes.
+
+        TestCase("engine_stackChain_kaTaPa_doesNotTruncateToSingleChar") { ctx in
+            let engine = BurmeseEngine()
+            let result = engine.update(buffer: "ka+ta+pa", context: [])
+            let top = result.candidates.first?.surface ?? ""
+            let scalars = top.unicodeScalars.map(\.value)
+            ctx.assertTrue(
+                scalars.count >= 3,
+                detail: "ka+ta+pa must not truncate to a single consonant; got \(scalars.map { String(format: "%04X", $0) })"
+            )
+            ctx.assertTrue(
+                scalars.contains(0x1000) && scalars.contains(0x1010) && scalars.contains(0x1015),
+                detail: "ka+ta+pa top candidate must surface က/တ/ပ; got \(scalars.map { String(format: "%04X", $0) })"
+            )
+        },
+
+        TestCase("engine_stackChain_ahDhiPaYay_doesNotTruncate") { ctx in
+            let engine = BurmeseEngine()
+            let result = engine.update(buffer: "ah+dhi+pa+yay", context: [])
+            let top = result.candidates.first?.surface ?? ""
+            let scalars = top.unicodeScalars.map(\.value)
+            ctx.assertTrue(
+                scalars.count >= 4,
+                detail: "ah+dhi+pa+yay must not truncate to a single consonant; got \(scalars.map { String(format: "%04X", $0) })"
+            )
+        },
+
+        TestCase("engine_stackChain_kaTa_doesNotTruncateToSingleChar") { ctx in
+            let engine = BurmeseEngine()
+            let result = engine.update(buffer: "ka+ta", context: [])
+            let top = result.candidates.first?.surface ?? ""
+            let scalars = top.unicodeScalars.map(\.value)
+            ctx.assertTrue(
+                scalars.count >= 2,
+                detail: "ka+ta must cover both consonants; got \(scalars.map { String(format: "%04X", $0) })"
+            )
+            ctx.assertTrue(
+                scalars.contains(0x1000) && scalars.contains(0x1010),
+                detail: "ka+ta top candidate must surface က and တ; got \(scalars.map { String(format: "%04X", $0) })"
+            )
+        },
+
+        TestCase("engine_stackChain_waTtaYa_doesNotTruncate") { ctx in
+            // Semivowel upper (wa) can't stack; `+` must degrade to a
+            // syllable-break hint so the whole buffer composes rather
+            // than collapsing to the first consonant.
+            let engine = BurmeseEngine()
+            let result = engine.update(buffer: "wa+tta+ya", context: [])
+            let top = result.candidates.first?.surface ?? ""
+            let scalars = top.unicodeScalars.map(\.value)
+            ctx.assertTrue(
+                scalars.count >= 3,
+                detail: "wa+tta+ya must not truncate to a single consonant; got \(scalars.map { String(format: "%04X", $0) })"
+            )
         },
     ])
 }

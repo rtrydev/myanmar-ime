@@ -103,11 +103,21 @@ public final class SyllableParser: Sendable {
     private let viramaVowelId: Int32
 
     /// `VowelMatchEntry.id` of the empty-emission `+` fallback — a "soft
-    /// syllable boundary" used when the virama stack is illegal but the
-    /// consonant after `+` starts a multi-character digraph whose root is
-    /// not stackable (e.g. `pyin+thit` → the `t` of `th` shouldn't be
-    /// consumed as subscript, leaving an orphan `h`). Only emitted when
-    /// gating in the DP succeeds.
+    /// syllable boundary" emitted in two disjoint cases:
+    ///
+    ///   1. Digraph-collision after a kinzi/asat-ending vowel:
+    ///      `pyin+thit` → the `t` of `th` shouldn't be consumed as
+    ///      subscript, leaving an orphan `h`. Gated on a legal short
+    ///      stack + unstackable long onset both existing.
+    ///   2. Syllable-break after a plain vowel: `ka+ta+pa` and similar
+    ///      chains where `+` can't form a valid stack (cross-class or
+    ///      depth-capped). Gated on the next onset being either
+    ///      cross-class-illegal or subject to the digraph collision.
+    ///
+    /// A bare `onsetOnly(X)` parent is never a soft-boundary site — the
+    /// user has typed no vowel, so a virama stack is the natural reading
+    /// (e.g. `k+ya` stays illegal rather than collapsing to `ကယ`).
+    /// Only emitted when gating in the DP succeeds.
     private let softBoundaryViramaVowelId: Int32
 
     /// Per-vowel: non-zero when the vowel's rendered Myanmar ends with
@@ -744,34 +754,94 @@ public final class SyllableParser: Sendable {
                 }
 
                 for (vowelEnd, vowelEntry) in standaloneVowels where !vowelEntry.isPureMedial {
-                    // Gate the empty-emission `+` fallback to the digraph-
-                    // collision case: the primary virama path would consume
-                    // the first char of a multi-char onset digraph whose
-                    // root is unstackable, leaving an orphan remainder.
-                    // Requires: (a) the prior state would supply a stackable
-                    // upper for `+`, (b) at least one onset at `vowelEnd` is
-                    // length 1 with a root that forms a legal stack with
-                    // upper, and (c) at least one onset at `vowelEnd` is
-                    // length ≥ 2 with a root outside the stack class.
+                    // Gate the empty-emission `+` fallback. Two cases:
+                    //   - After a kinzi/asat vowel: digraph collision
+                    //     (legal short stack + unstackable long onset).
+                    //   - After a plain vowel: syllable-break when the
+                    //     virama stack is cross-class illegal OR the
+                    //     digraph collision exists.
+                    // After a bare `onsetOnly(X)` the user has typed no
+                    // vowel, so a virama stack is the natural reading and
+                    // the soft-boundary must not fire.
                     if vowelEntry.id == softBoundaryViramaVowelId {
-                        guard let upper = viramaUpper(previous: previous, arena: arena),
-                              Grammar.stackableConsonants.contains(upper) else {
+                        let sbCtx = softBoundaryContext(previous: previous, arena: arena)
+                        // Admission rule depends on predecessor category:
+                        //   - seedOnset(stackable): user intent is stack;
+                        //     don't fire soft-boundary (keeps `k+ya` ill).
+                        //   - seedOnset(non-stackable): stack is
+                        //     structurally impossible (`ah+dhi`); admit
+                        //     whenever a valid onset follows.
+                        //   - asatVowel: fire on digraph collision only
+                        //     (kinzi/coda shapes like `pyin+thit`).
+                        //   - plainVowel: fire on cross-class illegal or
+                        //     digraph collision (`ka+ta+pa`, `mar+ta`).
+                        enum AdmitMode { case unconditional, digraphOnly, crossClassOrDigraph }
+                        let upperForGate: Character?
+                        let admit: AdmitMode
+                        switch sbCtx {
+                        case .none:
                             continue
-                        }
-                        var hasShortLegal = false
-                        var hasLongUnstackable = false
-                        for (oEnd, oEntry) in onsetMatchesByStart[vowelEnd] {
-                            let len = oEnd - vowelEnd
-                            if len == 1
-                                && Grammar.isValidStack(upper: upper, lower: oEntry.onset) {
-                                hasShortLegal = true
+                        case .seedOnset(let ch):
+                            // Seed onset with a stackable base: user's
+                            // first keystrokes are `C+…`, so `+` is
+                            // clearly a stacker. Non-stackable base
+                            // (independent vowel, semivowel) falls
+                            // through to a syllable break.
+                            if Grammar.stackableConsonants.contains(ch) {
+                                continue
                             }
-                            if len >= 2
-                                && !Grammar.stackableConsonants.contains(oEntry.onset) {
-                                hasLongUnstackable = true
+                            upperForGate = nil
+                            admit = .unconditional
+                        case .asatVowel(let ch):
+                            // Asat-ending or coda-like predecessor:
+                            // digraph collision is the only legitimate
+                            // soft-boundary trigger when the base could
+                            // legally stack.
+                            if Grammar.stackableConsonants.contains(ch) {
+                                upperForGate = ch
+                                admit = .digraphOnly
+                            } else {
+                                upperForGate = nil
+                                admit = .unconditional
+                            }
+                        case .plainVowel:
+                            // Plain dependent vowel sign between the
+                            // base consonant and `+`: virama cannot
+                            // bond to a vowel sign, so `+` is always
+                            // a syllable break regardless of the
+                            // onset that follows.
+                            upperForGate = nil
+                            admit = .unconditional
+                        }
+
+                        let onsetsAtVowelEnd = onsetMatchesByStart[vowelEnd]
+                        guard !onsetsAtVowelEnd.isEmpty else { continue }
+
+                        if admit != .unconditional, let upper = upperForGate {
+                            var hasShortLegal = false
+                            var hasLongUnstackable = false
+                            for (oEnd, oEntry) in onsetsAtVowelEnd {
+                                let len = oEnd - vowelEnd
+                                if len == 1
+                                    && Grammar.isValidStack(upper: upper, lower: oEntry.onset) {
+                                    hasShortLegal = true
+                                }
+                                if len >= 2
+                                    && !Grammar.stackableConsonants.contains(oEntry.onset) {
+                                    hasLongUnstackable = true
+                                }
+                            }
+                            let digraphCollision = hasShortLegal && hasLongUnstackable
+                            switch admit {
+                            case .digraphOnly:
+                                guard digraphCollision else { continue }
+                            case .crossClassOrDigraph:
+                                let crossClassIllegal = !hasShortLegal
+                                guard crossClassIllegal || digraphCollision else { continue }
+                            case .unconditional:
+                                break
                             }
                         }
-                        guard hasShortLegal && hasLongUnstackable else { continue }
                     }
 
                     var legality = vowelOnlyLegality[Int(vowelEntry.id)]
@@ -935,35 +1005,82 @@ public final class SyllableParser: Sendable {
         }
     }
 
-    /// Derive the would-be stack upper for a hypothetical virama transition
-    /// from `previous`. Parallels `viramaContext` but returns a bare
-    /// `Character?` for use at the vowel-match step (before the virama is
-    /// actually emitted), so the soft-boundary gate can decide whether to
-    /// admit an empty-emission `+` alternative based on the stackability
-    /// of the upper. Returns `nil` when the previous state has no valid
-    /// upper (seed, plain dependent vowel, etc.).
-    private func viramaUpper(
+    /// Classification of a DP state that might precede a soft-boundary
+    /// `+`. Distinguishes three structurally different predecessors so
+    /// the gate can pick the right admission rule:
+    ///
+    ///   - `.seedOnset` — onsetOnly(X) whose parent is the seed. User
+    ///     typed no vowel and no preceding syllable, so `+` is a virama
+    ///     stacker (e.g. `k+ya` must stay illegal rather than collapse
+    ///     to `ကယ`).
+    ///   - `.asatVowel(X)` — previous ended with an asat-bearing vowel
+    ///     (kinzi lead-in) or a bare onset after a full syllable
+    ///     (coda-like position). Soft-boundary fires only on digraph
+    ///     collision.
+    ///   - `.plainVowel(X)` — previous ended with a plain dependent
+    ///     vowel. Soft-boundary fires when the virama stack is
+    ///     cross-class illegal or subject to a digraph collision.
+    ///   - `.none` — no usable stack upper (seed, skip, ...).
+    private enum SoftBoundaryContext {
+        case seedOnset(Character)
+        case asatVowel(Character)
+        case plainVowel(Character)
+        case none
+    }
+
+    /// Classify the predecessor of a hypothetical soft-boundary `+` so
+    /// the DP gate can decide whether the `+` should be treated as a
+    /// stacker, a syllable break, or rejected outright.
+    private func softBoundaryContext(
         previous: ParseState,
         arena: [ParseState]
-    ) -> Character? {
+    ) -> SoftBoundaryContext {
         switch previous.matchRef {
         case let .onsetOnly(onsetId):
-            return onsetTerminals[Int(onsetId)].onset
+            let upper = onsetTerminals[Int(onsetId)].onset
+            // First onset after seed is the user's initial keystroke,
+            // so `+` is clearly a stacker. Later bare onsets (coda-like
+            // shape after a full syllable) behave like asat-vowel
+            // predecessors for gating purposes.
+            guard previous.parentIdx >= 0 else { return .seedOnset(upper) }
+            if case .seed = arena[Int(previous.parentIdx)].matchRef {
+                return .seedOnset(upper)
+            }
+            return .asatVowel(upper)
 
         case let .onsetVowel(onsetId, vowelId):
-            guard vowelEndsWithAsat[Int(vowelId)] else { return nil }
-            let pre = vowelPreAsatScalar[Int(vowelId)]
-            let scalar = pre != 0 ? pre : onsetLastScalar[Int(onsetId)]
-            return Unicode.Scalar(scalar).map(Character.init)
+            if vowelEndsWithAsat[Int(vowelId)] {
+                let pre = vowelPreAsatScalar[Int(vowelId)]
+                let scalar = pre != 0 ? pre : onsetLastScalar[Int(onsetId)]
+                guard let ch = Unicode.Scalar(scalar).map(Character.init) else { return .none }
+                return .asatVowel(ch)
+            }
+            let scalar = onsetLastScalar[Int(onsetId)]
+            guard let ch = Unicode.Scalar(scalar).map(Character.init) else { return .none }
+            return .plainVowel(ch)
 
         case let .vowelOnly(vowelId):
-            guard vowelEndsWithAsat[Int(vowelId)] else { return nil }
-            let pre = vowelPreAsatScalar[Int(vowelId)]
-            guard pre != 0 else { return nil }
-            return Unicode.Scalar(pre).map(Character.init)
+            if vowelEndsWithAsat[Int(vowelId)] {
+                let pre = vowelPreAsatScalar[Int(vowelId)]
+                guard pre != 0,
+                      let ch = Unicode.Scalar(pre).map(Character.init) else { return .none }
+                return .asatVowel(ch)
+            }
+            // Plain vowelOnly: walk back to the parent onset for the
+            // would-be stack upper. The split path `onsetOnly(X) →
+            // vowelOnly(V)` is the only shape that yields a usable
+            // upper here; anything else (vowelOnly after seed, kinzi
+            // chains, ...) can't be a plain-vowel syllable break.
+            guard previous.parentIdx >= 0 else { return .none }
+            if case let .onsetOnly(onsetId) = arena[Int(previous.parentIdx)].matchRef {
+                let scalar = onsetLastScalar[Int(onsetId)]
+                guard let ch = Unicode.Scalar(scalar).map(Character.init) else { return .none }
+                return .plainVowel(ch)
+            }
+            return .none
 
         default:
-            return nil
+            return .none
         }
     }
 
