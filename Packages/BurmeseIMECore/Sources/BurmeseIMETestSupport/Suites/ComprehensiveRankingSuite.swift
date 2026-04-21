@@ -200,7 +200,7 @@ public enum ComprehensiveRankingSuite {
               gloss: "myanmar's economic situation is gradually improving",
               surface: "မြန်မာနိုင်ငံရဲ့စီးပွားရေးအခြေအနေတိုးတက်လာတယ်",
               alternatives: [
-                "မြန်မာနိုင်ငန်ရယ့်စီးပွါးရေးဟခြေဟနေတိုးတက်လာတယ်",
+                "မြန်မာနိုင်ငန်ရယ့်စီးပွားရေးဟခြေဟနေတိုးတက်လာတယ်",
               ], topK: 8),
         .init(id: "article_healthRoutine",
               gloss: "to stay healthy one should exercise daily",

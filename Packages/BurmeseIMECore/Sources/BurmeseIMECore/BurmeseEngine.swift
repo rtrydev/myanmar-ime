@@ -1146,9 +1146,19 @@ public final class BurmeseEngine: @unchecked Sendable {
         for i in 0..<scalars.count {
             let v = scalars[i].value
             guard v == shortAa || v == tallAa else { continue }
+            // Record whether a medial sign (U+103B ya-pin, U+103C ya-yit,
+            // U+103D wa-hswe, U+103E ha-htoe) sat between the aa and its
+            // base consonant. When one did, the medial already visually
+            // disambiguates the consonant's round bottom and native
+            // orthography writes short-aa ာ — e.g. `ပြော` (freq 1,358,895
+            // in BurmeseLexiconSource.tsv), `ပွား`, `ဂြော` — so the
+            // tall-aa rewrite must be skipped (task 11).
+            var sawMedial = false
             var j = i - 1
             while j >= 0 {
                 let prev = scalars[j]
+                let pv = prev.value
+                if pv >= 0x103B && pv <= 0x103E { sawMedial = true }
                 if Myanmar.isConsonant(prev) {
                     // A round-bottomed consonant sitting as the subscript of a
                     // virama-stacked conjunct (e.g. ပ္ပ in အဓိပ္ပာယ်, ဂ္ဂ in
@@ -1156,7 +1166,9 @@ public final class BurmeseEngine: @unchecked Sendable {
                     // already disambiguates the visual footprint.
                     let virama: UInt32 = 0x1039
                     let isStackedSubscript = j >= 1 && scalars[j - 1].value == virama
-                    let wantsTall = tallAaSet.contains(prev.value) && !isStackedSubscript
+                    let wantsTall = tallAaSet.contains(prev.value)
+                        && !isStackedSubscript
+                        && !sawMedial
                     let target: UInt32 = wantsTall ? tallAa : shortAa
                     if v != target {
                         scalars[i] = Unicode.Scalar(target)!

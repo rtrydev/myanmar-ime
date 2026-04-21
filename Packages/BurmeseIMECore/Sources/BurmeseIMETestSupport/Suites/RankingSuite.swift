@@ -51,16 +51,23 @@ public enum RankingSuite {
     /// medials, e-kar, etc.) and flag any mismatch between the consonant's
     /// descender requirement and the aa shape used. Returns true if any
     /// wrong-shape aa is present.
+    ///
+    /// A descender onset with an intervening medial (U+103B…U+103E) keeps
+    /// short-aa — the medial already disambiguates the round bottom, and
+    /// native orthography writes `ပြော`, `ပွား`, `ဂြော` with ာ. Matches
+    /// the medial exception applied by `BurmeseEngine.correctAaShape`.
     private static func hasWrongAaShape(_ surface: String) -> Bool {
         let scalars = Array(surface.unicodeScalars)
         for i in 0..<scalars.count {
             let v = scalars[i].value
             guard v == shortAaScalar || v == tallAaScalar else { continue }
+            var sawMedial = false
             var j = i - 1
             while j >= 0 {
                 let prev = scalars[j].value
+                if prev >= 0x103B && prev <= 0x103E { sawMedial = true }
                 if isConsonantScalar(prev) {
-                    let wantsTall = requiresTallAaScalars.contains(prev)
+                    let wantsTall = requiresTallAaScalars.contains(prev) && !sawMedial
                     if wantsTall && v == shortAaScalar { return true }
                     if !wantsTall && v == tallAaScalar { return true }
                     break
@@ -134,11 +141,12 @@ public enum RankingSuite {
             )
         })
 
-        cases.append(TestCase("issueA_longOOVInputKeepsTallAaAfterPa") { ctx in
+        cases.append(TestCase("issueA_longOOVInputKeepsCanonicalAaAfterPa") { ctx in
             // Same buffer, same pool-collapse bug, but verified via a
-            // semantic anchor: the "pyaung" syllable must render with the
-            // tall-aa shape ပြေါင် (ပ carries a descender → tall aa), not
-            // the uncorrected short-aa ပြောင်.
+            // semantic anchor: `pyaung` carries a medial (ya-yit U+103C)
+            // on the descender ပ, so the canonical orthography is
+            // short-aa ပြောင် — the medial already disambiguates the
+            // round bottom and tall-aa ါ would be wrong (task 11).
             let engine = BurmeseEngine()
             let state = engine.update(buffer: "rarthiu.tu.pyaung", context: [])
             let surfaces = state.candidates.map(\.surface)
@@ -491,6 +499,107 @@ public enum RankingSuite {
                 "myanThar_hasTha",
                 detail: "expected 101E (tha); top=\(top.surface) scalars=\(scalars)"
             )
+        })
+
+        // MARK: - Medial exception on descender onsets (task 11)
+        //
+        // `Grammar.requiresTallAa` lists six descender consonants whose
+        // round bottom collides with short-aa ာ — the engine normally
+        // rewrites them to tall-aa ါ. But when a medial sign (U+103B…
+        // U+103E) sits between the consonant and the aa, the medial
+        // already disambiguates the visual, and native orthography keeps
+        // short-aa ာ (e.g. ပြော "say" — the single most frequent verb in
+        // the lexicon — not ပြေါ). `correctAaShape` must skip the
+        // rewrite in that case.
+
+        @Sendable func assertTopScalars(
+            _ ctx: TestContext,
+            _ buffer: String,
+            _ expected: [UInt32],
+            _ label: String
+        ) {
+            let state = BurmeseEngine().update(buffer: buffer, context: [])
+            let top = state.candidates.first?.surface ?? ""
+            ctx.assertEqual(top.unicodeScalars.map(\.value), expected,
+                "\(label): buffer=\(buffer) got=\(top)")
+        }
+
+        cases.append(TestCase("task11_pyawColon_shortAaAfterPaYaYitEkar") { ctx in
+            // ပြော — ပ + ya-yit + e-kar + short-aa (canonical "say").
+            assertTopScalars(ctx, "pyaw:",
+                [0x1015, 0x103C, 0x1031, 0x102C],
+                "pyawColon_shortAa")
+        })
+
+        cases.append(TestCase("task11_pyaw_shortAaAfterPaYaYitEkar") { ctx in
+            assertTopScalars(ctx, "pyaw",
+                [0x1015, 0x103C, 0x1031, 0x102C, 0x103A],
+                "pyaw_shortAa")
+        })
+
+        cases.append(TestCase("task11_pyawDot_shortAaAfterPaYaYitEkar") { ctx in
+            assertTopScalars(ctx, "pyaw.",
+                [0x1015, 0x103C, 0x1031, 0x102C, 0x1037],
+                "pyawDot_shortAa")
+        })
+
+        cases.append(TestCase("task11_pyaungColon_shortAaAfterPaYaYitEkar") { ctx in
+            assertTopScalars(ctx, "pyaung:",
+                [0x1015, 0x103C, 0x1031, 0x102C, 0x1004, 0x103A, 0x1038],
+                "pyaungColon_shortAa")
+        })
+
+        cases.append(TestCase("task11_pyarColon_shortAaAfterPaYaYit") { ctx in
+            assertTopScalars(ctx, "pyar:",
+                [0x1015, 0x103C, 0x102C, 0x1038],
+                "pyarColon_shortAa")
+        })
+
+        cases.append(TestCase("task11_pwarColon_shortAaAfterPaWaHswe") { ctx in
+            assertTopScalars(ctx, "pwar:",
+                [0x1015, 0x103D, 0x102C, 0x1038],
+                "pwarColon_shortAa")
+        })
+
+        cases.append(TestCase("task11_gyawColon_shortAaAfterGaYaYitEkar") { ctx in
+            assertTopScalars(ctx, "gyaw:",
+                [0x1002, 0x103C, 0x1031, 0x102C],
+                "gyawColon_shortAa")
+        })
+
+        cases.append(TestCase("task11_khyawColon_shortAaAfterKhaYaYitEkar") { ctx in
+            assertTopScalars(ctx, "khyaw:",
+                [0x1001, 0x103C, 0x1031, 0x102C],
+                "khyawColon_shortAa")
+        })
+
+        cases.append(TestCase("task11_dyawColon_shortAaAfterDaYaYitEkar") { ctx in
+            assertTopScalars(ctx, "dyaw:",
+                [0x1012, 0x103C, 0x1031, 0x102C],
+                "dyawColon_shortAa")
+        })
+
+        // Controls: bare descender with no medial must KEEP tall-aa.
+
+        cases.append(TestCase("task11_pawColon_tallAaPreservedWithoutMedial") { ctx in
+            assertTopScalars(ctx, "paw:",
+                [0x1015, 0x1031, 0x102B],
+                "pawColon_tallAa")
+        })
+
+        cases.append(TestCase("task11_parColon_tallAaPreservedWithoutMedial") { ctx in
+            assertTopScalars(ctx, "par:",
+                [0x1015, 0x102B, 0x1038],
+                "parColon_tallAa")
+        })
+
+        // Control: non-descender onset with medial always used short-aa;
+        // regression guard so the exception doesn't accidentally flip
+        // anyone's correct shape.
+        cases.append(TestCase("task11_kyawColon_shortAaPreservedOnNonDescender") { ctx in
+            assertTopScalars(ctx, "kyaw:",
+                [0x1000, 0x103C, 0x1031, 0x102C],
+                "kyawColon_shortAa")
         })
 
         return TestSuite(name: "Ranking", cases: cases)
