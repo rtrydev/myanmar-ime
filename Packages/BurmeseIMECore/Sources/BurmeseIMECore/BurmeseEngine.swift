@@ -515,20 +515,6 @@ public final class BurmeseEngine: @unchecked Sendable {
         let anchorApplies = priorAnchor != nil
             && !hasExactLexiconMatch
             && normalized.count > compositionWindowSize
-        // Latest (deepest) anchor, regardless of tail-parseability. Used
-        // during window-fallback to promote candidates that preserve the
-        // full committed surface on screen.
-        let latestAnchor: PrefixAnchor? = {
-            for anchor in historySnapshot.reversed() {
-                guard !anchor.normalized.isEmpty,
-                      normalized.hasPrefix(anchor.normalized),
-                      normalized.count > anchor.normalized.count,
-                      anchor.normalized.count >= anchorCommitThreshold
-                else { continue }
-                return anchor
-            }
-            return nil
-        }()
 
         let prefixBranches: [FrozenPrefixBranch]
         let parseInput: String
