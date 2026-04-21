@@ -232,6 +232,14 @@ public final class SyllableParser: Sendable {
                 // syllables. Permutations that begin with `h` are
                 // skipped for bases that would then form a consonant
                 // digraph (kh/gh/ph/dh/th) or the `sh` cluster alias.
+                //
+                // Table-size note: this permutation expansion adds ~1025
+                // trie entries on top of ~616 canonical entries. A
+                // canonical-at-input-time refactor (sort medial letters
+                // into canonical order before trie lookup) would remove
+                // the bloat but requires disambiguating `h` as medial
+                // vs. consonant-digraph component across every possible
+                // onset shape — deferred.
                 guard combo.count >= 2 else { continue }
 
                 let medialLetters: [String] = combo.map { medial in
