@@ -1453,7 +1453,7 @@ public final class SyllableParser: Sendable {
         // parse is illegal after demotion).
         let demotionWindow = max(limit, 4)
         let mapped: [SyllableParse] = sortedFinal.prefix(demotionWindow).map { m in
-            let adjusted = Self.remapEmptyToInherent(m.adjustedOutput)
+            let adjusted = Self.remapEmptyToInherent(m.adjustedOutput, reading: m.reading)
             let legal = m.state.isLegal && Self.scanOutputLegality(adjusted)
             return SyllableParse(
                 output: adjusted,
@@ -1481,8 +1481,17 @@ public final class SyllableParser: Sendable {
     /// like `a` / `aa` / `aaa` produces a visible inherent-consonant
     /// candidate instead of an empty surface. Empty surfaces would
     /// otherwise reach the candidate panel as blank entries.
-    private static func remapEmptyToInherent(_ output: String) -> String {
+    ///
+    /// Connector-only readings (`'`, `+`, `*` with no real vowel or
+    /// consonant alongside them) are the exception: the user typed pure
+    /// syllable-separator characters, so synthesising an `အ` here would
+    /// inject content they never asked for (see task 08).
+    private static func remapEmptyToInherent(_ output: String, reading: String) -> String {
         if output.isEmpty {
+            let isConnectorOnly = !reading.isEmpty && reading.allSatisfy {
+                $0 == "'" || $0 == "+" || $0 == "*"
+            }
+            if isConnectorOnly { return "" }
             return String(Unicode.Scalar(0x1021)!)
         }
         return output

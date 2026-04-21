@@ -984,5 +984,74 @@ public enum EngineSuite {
                             [0x1015, 0x1010, 0x102C],
                             "p+tar must produce ပတာ as two syllables; got '\(top)'")
         },
+
+        // MARK: - Connector-only and consecutive-connector buffers (task 08)
+        //
+        // Buffers composed entirely of `'` apostrophes or runs of `+` must
+        // not synthesise Burmese content (e.g. `အ` from three apostrophes).
+        // Consecutive `+` must collapse to a single soft boundary rather
+        // than force right-shrink to discard the tail.
+
+        TestCase("engine_connectorOnlyApostrophes_produceNoMyanmar_task08") { ctx in
+            let state = BurmeseEngine().update(buffer: "'''", context: [])
+            let top = state.candidates.first?.surface ?? ""
+            let scalars = top.unicodeScalars.map(\.value)
+            ctx.assertFalse(
+                scalars.contains(0x1021),
+                "'''_mustNotProduceIndependentA",
+                detail: "got '\(top)' scalars=\(scalars.map { String(format: "%04X", $0) })"
+            )
+        },
+
+        TestCase("engine_connectorOnlyPlus_producesNoMyanmar_task08") { ctx in
+            let state = BurmeseEngine().update(buffer: "+", context: [])
+            let top = state.candidates.first?.surface ?? ""
+            let scalars = top.unicodeScalars.map(\.value)
+            // A lone `+` may legitimately echo nothing, but must not inject
+            // a synthetic U+1021 (independent a).
+            ctx.assertFalse(
+                scalars.contains(0x1021),
+                "+_mustNotProduceIndependentA",
+                detail: "got '\(top)' scalars=\(scalars.map { String(format: "%04X", $0) })"
+            )
+        },
+
+        TestCase("engine_doublePlus_collapsesAndPreservesTail_task08") { ctx in
+            // `k++ar` must keep the `ar` tail. The second `+` cannot produce
+            // a stack (virama over virama), so it must degrade to a soft
+            // boundary rather than force right-shrink to drop `+ar`.
+            let state = BurmeseEngine().update(buffer: "k++ar", context: [])
+            let top = state.candidates.first?.surface ?? ""
+            let scalars = top.unicodeScalars.map(\.value)
+            ctx.assertTrue(
+                scalars.contains(0x1000),
+                "k++ar_mustContainKa",
+                detail: "got '\(top)' scalars=\(scalars.map { String(format: "%04X", $0) })"
+            )
+            // aa-shape will be short (U+102C) because ka has no descender.
+            ctx.assertTrue(
+                scalars.contains(0x102C) || scalars.contains(0x102B),
+                "k++ar_mustContainAaShape",
+                detail: "tail ar was dropped; got '\(top)' scalars=\(scalars.map { String(format: "%04X", $0) })"
+            )
+        },
+
+        TestCase("engine_interleavedPlusTail_preservesContent_task08") { ctx in
+            // `k+a+t`: three syllables with soft breaks. Must not collapse
+            // to just `က`.
+            let state = BurmeseEngine().update(buffer: "k+a+t", context: [])
+            let top = state.candidates.first?.surface ?? ""
+            let scalars = top.unicodeScalars.map(\.value)
+            ctx.assertTrue(
+                scalars.contains(0x1000),
+                "k+a+t_mustContainKa",
+                detail: "got '\(top)' scalars=\(scalars.map { String(format: "%04X", $0) })"
+            )
+            ctx.assertTrue(
+                scalars.contains(0x1010),
+                "k+a+t_mustContainTa",
+                detail: "tail `+t` was dropped; got '\(top)' scalars=\(scalars.map { String(format: "%04X", $0) })"
+            )
+        },
     ])
 }

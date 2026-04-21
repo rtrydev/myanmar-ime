@@ -1655,9 +1655,59 @@ public final class BurmeseEngine: @unchecked Sendable {
     }
 
     private static func normalizeForParser(_ input: String) -> String {
-        String(input.lowercased().filter {
+        let filtered = String(input.lowercased().filter {
             Romanization.composingCharacters.contains($0) || Romanization.isNumericAliasMarker($0)
         })
+        return collapseConnectorRuns(filtered)
+    }
+
+    /// Collapse ill-formed connector sequences before the DP ever sees
+    /// them (task 08). Three transforms, applied in order:
+    ///
+    ///   1. Consecutive `+` collapse to a single `+` — virama over
+    ///      virama is structurally impossible, so `k++ar` is equivalent
+    ///      to `k+ar` for any parse that survives right-shrink.
+    ///   2. `+` immediately before a vowel character is dropped — virama
+    ///      cannot stack to a dependent vowel sign or standalone vowel,
+    ///      so `k+ar` / `k+a+t` degrade to `kar` / `ka+t`. Without this,
+    ///      the DP emits illegal virama-before-vowel shapes that the
+    ///      right-shrink probe then prunes back to the seed consonant,
+    ///      silently losing the user's tail.
+    ///   3. Leading/trailing `+` peel off — a virama with no partner on
+    ///      one side has nothing to stack to and only produces the
+    ///      illegal hanging-virama shape.
+    private static func collapseConnectorRuns(_ input: String) -> String {
+        guard input.contains("+") else { return input }
+        var collapsed = ""
+        collapsed.reserveCapacity(input.count)
+        var prevWasPlus = false
+        for ch in input {
+            if ch == "+" {
+                if prevWasPlus { continue }
+                prevWasPlus = true
+            } else {
+                prevWasPlus = false
+            }
+            collapsed.append(ch)
+        }
+        let vowelLeaders: Set<Character> = ["a", "e", "i", "o", "u"]
+        var result = ""
+        result.reserveCapacity(collapsed.count)
+        let chars = Array(collapsed)
+        var i = 0
+        while i < chars.count {
+            if chars[i] == "+",
+               i + 1 < chars.count,
+               vowelLeaders.contains(chars[i + 1]) {
+                i += 1
+                continue
+            }
+            result.append(chars[i])
+            i += 1
+        }
+        while result.first == "+" { result.removeFirst() }
+        while result.last == "+" { result.removeLast() }
+        return result
     }
 
     /// Defence-in-depth gate for virama-stack surfaces. The DP already
