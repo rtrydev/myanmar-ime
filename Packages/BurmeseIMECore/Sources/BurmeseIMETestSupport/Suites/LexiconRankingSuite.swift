@@ -701,6 +701,50 @@ public enum LexiconRankingSuite {
                            detail: "top5=\(surfaces)")
         })
 
+        // MARK: - Task 08: ya-pin family must reach the top panel
+
+        // Every attested ya-pin word must surface in the top 5 for its
+        // user-typed buffer. The LM tilts toward ya-pin for most of these;
+        // lookup gaps (visarga / coda mismatches like ကျောင်း for `kyaung`)
+        // are papered over with override_reading rows in the lexicon TSV so
+        // the exact-alias prioritization lands them in the panel.
+        let task08Cases: [(buffer: String, expected: String, gloss: String)] = [
+            ("kywantaw", "ကျွန်တော်", "I (formal/masculine)"),
+            ("kywanma",  "ကျွန်မ",    "I (feminine/polite)"),
+            ("kywan",    "ကျွန်",     "servant/slave"),
+            ("kyaung",   "ကျောင်း",   "school/monastery"),
+            ("kyaw",     "ကျော်",     "cross/famous"),
+            ("kyay",     "ကျေ",      "pleased"),
+            ("kyayzu",   "ကျေးဇူး",   "thanks"),
+            ("kyat",     "ကျပ်",      "kyat (currency)"),
+            ("kyan",     "ကျန်",      "remain"),
+            ("kyin",     "ကျင်း",     "large/broad"),
+            ("kyit",     "ကျစ်",      "pinch/bite"),
+            ("kyi",      "ကျီ",      "glance"),
+            ("khyay",    "ချေ",      "defeat"),
+            ("khyin",    "ချင်",      "want"),
+            ("khyit",    "ချစ်",      "love"),
+        ]
+
+        for (buffer, expected, gloss) in task08Cases {
+            cases.append(TestCase("task08_yapin_\(buffer)") { ctx in
+                guard let lexPath = BundledArtifacts.lexiconPath,
+                      let store = SQLiteCandidateStore(path: lexPath),
+                      let lmPath = BundledArtifacts.trigramLMPath,
+                      let lm = try? TrigramLanguageModel(path: lmPath) else {
+                    ctx.assertTrue(true, "skipped_noBundledArtifacts")
+                    return
+                }
+                let engine = BurmeseEngine(candidateStore: store, languageModel: lm)
+                let state = engine.update(buffer: buffer, context: [])
+                let top5 = state.candidates.prefix(5).map { stripZW($0.surface) }
+                ctx.assertTrue(
+                    top5.contains(expected),
+                    detail: "buffer='\(buffer)' expected='\(expected)' (\(gloss)) top5=\(top5)"
+                )
+            })
+        }
+
         return TestSuite(name: "LexiconRanking", cases: cases)
     }()
 }
