@@ -1240,9 +1240,19 @@ public final class SyllableParser: Sendable {
         afterLetters preceding: [Character], digit: Character
     ) -> Bool {
         guard let digitByte = digit.asciiValue else { return false }
+        // Onset variants (e.g. `t2`, `ky2`) begin a syllable, so allow the
+        // match to start at any syllable boundary inside the letter run.
         for start in 0...preceding.count {
             if hasOnsetTerminalAt(letters: preceding[start...], trailingByte: digitByte) { return true }
-            if hasStandaloneVowelTerminalAt(letters: preceding[start...], trailingByte: digitByte) { return true }
+        }
+        // Standalone independent-vowel variants (e.g. `u2`, `ay2`) are only
+        // meaningful when no consonant precedes them — a consonant+standalone
+        // composition is orthographically illegal, so absorbing the digit
+        // there just produces garbage (e.g. `nay2day` → `n + ay2 + day`).
+        // Require the full letter run to form the standalone-vowel key so
+        // mid-buffer digit-as-literal cases like `nay2day` stay literal.
+        if hasStandaloneVowelTerminalAt(letters: preceding[0...], trailingByte: digitByte) {
+            return true
         }
         return false
     }

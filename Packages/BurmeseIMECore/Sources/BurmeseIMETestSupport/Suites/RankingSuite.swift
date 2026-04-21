@@ -371,6 +371,59 @@ public enum RankingSuite {
             )
         })
 
+        // MARK: - Task 06: digit after a consonant+vowel run stays literal
+        //
+        // When a letter run already contains a consonant, a trailing `2`
+        // cannot meaningfully select a standalone-vowel variant (consonant
+        // + standalone vowel is illegal). The digit must peel off as a
+        // literal Myanmar digit, not be absorbed as the `ay2`/`u2` suffix.
+
+        cases.append(TestCase("task06_nay2dayKeepsDigitLiteral") { ctx in
+            let engine = BurmeseEngine()
+            let top = engine.update(buffer: "nay2day", context: []).candidates.first?.surface ?? ""
+            let scalars = top.unicodeScalars.map(\.value)
+            ctx.assertTrue(
+                scalars.contains(0x1042),
+                "nay2day_expectsLiteralDigit",
+                detail: "top=\(top) scalars=\(scalars)"
+            )
+            ctx.assertFalse(
+                scalars.contains(0x1027),
+                "nay2day_mustNotContainIndependentE",
+                detail: "ay2 absorbed as standalone ဧ; top=\(top) scalars=\(scalars)"
+            )
+        })
+
+        cases.append(TestCase("task06_nay2KeepsDigitLiteralAtEnd") { ctx in
+            let engine = BurmeseEngine()
+            let top = engine.update(buffer: "nay2", context: []).candidates.first?.surface ?? ""
+            let scalars = top.unicodeScalars.map(\.value)
+            ctx.assertTrue(
+                scalars.contains(0x1042),
+                "nay2_expectsLiteralDigit",
+                detail: "top=\(top) scalars=\(scalars)"
+            )
+            ctx.assertFalse(
+                scalars.contains(0x1027),
+                "nay2_mustNotContainIndependentE",
+                detail: "top=\(top) scalars=\(scalars)"
+            )
+        })
+
+        cases.append(TestCase("task06_kar2niKeepsDigitLiteral") { ctx in
+            // `kar2` would match `ar2` (tall-aa cosmetic) but `correctAaShape`
+            // already reconciles it. `2` must stay literal so the user sees
+            // their typed digit in the surface.
+            let engine = BurmeseEngine()
+            let top = engine.update(buffer: "kar2ni", context: []).candidates.first?.surface ?? ""
+            let scalars = top.unicodeScalars.map(\.value)
+            ctx.assertTrue(
+                scalars.contains(0x1042),
+                "kar2ni_expectsLiteralDigit",
+                detail: "top=\(top) scalars=\(scalars)"
+            )
+        })
+
         // MARK: - Issue F: kinzi cross-class fallback
         //
         // "pyin+thit" should parse as ပြင် (py + in) + kinzi stack + သစ်
