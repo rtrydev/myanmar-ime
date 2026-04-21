@@ -685,6 +685,22 @@ public enum LexiconRankingSuite {
                            detail: "top=\(top) candidates=\(state.candidates.prefix(5).map(\.surface))")
         })
 
+        // MARK: - Task 03: anusvara coda words must surface at top
+
+        cases.append(TestCase("task03_thanhlyin_rankedInTop5") { ctx in
+            guard let path = BundledArtifacts.lexiconPath,
+                  let store = SQLiteCandidateStore(path: path) else {
+                ctx.assertTrue(true, "skipped_noBundledLexicon")
+                return
+            }
+            let engine = BurmeseEngine(candidateStore: store)
+            let state = engine.update(buffer: "thanhlyin", context: [])
+            let surfaces = state.candidates.prefix(5).map(\.surface)
+            ctx.assertTrue(surfaces.contains("သံလျှင်"),
+                           "task03_thanhlyin_inTop5",
+                           detail: "top5=\(surfaces)")
+        })
+
         return TestSuite(name: "LexiconRanking", cases: cases)
     }()
 }
