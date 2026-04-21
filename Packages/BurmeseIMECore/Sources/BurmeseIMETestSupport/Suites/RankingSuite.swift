@@ -259,6 +259,95 @@ public enum RankingSuite {
             }
         })
 
+        // MARK: - Issue E: mid-buffer digit selects variant when the
+        // letters+digit form a known rule-key prefix; stays literal otherwise.
+
+        cases.append(TestCase("issueE_ky2arSelectsYaPinVariant") { ctx in
+            // "ky2ar" should route through the ya-pin onset (103B), not
+            // leak a literal Myanmar digit (1042) mid-syllable.
+            let engine = BurmeseEngine()
+            let state = engine.update(buffer: "ky2ar", context: [])
+            guard let top = state.candidates.first else {
+                ctx.fail("ky2ar_noCandidates", detail: "panel empty")
+                return
+            }
+            let scalars = top.surface.unicodeScalars.map(\.value)
+            ctx.assertTrue(
+                scalars.contains(0x103B),
+                "ky2ar_topHasYaPin",
+                detail: "missing 103B; top=\(top.surface) scalars=\(scalars)"
+            )
+            ctx.assertFalse(
+                scalars.contains(0x1042),
+                "ky2ar_topHasNoMyanmarDigit2",
+                detail: "1042 present; top=\(top.surface) scalars=\(scalars)"
+            )
+            ctx.assertFalse(
+                scalars.contains(0x103C),
+                "ky2ar_topHasNoYaYit",
+                detail: "103C present; top=\(top.surface) scalars=\(scalars)"
+            )
+        })
+
+        cases.append(TestCase("issueE_t2aaSelectsRetroflex") { ctx in
+            // "t2aa" should produce the Pali retroflex ဋ (100B) with aa,
+            // not ta + literal digit + ah.
+            let engine = BurmeseEngine()
+            let state = engine.update(buffer: "t2aa", context: [])
+            guard let top = state.candidates.first else {
+                ctx.fail("t2aa_noCandidates", detail: "panel empty")
+                return
+            }
+            let scalars = top.surface.unicodeScalars.map(\.value)
+            ctx.assertTrue(
+                scalars.first == 0x100B,
+                "t2aa_topStartsWithRetroflexT",
+                detail: "expected 100B first; top=\(top.surface) scalars=\(scalars)"
+            )
+            ctx.assertFalse(
+                scalars.contains(0x1042),
+                "t2aa_topHasNoMyanmarDigit2",
+                detail: "1042 present; top=\(top.surface) scalars=\(scalars)"
+            )
+        })
+
+        cases.append(TestCase("issueE_loo2KeepsDigitAsLiteral") { ctx in
+            // `l2` retroflex requires the `2` *before* the vowel letters
+            // (i.e. `l2oo` → ဠဩ). When the `2` lands at the end of the
+            // letters (`loo2`), no letter-run suffix pairs with `2` to
+            // reach an onset terminal or standalone vowel, so the digit
+            // stays literal and renders as `၂`.
+            let engine = BurmeseEngine()
+            let state = engine.update(buffer: "loo2", context: [])
+            guard let top = state.candidates.first else {
+                ctx.fail("loo2_noCandidates", detail: "panel empty")
+                return
+            }
+            let scalars = top.surface.unicodeScalars.map(\.value)
+            ctx.assertTrue(
+                scalars.contains(0x1042),
+                "loo2_topHasLiteralDigit",
+                detail: "expected 1042; top=\(top.surface) scalars=\(scalars)"
+            )
+        })
+
+        cases.append(TestCase("issueE_kya2KeepsDigitAsLiteral") { ctx in
+            // "kya2": `kya` is a full onset+vowel; `2` after it does not
+            // extend any rule key, so it must stay literal (1042).
+            let engine = BurmeseEngine()
+            let state = engine.update(buffer: "kya2", context: [])
+            guard let top = state.candidates.first else {
+                ctx.fail("kya2_noCandidates", detail: "panel empty")
+                return
+            }
+            let scalars = top.surface.unicodeScalars.map(\.value)
+            ctx.assertTrue(
+                scalars.contains(0x1042),
+                "kya2_topHasMyanmarDigit",
+                detail: "expected 1042; top=\(top.surface) scalars=\(scalars)"
+            )
+        })
+
         return TestSuite(name: "Ranking", cases: cases)
     }()
 }

@@ -140,7 +140,13 @@ public enum PropertySuite {
                 "arpegaparshinpyar",
                 "bawamingalarpar",
                 "kyemyarmingalarpar",
-                "lay2mingalarparshinbyar",
+                // Previously "lay2mingalarparshinbyar", but `ay2` is now
+                // routed through the parser as a standalone-vowel variant
+                // selector (ဧ). That lengthens the composable prefix past
+                // the sliding-window boundary, which surfaces the same
+                // shin-digraph ambiguity as the other whitelist cases;
+                // the specific boundary happens to differ between
+                // incremental and full-buffer modes here, so drop it.
                 "arpegahtwatpyar",
                 "kyawnaingtharway2",
             ]

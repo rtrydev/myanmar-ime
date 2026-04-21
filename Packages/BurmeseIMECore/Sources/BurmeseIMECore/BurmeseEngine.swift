@@ -310,7 +310,7 @@ public final class BurmeseEngine: @unchecked Sendable {
         // (punctuation, whitespace, etc.) is held aside and emitted verbatim
         // on commit — this lets the user freely mix Burmese-convertible text
         // with literal content without the IME swallowing either.
-        let (rawComposable, rawLiteralTail) = Self.splitComposablePrefix(postDigitBuffer)
+        let (rawComposable, rawLiteralTail) = splitComposablePrefix(postDigitBuffer)
         // `.` is in `Romanization.composingCharacters` for abbreviation
         // handling, so trailing punctuation lands in the composable portion
         // rather than the literal tail. When punctuation mapping is on,
@@ -1403,7 +1403,7 @@ public final class BurmeseEngine: @unchecked Sendable {
     private func renderFrozenSegment(_ segment: String) -> String {
         let (digits, rest) = Self.splitLeadingDigits(segment)
         let digitPart = Self.arabicToBurmeseDigits(digits)
-        let (composable, literal) = Self.splitComposablePrefix(rest)
+        let (composable, literal) = splitComposablePrefix(rest)
         let normalized = Self.normalizeForParser(composable)
         guard !normalized.isEmpty else {
             return digitPart + composable + literal
@@ -1609,7 +1609,9 @@ public final class BurmeseEngine: @unchecked Sendable {
     }
 
     private static func normalizeForParser(_ input: String) -> String {
-        String(input.lowercased().filter { Romanization.composingCharacters.contains($0) })
+        String(input.lowercased().filter {
+            Romanization.composingCharacters.contains($0) || Romanization.isNumericAliasMarker($0)
+        })
     }
 
     /// Defence-in-depth gate for virama-stack surfaces. The DP already
@@ -1740,16 +1742,41 @@ public final class BurmeseEngine: @unchecked Sendable {
 
     /// Split a buffer into its leading run of composing characters and the
     /// remainder (starting at the first non-composing character). ASCII
-    /// digits peel off as literal tail — they are never consumed as
-    /// variant-disambiguation markers on the user→parser path. Variants
-    /// that share a reading are selected from the candidate panel.
-    private static func splitComposablePrefix(_ buffer: String) -> (composable: String, literal: String) {
-        if let firstNonComposing = buffer.firstIndex(where: {
-            !Romanization.composingCharacters.contains($0)
-        }) {
-            return (String(buffer[..<firstNonComposing]), String(buffer[firstNonComposing...]))
+    /// digits (`2`/`3`) pass through as part of the composable prefix when
+    /// the letters immediately before the digit plus the digit walk a
+    /// known onset/vowel trie key — mid-buffer variant selectors like the
+    /// `2` in `ky2ar` (ya-pin) or `t2aa` (Pali retroflex) get routed to
+    /// the parser. Otherwise the digit peels off as literal tail (e.g. the
+    /// trailing `2` in `kya2` becomes `၂`).
+    private func splitComposablePrefix(_ buffer: String) -> (composable: String, literal: String) {
+        var composable = ""
+        var letterRun: [Character] = []
+        var iterator = buffer.makeIterator()
+        var splitIndex = buffer.startIndex
+        var current = buffer.startIndex
+        while let ch = iterator.next() {
+            defer { current = buffer.index(after: current) }
+            if Romanization.composingCharacters.contains(ch) {
+                composable.append(ch)
+                if ch.isLetter {
+                    letterRun.append(ch)
+                } else {
+                    letterRun.removeAll(keepingCapacity: true)
+                }
+                splitIndex = buffer.index(after: current)
+                continue
+            }
+            if Romanization.isNumericAliasMarker(ch),
+               !letterRun.isEmpty,
+               parser.canDigitSelectMeaningfulVariant(afterLetters: letterRun, digit: ch) {
+                composable.append(ch)
+                letterRun.append(ch)
+                splitIndex = buffer.index(after: current)
+                continue
+            }
+            break
         }
-        return (buffer, "")
+        return (composable, String(buffer[splitIndex...]))
     }
 
     private func grammarCandidateIsBetter(_ lhs: RankedGrammarCandidate, than rhs: RankedGrammarCandidate) -> Bool {

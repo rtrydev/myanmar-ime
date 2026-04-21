@@ -937,6 +937,65 @@ public final class SyllableParser: Sendable {
         return results
     }
 
+    /// True if appending `digit` to some suffix of the letter run `preceding`
+    /// terminates a rule key whose variant selection is *meaningful* — i.e.
+    /// an onset variant (e.g. `ky2` ya-pin, `t2` Pali retroflex) or a
+    /// standalone independent-vowel variant (e.g. `u2` for ဦ). The engine
+    /// consults this to decide whether a mid-buffer ASCII digit should flow
+    /// into the parser as a variant selector or peel off as a literal digit.
+    ///
+    /// Cosmetic vowel variants that only swap U+102B↔U+102C (e.g. `ar2` vs
+    /// `ar`, `aw2` vs `aw`) are intentionally excluded — `correctAaShape`
+    /// already reconciles them from the digitless form based on the base
+    /// consonant, so the `2` would be redundant and should remain literal.
+    public func canDigitSelectMeaningfulVariant(
+        afterLetters preceding: [Character], digit: Character
+    ) -> Bool {
+        guard let digitByte = digit.asciiValue else { return false }
+        for start in 0...preceding.count {
+            if hasOnsetTerminalAt(letters: preceding[start...], trailingByte: digitByte) { return true }
+            if hasStandaloneVowelTerminalAt(letters: preceding[start...], trailingByte: digitByte) { return true }
+        }
+        return false
+    }
+
+    private func hasOnsetTerminalAt(letters: ArraySlice<Character>, trailingByte: UInt8) -> Bool {
+        guard let digitChild = walkTrie(onsetTrie, letters: letters, trailingByte: trailingByte) else {
+            return false
+        }
+        let startRange = onsetTrie.terminalStart[Int(digitChild)]
+        let endRange = onsetTrie.terminalStart[Int(digitChild) + 1]
+        return startRange < endRange
+    }
+
+    private func hasStandaloneVowelTerminalAt(letters: ArraySlice<Character>, trailingByte: UInt8) -> Bool {
+        guard let digitChild = walkTrie(vowelTrie, letters: letters, trailingByte: trailingByte) else {
+            return false
+        }
+        let startRange = vowelTrie.terminalStart[Int(digitChild)]
+        let endRange = vowelTrie.terminalStart[Int(digitChild) + 1]
+        for i in Int(startRange)..<Int(endRange) {
+            if vowelTerminals[i].isStandalone { return true }
+        }
+        return false
+    }
+
+    private func walkTrie(
+        _ trie: AsciiTrieTable,
+        letters: ArraySlice<Character>,
+        trailingByte: UInt8
+    ) -> Int32? {
+        var node: Int32 = 0
+        for ch in letters {
+            guard let byte = ch.asciiValue else { return nil }
+            let child = trie.children[Int(node) * 128 + Int(byte)]
+            if child < 0 { return nil }
+            node = child
+        }
+        let digitChild = trie.children[Int(node) * 128 + Int(trailingByte)]
+        return digitChild >= 0 ? digitChild : nil
+    }
+
     private func precomputeOnsetMatches(_ chars: [Character]) -> [[OnsetMatch]] {
         var matches = Array(repeating: [OnsetMatch](), count: chars.count + 1)
         guard !chars.isEmpty else { return matches }
