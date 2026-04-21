@@ -854,6 +854,7 @@ public final class BurmeseEngine: @unchecked Sendable {
         }
 
         merged = Self.expandAaVariants(merged)
+        merged = Self.sanitizeOrphanZwnj(merged)
 
         // Anchor promotion: when the top candidate drifts away from a
         // previously established prefix, promote any candidate that
@@ -1824,6 +1825,27 @@ public final class BurmeseEngine: @unchecked Sendable {
             return String(chars[..<i] + chars[(i + 1)...])
         }
         return nil
+    }
+
+    /// Orphan `ZWNJ + combining-mark` surfaces are a Unicode rendering
+    /// kludge that shows a standalone dependent vowel or medial — never
+    /// valid Burmese orthography. The parser emits them when a bare-vowel
+    /// or bare-mark input has no onset consonant to anchor the mark. The
+    /// engine suppresses them from the panel whenever any legal-structure
+    /// candidate survives (see CLAUDE.md § *Orphan dependent-vowel
+    /// sanitizer*); when no legal sibling exists, the orphan is kept as
+    /// a last-resort fallback so the user can still commit something.
+    private static func isOrphanZwnjMark(_ surface: String) -> Bool {
+        let scalars = Array(surface.unicodeScalars)
+        guard scalars.count >= 2, scalars[0].value == 0x200C else { return false }
+        let v = scalars[1].value
+        return v >= 0x102B && v <= 0x103A
+    }
+
+    private static func sanitizeOrphanZwnj(_ candidates: [Candidate]) -> [Candidate] {
+        let hasLegal = candidates.contains { !isOrphanZwnjMark($0.surface) }
+        guard hasLegal else { return candidates }
+        return candidates.filter { !isOrphanZwnjMark($0.surface) }
     }
 
     private static func hasInterleavedLatin(_ output: String) -> Bool {

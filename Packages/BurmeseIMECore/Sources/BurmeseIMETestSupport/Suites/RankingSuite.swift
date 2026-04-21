@@ -576,6 +576,70 @@ public enum RankingSuite {
                 "kyawColon_shortAa")
         })
 
+        // MARK: - Task 02: orphan ZWNJ + dep-vowel sanitizer
+
+        @Sendable func hasOrphanZwnjMark(_ surface: String) -> Bool {
+            let scalars = Array(surface.unicodeScalars)
+            guard scalars.count >= 2, scalars[0].value == 0x200C else { return false }
+            let v = scalars[1].value
+            return (v >= 0x102B && v <= 0x103A)
+        }
+
+        // Group 1: independent-vowel rank 1 exists; orphan ZWNJ forms must
+        // be removed from the panel.
+        for (buffer, expected) in [
+            ("u", "ဦ"),
+            ("u:", "ဦး"),
+            ("u.", "ဥ"),
+            ("ay", "ဧ"),
+            ("oo", "ဩ"),
+            ("oo:", "ဪ"),
+            ("ii", "ဤ"),
+            ("ii.", "ဣ"),
+        ] {
+            cases.append(TestCase("task02_orphanZwnj_suppressed_\(buffer)") { ctx in
+                let state = BurmeseEngine().update(buffer: buffer, context: [])
+                let surfaces = state.candidates.map(\.surface)
+                ctx.assertTrue(
+                    surfaces.first == expected,
+                    "task02_top_\(buffer)",
+                    detail: "expected top=\(expected); got: \(surfaces)"
+                )
+                ctx.assertFalse(
+                    surfaces.contains(where: hasOrphanZwnjMark),
+                    "task02_noOrphanSibling_\(buffer)",
+                    detail: "orphan ZWNJ+mark present for \(buffer); got: \(surfaces)"
+                )
+            })
+        }
+
+        // Group 2: no legal independent-vowel form exists; orphan must
+        // survive as fallback so the user can still commit something.
+        for buffer in ["ay.", "ay:", "aw.", "aw:"] {
+            cases.append(TestCase("task02_orphanZwnj_preservedFallback_\(buffer)") { ctx in
+                let state = BurmeseEngine().update(buffer: buffer, context: [])
+                let surfaces = state.candidates.map(\.surface)
+                ctx.assertFalse(
+                    surfaces.isEmpty,
+                    "task02_fallbackNotEmpty_\(buffer)",
+                    detail: "panel must keep orphan fallback when no legal sibling exists")
+            })
+        }
+
+        // Group 3: unrelated buffers (no orphan to begin with) must remain
+        // byte-identical at rank 1.
+        for (buffer, expectedTop) in [
+            ("a", "အ"),
+            ("aa", "အ"),
+        ] {
+            cases.append(TestCase("task02_unchanged_\(buffer)") { ctx in
+                let state = BurmeseEngine().update(buffer: buffer, context: [])
+                let top = state.candidates.first?.surface ?? ""
+                ctx.assertEqual(top, expectedTop,
+                    "task02_group3_\(buffer)_top")
+            })
+        }
+
         return TestSuite(name: "Ranking", cases: cases)
     }()
 }
