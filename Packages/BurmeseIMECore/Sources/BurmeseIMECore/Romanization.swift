@@ -130,18 +130,18 @@ public enum Romanization {
     /// their ya-yit twin from the canonical `cons+"y"` path, so they need no
     /// explicit mirror here.
     public static let clusterAliases: [ClusterAliasEntry] = [
-        .init(roman: "j",   consonant: Myanmar.ka,  medials: [Myanmar.medialYa]),
-        .init(roman: "j",   consonant: Myanmar.ka,  medials: [Myanmar.medialRa], aliasCost: 51),
-        .init(roman: "jw",  consonant: Myanmar.ka,  medials: [Myanmar.medialYa, Myanmar.medialWa]),
-        .init(roman: "jw",  consonant: Myanmar.ka,  medials: [Myanmar.medialRa, Myanmar.medialWa], aliasCost: 51),
-        .init(roman: "ch",  consonant: Myanmar.kha, medials: [Myanmar.medialYa]),
-        .init(roman: "ch",  consonant: Myanmar.kha, medials: [Myanmar.medialRa], aliasCost: 51),
-        .init(roman: "chw", consonant: Myanmar.kha, medials: [Myanmar.medialYa, Myanmar.medialWa]),
-        .init(roman: "chw", consonant: Myanmar.kha, medials: [Myanmar.medialRa, Myanmar.medialWa], aliasCost: 51),
+        .init(roman: "j",   consonant: Myanmar.ka,  medials: [Myanmar.medialYa], aliasCost: 0),
+        .init(roman: "j",   consonant: Myanmar.ka,  medials: [Myanmar.medialRa], aliasCost: 1),
+        .init(roman: "jw",  consonant: Myanmar.ka,  medials: [Myanmar.medialYa, Myanmar.medialWa], aliasCost: 0),
+        .init(roman: "jw",  consonant: Myanmar.ka,  medials: [Myanmar.medialRa, Myanmar.medialWa], aliasCost: 1),
+        .init(roman: "ch",  consonant: Myanmar.kha, medials: [Myanmar.medialYa], aliasCost: 0),
+        .init(roman: "ch",  consonant: Myanmar.kha, medials: [Myanmar.medialRa], aliasCost: 1),
+        .init(roman: "chw", consonant: Myanmar.kha, medials: [Myanmar.medialYa, Myanmar.medialWa], aliasCost: 0),
+        .init(roman: "chw", consonant: Myanmar.kha, medials: [Myanmar.medialRa, Myanmar.medialWa], aliasCost: 1),
         .init(roman: "gy",  consonant: Myanmar.ga,  medials: [Myanmar.medialYa]),
         .init(roman: "gyw", consonant: Myanmar.ga,  medials: [Myanmar.medialYa, Myanmar.medialWa]),
-        .init(roman: "sh",  consonant: Myanmar.ra,  medials: [Myanmar.medialHa]),
-        .init(roman: "shw", consonant: Myanmar.ra,  medials: [Myanmar.medialHa, Myanmar.medialWa]),
+        .init(roman: "sh",  consonant: Myanmar.ra,  medials: [Myanmar.medialHa], aliasCost: 0),
+        .init(roman: "shw", consonant: Myanmar.ra,  medials: [Myanmar.medialWa, Myanmar.medialHa], aliasCost: 0),
         // Doubled consonant shortcut: `ll` surfaces ဠ (retroflex la) as
         // an alternative to the rank-1 `la la` literal pair. Users who
         // type `lla` expecting a single retroflex consonant then pick

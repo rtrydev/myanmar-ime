@@ -144,5 +144,51 @@ public enum ClusterAliasSuite {
                 detail: "expected 'char' candidates to include ချာ, got: \(surfaces)"
             )
         },
+
+        // MARK: - Clusters survive inside compound buffers (task 04)
+        //
+        // Well-established cluster aliases (`sh`, `shw`) previously lost
+        // to their canonical decomposition (`s + h + i + …`) once embedded
+        // in a longer buffer because the alias cost summed to more than
+        // the cost-free decomposition. The winning decomposition produced
+        // `စဟင်` / `စဝှယ်` shapes that aren't real orthography.
+
+        TestCase("cluster_shway_resolvesToCluster_task04") { ctx in
+            let engine = BurmeseEngine()
+            let top = engine.update(buffer: "shway", context: []).candidates.first?.surface ?? ""
+            ctx.assertEqual(top, "ရွှေ",
+                            "shway must resolve to ရွှေ; got '\(top)'")
+        },
+
+        TestCase("cluster_shwayshar_resolvesToClusterPair_task04") { ctx in
+            let engine = BurmeseEngine()
+            let top = engine.update(buffer: "shwayshar", context: []).candidates.first?.surface ?? ""
+            ctx.assertEqual(top, "ရွှေရှာ",
+                            "shwayshar must resolve to ရွှေရှာ; got '\(top)'")
+        },
+
+        TestCase("cluster_shinInCompound_retainsCluster_task04") { ctx in
+            let engine = BurmeseEngine()
+            let top = engine.update(
+                buffer: "mingalarparshinbyarthwarmaylay",
+                context: []
+            ).candidates.first?.surface ?? ""
+            ctx.assertTrue(top.contains("ရှင်"),
+                           detail: "mingalarparshinbyarthwarmaylay must contain ရှင် (not စဟင်); got '\(top)'")
+            ctx.assertFalse(top.contains("စဟင်"),
+                            detail: "decomposition စဟင် must not appear; got '\(top)'")
+        },
+
+        TestCase("cluster_shintokya_retainsCluster_task04") { ctx in
+            let engine = BurmeseEngine()
+            let top = engine.update(
+                buffer: "shintokyamintamin",
+                context: []
+            ).candidates.first?.surface ?? ""
+            ctx.assertTrue(top.hasPrefix("ရှင်"),
+                           detail: "shintokyamintamin must start with ရှင်; got '\(top)'")
+            ctx.assertFalse(top.hasPrefix("စဟင်"),
+                            detail: "decomposition စဟင် must not lead; got '\(top)'")
+        },
     ])
 }
