@@ -79,8 +79,11 @@ public enum ReverseRomanizer {
                     result += vowelRoman
                     i = j + consumed
                 } else {
-                    // Inherent vowel 'a' — emit "a" only if this isn't the final consonant
-                    // with a following asat (which would be handled by vowel matching)
+                    // Inherent vowel 'a'. Emitted even for `အ` (roman `ah`)
+                    // because the trailing `a` serves as a syllable-boundary
+                    // anchor downstream: without it, compound buffers like
+                    // `ahphayahainhmarhri.te` become parser-ambiguous between
+                    // `ah+ph+ay` and `a+hph+ay`.
                     result += "a"
                     i = j
                 }
@@ -141,6 +144,13 @@ public enum ReverseRomanizer {
 
     /// Match a vowel/final sequence starting at position.
     /// Returns the roman key and number of scalars consumed.
+    ///
+    /// The `2` suffix on aa-shape vowels (`ar2`, `aw2`, `out2`, `aung2`,
+    /// and their tonal siblings) is stripped from the emitted roman:
+    /// those digits just disambiguate tall-aa (U+102B) from short-aa
+    /// (U+102C), which `BurmeseEngine.correctAaShape` resolves from the
+    /// preceding consonant at render time. The reading the user types
+    /// has no `2`, so the reverse form must agree.
     private static func matchVowelSequence(_ scalars: [Unicode.Scalar], from start: Int) -> (String, Int)? {
         guard start < scalars.count else { return nil }
 
@@ -151,6 +161,7 @@ public enum ReverseRomanizer {
 
         // Match against known vowel output patterns (reverse of Romanization.vowels)
         // Check longest patterns first
+        let tallAa: UInt32 = 0x102B
         for entry in vowelPatterns {
             let pattern = entry.pattern
             if pattern.count <= slice.count {
@@ -162,7 +173,13 @@ public enum ReverseRomanizer {
                     }
                 }
                 if matches {
-                    return (entry.roman, pattern.count)
+                    let roman: String
+                    if pattern.contains(tallAa) {
+                        roman = entry.roman.filter { $0 != "2" }
+                    } else {
+                        roman = entry.roman
+                    }
+                    return (roman, pattern.count)
                 }
             }
         }

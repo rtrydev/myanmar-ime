@@ -43,8 +43,20 @@ public enum ReverseRomanizerSuite {
             ctx.assertEqual(ReverseRomanizer.romanize("ဦး"), "u2:")
         },
 
-        TestCase("reverse_minGalarPar2") { ctx in
-            ctx.assertEqual(ReverseRomanizer.romanize("မင်္ဂလာပါ"), "min+galarpar2")
+        TestCase("reverse_minGalarPar") { ctx in
+            // ပါ uses tall-aa U+102B, but `correctAaShape` resolves shape from
+            // the base consonant — the reverse form drops the `2` so the
+            // reading matches what users actually type.
+            ctx.assertEqual(ReverseRomanizer.romanize("မင်္ဂလာပါ"), "min+galarpar")
+        },
+
+        TestCase("reverse_tallAa_stripsDigit") { ctx in
+            // All ar-shape aa variants collapse to the digit-less form.
+            ctx.assertEqual(ReverseRomanizer.romanize("\u{1015}\u{102B}"), "par")
+            ctx.assertEqual(ReverseRomanizer.romanize("\u{1015}\u{102B}\u{1038}"), "par:")
+            ctx.assertEqual(ReverseRomanizer.romanize("\u{1000}\u{1031}\u{102B}\u{103A}"), "kaw")
+            ctx.assertEqual(ReverseRomanizer.romanize("\u{1000}\u{1031}\u{102B}\u{1000}\u{103A}"), "kout")
+            ctx.assertEqual(ReverseRomanizer.romanize("\u{1000}\u{1031}\u{102B}\u{1004}\u{103A}"), "kaung")
         },
 
         TestCase("roundTrip_thar") { ctx in
@@ -63,12 +75,43 @@ public enum ReverseRomanizerSuite {
             ctx.assertEqual(forward, roundTrip)
         },
 
-        TestCase("roundTrip_minGalarPar2") { ctx in
+        TestCase("roundTrip_minGalarPar") { ctx in
+            // Feed the tall-aa canonical reading through the parser, reverse
+            // its surface, and re-parse: the digit-stripped reverse form
+            // must parse to the same short-aa surface that `"min+galarpar"`
+            // produces directly.
             let parser = SyllableParser()
             let forward = parser.parse("min+galarpar2").first?.output ?? ""
             let reversed = ReverseRomanizer.romanize(forward)
             let roundTrip = parser.parse(reversed).first?.output ?? ""
-            ctx.assertEqual(forward, roundTrip)
+            let shortAaForward = parser.parse("min+galarpar").first?.output ?? ""
+            ctx.assertEqual(shortAaForward, roundTrip)
+        },
+
+        TestCase("roundTrip_lexiconSurfaces") { ctx in
+            // For each surface below (drawn from real lexicon-like words),
+            // reverse-romanize then forward-parse; the shape of `ar/ar2`
+            // (U+102B/U+102C) is allowed to differ because `correctAaShape`
+            // re-selects the right variant at engine-emission time.
+            let parser = SyllableParser()
+            let surfaces = [
+                "\u{1021}",                                      // အ
+                "\u{1021}\u{1019}",                              // အမ
+                "\u{1021}\u{1019}\u{1031}",                      // အမေ
+                "\u{1021}\u{1019}\u{1031}\u{101B}\u{102D}\u{1000}\u{1014}\u{103A}",  // အမေရိကန်
+                "\u{1015}\u{1009}\u{1039}\u{1005}",              // ပဉ္စ
+                "\u{1000}\u{103B}\u{103D}\u{1014}\u{103A}\u{1010}\u{1031}\u{102C}\u{103A}", // ကျွန်တော်
+                "\u{1000}\u{103C}\u{1031}\u{102C}\u{1004}\u{103A}\u{1038}", // ကြောင်း
+                "\u{1014}\u{103E}\u{1004}\u{1037}\u{103A}",      // နှင့်
+            ]
+            for surface in surfaces {
+                let reversed = ReverseRomanizer.romanize(surface)
+                let parsed = parser.parse(reversed).first?.output ?? ""
+                let normalized = normalizeAaShapeForTest(parsed)
+                let expected = normalizeAaShapeForTest(surface)
+                ctx.assertEqual(normalized, expected,
+                    "roundTrip reversed=\(reversed)")
+            }
         },
 
         TestCase("reverse_kinzi_tinKyi") { ctx in
@@ -204,4 +247,18 @@ public enum ReverseRomanizerSuite {
                 detail: "expected ဉာ in candidates (via ny2 alias): \(candidates)")
         },
     ])
+}
+
+// Collapse both aa scalars to the short form so the round-trip check
+// ignores the engine's downstream tall/short selection.
+private func normalizeAaShapeForTest(_ s: String) -> String {
+    var out = ""
+    for scalar in s.unicodeScalars {
+        if scalar.value == 0x102B {
+            out.unicodeScalars.append(Unicode.Scalar(0x102C)!)
+        } else {
+            out.unicodeScalars.append(scalar)
+        }
+    }
+    return out
 }
