@@ -259,6 +259,29 @@ public enum RankingSuite {
             }
         })
 
+        cases.append(TestCase("issueD_standaloneVowelDigitSuffixIsConsumed") { ctx in
+            // Typing the variant-suffix form of a standalone independent
+            // vowel in isolation must not leak the `2` as a literal
+            // Myanmar digit. `u2` selects ဦ, `ay2` selects ဧ, and the
+            // `u2:` compound picks up ဦး.
+            let engine = BurmeseEngine()
+            let expectations: [(key: String, expected: String)] = [
+                ("u2", "ဦ"),
+                ("ay2", "ဧ"),
+                ("u2:", "ဦး"),
+            ]
+            for expectation in expectations {
+                let top = engine.update(buffer: expectation.key, context: []).candidates.first?.surface ?? ""
+                ctx.assertEqual(top, expectation.expected, "standaloneDigit.\(expectation.key)")
+                let scalars = top.unicodeScalars.map(\.value)
+                ctx.assertFalse(
+                    scalars.contains(0x1042),
+                    "standaloneDigit.\(expectation.key).noLiteralDigit",
+                    detail: "top=\(top) scalars=\(scalars)"
+                )
+            }
+        })
+
         // MARK: - Issue E: mid-buffer digit selects variant when the
         // letters+digit form a known rule-key prefix; stays literal otherwise.
 
