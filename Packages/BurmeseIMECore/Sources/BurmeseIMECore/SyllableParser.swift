@@ -466,16 +466,61 @@ public final class SyllableParser: Sendable {
             maxResults: beamWidth
         )
 
-        // Walk buckets backward and finalize the candidate list at each
-        // position until one of the surfaced parses satisfies the caller's
-        // acceptability predicate. This keeps the acceptability walk aligned
-        // with the same string-aware ranking and cleanup used by
-        // `parseCandidates`, which matters for cleaned virama stacks and
-        // explicit digit-disambiguated readings.
+        // Walk buckets backward with a scalar-only probe: at each position
+        // pick the best legal and best illegal state via `isBetterDP`,
+        // materialize only those (at most two string reconstructions per
+        // bucket), and test acceptability. `finalizeStates` — which
+        // materializes every surviving candidate, builds a marker-penalty
+        // map, and runs multiple sorts — is deferred until a bucket has
+        // committed to acceptance, so long garbage inputs pay scalar work
+        // per bucket instead of the full ranking cost. The illegal-state
+        // probe is only useful when an asat-virama clean-stack rescue could
+        // apply, which requires `+` somewhere in the reading; when the
+        // buffer has no `+` we skip that path entirely.
+        let hasViramaInBuffer = chars.contains("+")
         for k in stride(from: chars.count, through: 1, by: -1) {
             if dp[k].needsPrune {
                 pruneBucket(&dp[k], arena: arena, limit: beamWidth)
             }
+
+            var bestLegal: Int32 = -1
+            var bestIllegal: Int32 = -1
+            for idx in dp[k].stateIndices {
+                let s = arena[Int(idx)]
+                guard s.syllableCount > 0 else { continue }
+                if s.isLegal {
+                    if bestLegal < 0 || isBetterDP(s, than: arena[Int(bestLegal)]) {
+                        bestLegal = idx
+                    }
+                } else if hasViramaInBuffer {
+                    if bestIllegal < 0 || isBetterDP(s, than: arena[Int(bestIllegal)]) {
+                        bestIllegal = idx
+                    }
+                }
+            }
+            if bestLegal < 0 && bestIllegal < 0 { continue }
+
+            var probeAccepted = false
+            for idx in [bestLegal, bestIllegal] where idx >= 0 {
+                let s = arena[Int(idx)]
+                let (output, reading) = materialize(stateIdx: idx, arena: arena)
+                let probe = SyllableParse(
+                    output: adjustLeadingVowel(output),
+                    reading: reading,
+                    aliasCost: s.aliasCost,
+                    legalityScore: s.isLegal ? s.legalityScore : 0,
+                    score: s.score,
+                    structureCost: s.structureCost,
+                    syllableCount: s.syllableCount,
+                    rarityPenalty: 0
+                )
+                if acceptable(probe) {
+                    probeAccepted = true
+                    break
+                }
+            }
+            guard probeAccepted else { continue }
+
             let parses = finalizeStates(
                 arena: arena,
                 finalIndices: dp[k].stateIndices,
