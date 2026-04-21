@@ -188,6 +188,28 @@ Optional feature that substitutes ASCII `. , ! ? ;` with their Myanmar
 equivalents (`။` / `၊`) when the surrounding context is Myanmar. Off by
 default; enable from Preferences → Text output.
 
+### Mixed-Script Input
+Like Pinyin, Kotoeri, and other system IMEs, Myanmar output can be
+freely interlaced with Latin letters, digits, punctuation, or any other
+characters present in the user's input. Each composition run converts
+what it can and leaves the rest verbatim, so the surrounding document
+ends up as a natural mix of Myanmar and non-Myanmar text:
+
+- Unparseable trailing characters (digits, punctuation, symbols) peel
+  off the composable prefix as a **literal tail** and are emitted
+  alongside the Myanmar surface — `thar.` commits as `သာ.`,
+  `min+galar!` as `မင်္ဂလာ!`.
+- Typing English in the middle of a Myanmar sentence just means the
+  Latin run has no legal Burmese parse, so the engine emits the raw
+  buffer verbatim. Users can freely alternate: compose a Burmese word,
+  commit, type `OK`, commit, compose another Burmese word.
+- Switching the menu-bar input mode from **က** to **ABC** disables
+  conversion entirely for passthrough typing.
+
+The only constraint is *within a single composed run*: output never
+contains Latin characters interleaved between Myanmar ones. Mixing
+scripts across runs in the surrounding document is the expected flow.
+
 ### Native macOS Integration
 - Built on **InputMethodKit** (`IMKInputController`).
 - Uses the native **IMKCandidates** panel
@@ -474,8 +496,12 @@ Suites under `Sources/BurmeseIMETestSupport/Suites/`:
 | `FuzzSuite` | Budget-capped random buffers (`FUZZ_BUDGET_MS`, default 1000ms) |
 
 **Key invariants:**
-- All committed output contains only Myanmar Unicode (U+1000–U+109F) and
-  U+200C — no Latin interleaved inside composed runs.
+- Within a single composed run, Myanmar output never has Latin
+  interleaved *between* Myanmar characters. Mixing scripts across runs
+  in the document is expected and supported: literal tails (unparseable
+  suffixes) are emitted verbatim alongside the Myanmar surface, and
+  Latin text between commits flows through untouched — see
+  **Mixed-Script Input** above.
 - Forward parse → reverse romanize → forward parse produces the same
   surface (round-trip stable).
 - Illegal consonant+medial pairs never appear in committed output.

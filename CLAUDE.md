@@ -205,6 +205,26 @@ buffer ─► BurmeseEngine.update
             └─ merge, rank, expand aa      returns CompositionState
 ```
 
+Like Pinyin, Kotoeri, and other system IMEs, the engine is designed to
+let users freely interlace Myanmar with Latin, digits, punctuation, or
+any other characters in the surrounding document. Two mechanisms enable
+this:
+
+- **Literal tail (intra-run):** `splitComposablePrefix` peels
+  non-composable trailing chars (digits, punctuation, symbols) off the
+  buffer. The composable prefix converts to Myanmar; the literal tail is
+  re-appended verbatim to each candidate surface (see [`BurmeseEngine.swift:986`](Packages/BurmeseIMECore/Sources/BurmeseIMECore/BurmeseEngine.swift#L986)).
+  So `thar.` commits as `သာ.` without breaking composition.
+- **Raw passthrough (inter-run):** when the composable prefix has no
+  legal Burmese parse, the engine emits the raw buffer verbatim. The IMK
+  controller (see [`BurmeseInputController.swift:193`](native/macos/BurmeseIME/BurmeseInputController.swift#L193))
+  keeps typeable ASCII in the buffer rather than force-committing, so
+  users can type English words inline and get them back unchanged.
+
+Invariant: within a single composed run, Myanmar output never has Latin
+characters interleaved *between* Myanmar chars (see `PropertySuite` /
+`FuzzSuite`). Mixing scripts across runs in the document is by design.
+
 ### Key types
 
 - **`BurmeseEngine`** — orchestrates composition. Stateful only for its

@@ -1286,5 +1286,59 @@ public enum GrammarSuite {
                 detail: "mwhar must surface ma + wa + ha medials; got \(scalars.map { String(format: "%04X", $0) })"
             )
         },
+
+        // MARK: - Score-tied parses prefer higher legality (task 10)
+        //
+        // When two parses share the same DP score, the higher
+        // legalityScore must win at rank 0. Without an explicit
+        // legality tie-breaker the DP insertion order decides, and
+        // cross-class virama readings (e.g. တ်ဟာ for `athar`) can
+        // surface ahead of the clean အသာ parse.
+
+        TestCase("parse_athar_tiedScore_prefersHigherLegality_task10") { ctx in
+            let parser = SyllableParser()
+            let ps = parser.parseCandidates("athar", maxResults: 4)
+            guard let top = ps.first else {
+                ctx.assertTrue(false, detail: "athar returned no parses")
+                return
+            }
+            let topScalars = top.output.unicodeScalars.map(\.value)
+            ctx.assertTrue(
+                topScalars.contains(0x1021),
+                detail: "athar top parse must begin with independent a (U+1021); got \(topScalars.map { String(format: "%04X", $0) })"
+            )
+            ctx.assertFalse(
+                topScalars.contains(0x1039),
+                detail: "athar top parse must not contain a virama stack; got \(topScalars.map { String(format: "%04X", $0) })"
+            )
+            // Every other rank with the same DP score must have
+            // legality <= top.legalityScore.
+            for p in ps where p.score == top.score {
+                ctx.assertTrue(
+                    p.legalityScore <= top.legalityScore,
+                    detail: "athar rank tied on score=\(p.score) but had higher legality than top: top=\(top.legalityScore) other=\(p.legalityScore) out=\(p.output)"
+                )
+            }
+        },
+
+        TestCase("parse_atha_tiedScore_prefersHigherLegality_task10") { ctx in
+            let parser = SyllableParser()
+            let ps = parser.parseCandidates("atha", maxResults: 4)
+            guard let top = ps.first else {
+                ctx.assertTrue(false, detail: "atha returned no parses")
+                return
+            }
+            let topScalars = top.output.unicodeScalars.map(\.value)
+            // Independent a + tha: must contain U+1021 and U+101E,
+            // must not contain a virama.
+            ctx.assertTrue(
+                topScalars.contains(0x1021) && topScalars.contains(0x101E),
+                detail: "atha top parse must be အသ (U+1021 U+101E); got \(topScalars.map { String(format: "%04X", $0) })"
+            )
+            ctx.assertFalse(
+                topScalars.contains(0x1039),
+                detail: "atha top parse must not contain a virama stack; got \(topScalars.map { String(format: "%04X", $0) })"
+            )
+        },
     ])
 }

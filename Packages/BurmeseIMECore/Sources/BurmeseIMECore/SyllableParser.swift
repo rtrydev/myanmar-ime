@@ -1882,6 +1882,9 @@ public final class SyllableParser: Sendable {
         if lhs.state.score != rhs.state.score {
             return lhs.state.score > rhs.state.score
         }
+        if lhs.state.legalityScore != rhs.state.legalityScore {
+            return lhs.state.legalityScore > rhs.state.legalityScore
+        }
         if lhs.state.structureCost != rhs.state.structureCost {
             return lhs.state.structureCost < rhs.state.structureCost
         }
@@ -1921,6 +1924,9 @@ public final class SyllableParser: Sendable {
         }
         if lhs.state.score != rhs.state.score {
             return lhs.state.score > rhs.state.score
+        }
+        if lhs.state.legalityScore != rhs.state.legalityScore {
+            return lhs.state.legalityScore > rhs.state.legalityScore
         }
         if lhs.state.structureCost != rhs.state.structureCost {
             return lhs.state.structureCost < rhs.state.structureCost
