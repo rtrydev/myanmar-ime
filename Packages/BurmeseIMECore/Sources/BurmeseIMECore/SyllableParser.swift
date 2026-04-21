@@ -171,6 +171,13 @@ public final class SyllableParser: Sendable {
             }
         }
 
+        // Consonant bases where appending `h` forms a distinct consonant
+        // digraph (kh, gh, ph, dh, th) or a reserved cluster alias (sh).
+        // A natural-order permutation that starts with `h` after one of
+        // these bases would be indistinguishable from the digraph
+        // consumption of `h`, so those permutations are skipped.
+        let hDigraphBases: Set<String> = ["k", "g", "p", "d", "t", "s"]
+
         // Generate all consonant + medial combinations (matching the legacy engine)
         for cons in Romanization.consonants {
             appendOnset(
@@ -204,14 +211,63 @@ public final class SyllableParser: Sendable {
                     (hasY2 ? "y2" : "")
 
                 let myanmarOutput = Grammar.composeOnset(consonant: cons.myanmar, medials: combo)
+                let baseAliasCost = cons.aliasCost + (allLegal ? 0 : 100)
 
                 appendOnset(
                     canonicalRoman: canonicalRoman,
                     myanmar: myanmarOutput,
                     onset: cons.myanmar,
                     medials: combo,
-                    baseAliasCost: cons.aliasCost + (allLegal ? 0 : 100)
+                    baseAliasCost: baseAliasCost
                 )
+
+                // For multi-medial combos, also accept natural-order keys
+                // where the user types medial letters after the consonant
+                // in any permutation. The canonical scheme (h prefix +
+                // w+y+y2 suffixes) keeps the `h` medial away from the
+                // base so input like `khywhar` — kha followed by three
+                // medials — doesn't match any canonical. Emit every
+                // post-consonant permutation so the whole cluster stacks
+                // on one base instead of decomposing into multiple
+                // syllables. Permutations that begin with `h` are
+                // skipped for bases that would then form a consonant
+                // digraph (kh/gh/ph/dh/th) or the `sh` cluster alias.
+                guard combo.count >= 2 else { continue }
+
+                let medialLetters: [String] = combo.map { medial in
+                    switch medial {
+                    case Myanmar.medialRa: return "y"
+                    case Myanmar.medialYa: return "y2"
+                    case Myanmar.medialWa: return "w"
+                    case Myanmar.medialHa: return "h"
+                    default: return ""
+                    }
+                }
+                for perm in Self.permutations(of: medialLetters) {
+                    if perm.first == "h", hDigraphBases.contains(cons.roman) {
+                        continue
+                    }
+                    let naturalKey = cons.roman + perm.joined()
+                    if naturalKey == canonicalRoman { continue }
+
+                    // Preserve the canonical roman in the stored entry
+                    // so reading reconstruction (used for lexicon and
+                    // history lookup) stays in the canonical form
+                    // regardless of which alias key matched.
+                    for variant in Romanization.aliasVariants(
+                        for: naturalKey, baseAliasCost: baseAliasCost
+                    ) {
+                        onsetLookup[variant.key, default: []].append(OnsetEntry(
+                            id: -1,
+                            canonicalRoman: canonicalRoman,
+                            myanmar: myanmarOutput,
+                            onset: cons.myanmar,
+                            medials: combo,
+                            aliasCost: variant.aliasCost,
+                            structureCost: combo.count
+                        ))
+                    }
+                }
             }
         }
 
@@ -340,6 +396,24 @@ public final class SyllableParser: Sendable {
             }
         }
         self.onsetLastScalar = onsetLast
+    }
+
+    /// Enumerate every ordering of `items`. Used during onset-table
+    /// construction to emit natural-order medial-letter keys on top of
+    /// the canonical h-prefix scheme. Inputs are small (≤ 3 medial
+    /// letters) so the recursive allocation is negligible.
+    private static func permutations<T>(of items: [T]) -> [[T]] {
+        guard items.count > 1 else { return [items] }
+        var result: [[T]] = []
+        result.reserveCapacity((2...items.count).reduce(1, *))
+        for i in items.indices {
+            var rest = items
+            let pivot = rest.remove(at: i)
+            for sub in permutations(of: rest) {
+                result.append([pivot] + sub)
+            }
+        }
+        return result
     }
 
     /// Compact a `[String: [Entry]]` map into an ASCII trie + flat terminal

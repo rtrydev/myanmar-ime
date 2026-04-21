@@ -1178,5 +1178,101 @@ public enum GrammarSuite {
                 detail: "wa+tta+ya must not truncate to a single consonant; got \(scalars.map { String(format: "%04X", $0) })"
             )
         },
+
+        // MARK: - Triple-Medial Natural-Order Input
+        //
+        // Users type a consonant followed by its medials in roughly the
+        // order the medials appear visually (y-then-w-then-h, or close
+        // variants). The canonical h-prefix scheme (`hkhwy`) doesn't
+        // match that ordering — accept post-consonant permutations as
+        // onset aliases so the whole cluster stacks on one base.
+
+        TestCase("parse_tripleMedial_khywhar_stacksOnOneBase") { ctx in
+            let parser = SyllableParser()
+            let top = parser.parseCandidates("khywhar", maxResults: 1).first
+            let scalars = top?.output.unicodeScalars.map(\.value) ?? []
+            ctx.assertTrue(
+                (top?.syllableCount ?? -1) == 1,
+                detail: "khywhar must parse as a single syllable; got syl=\(top?.syllableCount ?? -1) scalars=\(scalars.map { String(format: "%04X", $0) })"
+            )
+            ctx.assertTrue(
+                scalars.contains(0x1001)
+                    && (scalars.contains(0x103B) || scalars.contains(0x103C))
+                    && scalars.contains(0x103D)
+                    && scalars.contains(0x103E),
+                detail: "khywhar must surface kha + (ya-pin|ya-yit) + wa + ha; got \(scalars.map { String(format: "%04X", $0) })"
+            )
+        },
+
+        TestCase("parse_tripleMedial_kywhar_stacksOnOneBase") { ctx in
+            let parser = SyllableParser()
+            let top = parser.parseCandidates("kywhar", maxResults: 1).first
+            let scalars = top?.output.unicodeScalars.map(\.value) ?? []
+            ctx.assertTrue(
+                (top?.syllableCount ?? -1) == 1,
+                detail: "kywhar must parse as a single syllable; got syl=\(top?.syllableCount ?? -1) scalars=\(scalars.map { String(format: "%04X", $0) })"
+            )
+            ctx.assertTrue(
+                scalars.contains(0x1000)
+                    && (scalars.contains(0x103B) || scalars.contains(0x103C))
+                    && scalars.contains(0x103D)
+                    && scalars.contains(0x103E),
+                detail: "kywhar must surface ka + (ya-pin|ya-yit) + wa + ha; got \(scalars.map { String(format: "%04X", $0) })"
+            )
+        },
+
+        TestCase("parse_tripleMedial_myhwar_stacksOnOneBase") { ctx in
+            // Users may type medials in a non-canonical order (yhw).
+            // All permutations of post-consonant medial letters should
+            // resolve to the same stacked cluster.
+            let parser = SyllableParser()
+            let top = parser.parseCandidates("myhwar", maxResults: 1).first
+            let scalars = top?.output.unicodeScalars.map(\.value) ?? []
+            ctx.assertTrue(
+                (top?.syllableCount ?? -1) == 1,
+                detail: "myhwar must parse as a single syllable; got syl=\(top?.syllableCount ?? -1) scalars=\(scalars.map { String(format: "%04X", $0) })"
+            )
+            ctx.assertTrue(
+                scalars.contains(0x1019)
+                    && (scalars.contains(0x103B) || scalars.contains(0x103C))
+                    && scalars.contains(0x103D)
+                    && scalars.contains(0x103E),
+                detail: "myhwar must surface ma + (ya-pin|ya-yit) + wa + ha; got \(scalars.map { String(format: "%04X", $0) })"
+            )
+        },
+
+        TestCase("parse_doubleMedial_kywar_stacksOnOneBase") { ctx in
+            // Natural order y-then-w (canonical is w-then-y = `kwyar`).
+            let parser = SyllableParser()
+            let top = parser.parseCandidates("kywar", maxResults: 1).first
+            let scalars = top?.output.unicodeScalars.map(\.value) ?? []
+            ctx.assertTrue(
+                (top?.syllableCount ?? -1) == 1,
+                detail: "kywar must parse as a single syllable; got syl=\(top?.syllableCount ?? -1) scalars=\(scalars.map { String(format: "%04X", $0) })"
+            )
+            ctx.assertTrue(
+                scalars.contains(0x1000)
+                    && (scalars.contains(0x103B) || scalars.contains(0x103C))
+                    && scalars.contains(0x103D),
+                detail: "kywar must surface ka + (ya-pin|ya-yit) + wa; got \(scalars.map { String(format: "%04X", $0) })"
+            )
+        },
+
+        TestCase("parse_doubleMedial_mwhar_stacksOnOneBase") { ctx in
+            // Natural order w-then-h (canonical is h-prefix = `hmwar`).
+            let parser = SyllableParser()
+            let top = parser.parseCandidates("mwhar", maxResults: 1).first
+            let scalars = top?.output.unicodeScalars.map(\.value) ?? []
+            ctx.assertTrue(
+                (top?.syllableCount ?? -1) == 1,
+                detail: "mwhar must parse as a single syllable; got syl=\(top?.syllableCount ?? -1) scalars=\(scalars.map { String(format: "%04X", $0) })"
+            )
+            ctx.assertTrue(
+                scalars.contains(0x1019)
+                    && scalars.contains(0x103D)
+                    && scalars.contains(0x103E),
+                detail: "mwhar must surface ma + wa + ha medials; got \(scalars.map { String(format: "%04X", $0) })"
+            )
+        },
     ])
 }
