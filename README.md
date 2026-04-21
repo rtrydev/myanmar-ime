@@ -161,9 +161,22 @@ Aspirated sonorants already fall out of the `h`-prefix medial scheme:
 
 ### Unicode Canonical Output
 Output characters are emitted in Unicode canonical order (ျ < ြ < ွ < ှ).
-Leading dependent vowels are automatically prefixed with U+200C
-(zero-width non-joiner). No Latin characters ever appear in committed
-output.
+No Latin characters ever appear in committed output.
+
+**Orphan dependent-vowel policy.** Burmese orthography has no valid
+form where a dependent vowel or combining mark stands alone — every
+such mark must attach to a consonant base. When the parser has no onset
+to anchor a bare vowel input (e.g. `u`, `ay`), it can technically emit
+`U+200C` (zero-width non-joiner) as an invisible base so the mark
+renders; this is a Unicode rendering kludge, not Burmese text. The
+engine applies an orthographic sanitizer after ranking: **any candidate
+whose surface begins with `U+200C` followed by a combining mark is
+dropped from the panel whenever at least one legal-structure candidate
+survives.** Only when the buffer would otherwise produce no candidate
+does the ZWNJ form reach the user, as a pedagogical fallback for
+inserting a bare combining mark. Inputs like `u` / `u:` / `ay` surface
+the independent vowels ဦ / ဦး / ဧ exclusively; the ZWNJ sibling is
+never offered alongside them.
 
 ### Bundled SQLite Lexicon
 The lexicon is compiled from a TSV source file into a bundled read-only

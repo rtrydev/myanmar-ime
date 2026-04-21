@@ -225,6 +225,42 @@ Invariant: within a single composed run, Myanmar output never has Latin
 characters interleaved *between* Myanmar chars (see `PropertySuite` /
 `FuzzSuite`). Mixing scripts across runs in the document is by design.
 
+### Orphan dependent-vowel sanitizer
+
+The parser can emit `U+200C` (ZWNJ) + a dependent vowel or combining
+mark when a bare vowel input has no onset consonant to anchor the mark
+(e.g. `u` → `‌ူ`, `ay` → `‌ေ`). The ZWNJ is an invisible base that
+makes the combining mark render standalone under Unicode — it is *not*
+valid Burmese orthography. Real Burmese text never contains ZWNJ+mark;
+the correct surface for a bare vowel is always an independent vowel
+(ဦ, ဧ, ဩ, …).
+
+Policy — applied as a post-ranking sanitizer in `BurmeseEngine`:
+
+> **Drop any candidate whose surface begins with `U+200C` followed by
+> a combining mark (`U+102B`–`U+103A` range) whenever at least one
+> candidate with a legal-structure orthographic surface survives in
+> the panel.**
+
+When the buffer yields *no* other candidate (rare — essentially only
+pedagogical "insert a bare combining mark" inputs), the ZWNJ form is
+allowed through as a last-resort fallback so the user can still commit
+something. This keeps the panel clean without losing the escape hatch.
+
+The sanitizer applies to both:
+
+- **Standalone vowel inputs** (`u`, `u:`, `ay`) — only the independent
+  vowel surfaces; the ZWNJ sibling is suppressed.
+- **Mid-buffer literals** (`t2ote`) — once `splitComposablePrefix`
+  handles mid-buffer literals as a segment list (see tasks 04 / 10)
+  and the full composable run parses as one syllable, the orphan
+  never arises. The sanitizer is the belt-and-suspenders guard that
+  ensures it never reaches the panel even if new edge cases appear.
+
+Callers adding new parser features that could emit combining marks
+without a base must either produce a legal-structure sibling or accept
+that their output will only surface when nothing else does.
+
 ### Key types
 
 - **`BurmeseEngine`** — orchestrates composition. Stateful only for its
