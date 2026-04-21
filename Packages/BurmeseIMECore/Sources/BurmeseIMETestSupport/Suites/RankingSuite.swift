@@ -640,6 +640,62 @@ public enum RankingSuite {
             })
         }
 
+        // Task 04 — leading literal characters must not collapse the
+        // candidate panel. Each bug case maps the literal head verbatim
+        // onto each Myanmar surface produced by the composable middle,
+        // so the top candidate = leadingLiteral + engine(composable).top.
+        for (buffer, leading, middle, trailing) in [
+            (".aung", ".", "aung", ""),
+            (",aung", ",", "aung", ""),
+            ("!mu", "!", "mu", ""),
+            ("?mu", "?", "mu", ""),
+            ("(thar)", "(", "thar", ")"),
+            ("[thar]", "[", "thar", "]"),
+            ("<thar>", "<", "thar", ">"),
+            (";thar", ";", "thar", ""),
+            ("@thar", "@", "thar", ""),
+            ("#thar", "#", "thar", ""),
+            ("$thar", "$", "thar", ""),
+            ("%thar", "%", "thar", ""),
+            ("&thar", "&", "thar", ""),
+            ("\"thar\"", "\"", "thar", "\""),
+        ] {
+            cases.append(TestCase("task04_leadingLiteral_\(buffer)") { ctx in
+                let engine = BurmeseEngine()
+                let state = engine.update(buffer: buffer, context: [])
+                let surfaces = state.candidates.map(\.surface)
+                ctx.assertFalse(
+                    surfaces.isEmpty,
+                    "task04_nonEmpty_\(buffer)",
+                    detail: "leading literal \(buffer) produced no candidates"
+                )
+                let middleState = engine.update(buffer: middle, context: [])
+                let middleTop = middleState.candidates.first?.surface ?? ""
+                let expected = leading + middleTop + trailing
+                ctx.assertTrue(
+                    surfaces.first == expected,
+                    "task04_top_\(buffer)",
+                    detail: "expected top=\(expected); got: \(surfaces)"
+                )
+            })
+        }
+
+        // Task 04 — currently-working inputs must return byte-identical
+        // surfaces after the refactor. `'thar'` uses `'` as a composable
+        // null-vowel separator so the apostrophes get swallowed; `123kya`
+        // flows through the separate leading-digit path.
+        for (buffer, expectedTop) in [
+            ("'thar'", "သာ"),
+            ("123kya", "၁၂၃ကြ"),
+        ] {
+            cases.append(TestCase("task04_preservedBehavior_\(buffer)") { ctx in
+                let state = BurmeseEngine().update(buffer: buffer, context: [])
+                let top = state.candidates.first?.surface ?? ""
+                ctx.assertEqual(top, expectedTop,
+                    "task04_preserved_\(buffer)")
+            })
+        }
+
         return TestSuite(name: "Ranking", cases: cases)
     }()
 }

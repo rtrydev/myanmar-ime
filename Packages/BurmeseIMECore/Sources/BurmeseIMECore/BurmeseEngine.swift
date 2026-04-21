@@ -301,10 +301,17 @@ public final class BurmeseEngine: @unchecked Sendable {
             }
             return state
         }
+        // Peel a leading literal head (punctuation, brackets, quotes, …)
+        // before digits / composable extraction. Without this, a buffer
+        // starting with e.g. `.` or `(` collapses the composable prefix to
+        // empty and returns no candidates even though `aung` / `thar`
+        // after the literal are perfectly parseable.
+        let (leadingLiteral, postLeadingLiteralBuffer) =
+            Self.splitLeadingLiteral(displayBuffer)
         // Strip leading ASCII digits — they convert directly to Myanmar
         // digits and are prepended to candidate surfaces after the
         // composable portion is parsed.
-        let (digitPrefix, postDigitBuffer) = Self.splitLeadingDigits(displayBuffer)
+        let (digitPrefix, postDigitBuffer) = Self.splitLeadingDigits(postLeadingLiteralBuffer)
         // Candidates are generated only from the leading run of composing
         // characters. Anything after the first non-composing character
         // (punctuation, whitespace, etc.) is held aside and emitted verbatim
@@ -331,13 +338,14 @@ public final class BurmeseEngine: @unchecked Sendable {
         guard !initialNormalized.isEmpty else {
             // No composable text: if digits or literal text are present,
             // offer Burmese and Arabic digit candidates directly.
-            let rawFullLiteral = digitPrefix + literalTail
+            let rawFullLiteral = leadingLiteral + digitPrefix + literalTail
             let mappedTail = burmesePunctuationEnabled
                 ? Self.mapPunctuation(literalTail)
                 : literalTail
-            let fullLiteral = digitPrefix + mappedTail
+            let fullLiteral = leadingLiteral + digitPrefix + mappedTail
             if Self.containsDigit(fullLiteral) {
-                let burmese = Self.arabicToBurmeseDigits(fullLiteral)
+                let burmese = leadingLiteral
+                    + Self.arabicToBurmeseDigits(digitPrefix + mappedTail)
                 var candidates = [Candidate(
                     surface: burmese,
                     reading: rawFullLiteral,
@@ -349,6 +357,7 @@ public final class BurmeseEngine: @unchecked Sendable {
                 // buffer so the plain-digit candidate stays the default pick.
                 if settings?.numberMeasureWordsEnabled == true,
                    literalTail.isEmpty,
+                   leadingLiteral.isEmpty,
                    !digitPrefix.isEmpty {
                     for entry in NumberMeasureWords.shared.candidates(
                         forDigits: digitPrefix, limit: 2
@@ -996,8 +1005,9 @@ public final class BurmeseEngine: @unchecked Sendable {
             cacheLock.unlock()
         }
 
-        // Attach digit prefix and literal tail to each candidate surface.
-        let hasAffixes = !digitPrefix.isEmpty || !effectiveTail.isEmpty
+        // Attach leading literal, digit prefix, and literal tail to each
+        // candidate surface.
+        let hasAffixes = !leadingLiteral.isEmpty || !digitPrefix.isEmpty || !effectiveTail.isEmpty
         let mergedWithAffixes: [Candidate]
         if !hasAffixes {
             mergedWithAffixes = merged
@@ -1008,14 +1018,14 @@ public final class BurmeseEngine: @unchecked Sendable {
             for candidate in merged {
                 let candidateTail = effectiveTail
                 let hasDigitAffixes = Self.containsDigit(digitPrefix) || Self.containsDigit(candidateTail)
-                if digitPrefix.isEmpty && candidateTail.isEmpty {
+                if leadingLiteral.isEmpty && digitPrefix.isEmpty && candidateTail.isEmpty {
                     if seen.insert(candidate.surface).inserted {
                         expanded.append(candidate)
                     }
                     continue
                 }
                 if hasDigitAffixes {
-                    let primary = burmesePrefix + candidate.surface + Self.arabicToBurmeseDigits(candidateTail)
+                    let primary = leadingLiteral + burmesePrefix + candidate.surface + Self.arabicToBurmeseDigits(candidateTail)
                     if seen.insert(primary).inserted {
                         expanded.append(Candidate(
                             surface: primary,
@@ -1024,7 +1034,7 @@ public final class BurmeseEngine: @unchecked Sendable {
                             score: candidate.score
                         ))
                     }
-                    let secondary = digitPrefix + candidate.surface + candidateTail
+                    let secondary = leadingLiteral + digitPrefix + candidate.surface + candidateTail
                     if secondary != primary, seen.insert(secondary).inserted {
                         expanded.append(Candidate(
                             surface: secondary,
@@ -1034,7 +1044,7 @@ public final class BurmeseEngine: @unchecked Sendable {
                         ))
                     }
                 } else {
-                    let surface = digitPrefix + candidate.surface + candidateTail
+                    let surface = leadingLiteral + digitPrefix + candidate.surface + candidateTail
                     if seen.insert(surface).inserted {
                         expanded.append(Candidate(
                             surface: surface,
@@ -1654,6 +1664,30 @@ public final class BurmeseEngine: @unchecked Sendable {
             }
             return Character(scalar)
         })
+    }
+
+    /// Peel a leading run of non-alphanumeric literal characters (the
+    /// "literal head") from the rest of the buffer. Lowercase ASCII
+    /// letters start composable syllables; ASCII digits have their own
+    /// downstream path (→ Myanmar numerals); `'` and `+` are composable
+    /// null-vowel / kinzi separators handled by the parser. Everything
+    /// else at the start is treated as a literal segment and carried
+    /// verbatim onto each candidate surface — `.aung` → `.အောင်`,
+    /// `(thar)` → `(သာ)`, `"thar"` → `"သာ"`. Note `.`, `:`, `*` are in
+    /// `composingCharacters` but cannot start a legal parse, so peeling
+    /// them here prevents the composable run from starting empty.
+    private static func splitLeadingLiteral(_ buffer: String) -> (literal: String, remainder: String) {
+        let firstNonLiteral = buffer.firstIndex(where: { ch in
+            guard let scalar = ch.unicodeScalars.first, ch.unicodeScalars.count == 1 else {
+                return true
+            }
+            let v = scalar.value
+            if v >= 0x61 && v <= 0x7A { return true }            // a-z
+            if v >= 0x30 && v <= 0x39 { return true }            // 0-9
+            if v == 0x27 || v == 0x2B { return true }            // ' and +
+            return false
+        }) ?? buffer.endIndex
+        return (String(buffer[..<firstNonLiteral]), String(buffer[firstNonLiteral...]))
     }
 
     /// Split a leading run of ASCII digits from the rest of the buffer.
