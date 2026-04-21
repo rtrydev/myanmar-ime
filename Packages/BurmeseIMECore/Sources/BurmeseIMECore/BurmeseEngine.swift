@@ -671,7 +671,11 @@ public final class BurmeseEngine: @unchecked Sendable {
             }
             grammarCandidates = deduped
         }
-        grammarCandidates.removeAll { Self.hasInterleavedLatin($0.candidate.surface) }
+        // `hasInterleavedLatin` was already applied to `grammarParses` at
+        // the two removeAll sites above (primary + window-fallback). The
+        // windowed branch merely concatenates `branch.output` (frozen
+        // prefix, Myanmar-only) with each already-filtered parse output,
+        // so a repeat filter here cannot reject anything new.
         grammarCandidates.sort { lhs, rhs in
             grammarCandidateIsBetter(lhs, than: rhs)
         }
