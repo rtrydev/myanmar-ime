@@ -83,14 +83,28 @@ and ဋ as an alternate; the user picks whichever fits. Commits are
 remembered per alias key so the next same-reading input promotes the
 previous pick.
 
-ASCII digits typed by the user are never variant selectors — they are
-literal digits. `min+galar2par2` renders as `မင်္ဂလာ၂ပါ၂`, with
-Burmese digit `၂` inserted at the positions the user typed `2` (and
-the digit-less ASCII form offered as an alternate candidate). The
-`2` / `3` suffixes visible in internal rule tables (`t2`, `p2`, `oo2`, …)
-are code-internal keys used to distinguish variants that share a
-reading; they are **not** part of the romanization scheme exposed to
-the user.
+**ASCII digits are always literal — never variant selectors.** The user
+types the digit-less reading and always disambiguates via the candidate
+panel. Digits the user types anywhere in the buffer are preserved at
+the position they were typed and rendered as either Myanmar numerals
+(၀–၉) or ASCII digits depending on which candidate is selected — the
+engine offers both. So:
+
+- `min+galar2par2` renders `မင်္ဂလာ၂ပါ၂` / `မင်္ဂလာ2ပါ2` — the two
+  `2`s are literal Myanmar/Arabic digits, never variant pickers for ါ.
+- `ky2an` renders `ကယ်၂အန်` or `က၂အန်` (raw composition around the
+  literal `2`), **never** ကျန်. `y2` is an internal token, not a
+  user-facing way to ask for ya-pin (ျ). Users who want ကျန် type
+  `kyan` or `jan` and pick ကျန် from the panel.
+- `t2ote`, `nay2day`, `u2`, `pa2` — every `2`/`3` in these buffers is
+  literal and stays at its position.
+
+The `2` / `3` suffixes visible in internal rule tables (`t2`, `p2`,
+`oo2`, `ky2`, …) are code-internal tokens used to distinguish variants
+that share a reading. They are **not** part of the romanization scheme
+exposed to the user and the user→parser path never interprets a digit
+as a variant selector — even if the surrounding letters happen to
+match an internal variant key.
 
 ### Hybrid Burmese Romanization
 The romanization scheme maps 33 base consonants × medial combinations ×
@@ -286,6 +300,7 @@ which accumulates a raw Roman buffer and calls
 buffer ─► BurmeseEngine.update
             │
             ├─ splitComposablePrefix       composable chars vs. literal tail
+                                           (all ASCII digits break the composable run)
             ├─ Romanization.normalize      alias folding, digit stripping
             ├─ right-shrink probe loop     drop trailing chars until parse is legal
             ├─ sliding-window split        frozen prefix + active tail (long inputs)

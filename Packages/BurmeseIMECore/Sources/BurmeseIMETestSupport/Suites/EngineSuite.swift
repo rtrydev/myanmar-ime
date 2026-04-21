@@ -267,6 +267,75 @@ public enum EngineSuite {
             )
         },
 
+        // ASCII digits never act as variant selectors, even when the
+        // surrounding letters happen to form an internal variant key
+        // (`ky2`, `t2`, `ay2`, `u2`, …). The `2`/`3` digits in those keys
+        // are code-internal only; users disambiguate via the candidate
+        // panel, never by typing a digit. See tasks/06.
+        TestCase("digits_neverSteerVariants_ky2anNotYaPin") { ctx in
+            let engine = BurmeseEngine()
+            let state = engine.update(buffer: "ky2an", context: [])
+            ctx.assertFalse(state.candidates.isEmpty, "hasCandidates")
+            ctx.assertFalse(
+                state.candidates.contains { $0.surface == "ကျန်" },
+                "noYaPinFromDigit",
+                detail: "top=\(state.candidates.first?.surface ?? "")"
+            )
+            ctx.assertTrue(
+                state.candidates.allSatisfy { cand in
+                    cand.surface.unicodeScalars.contains { s in
+                        s.value == 0x1042 || s.value == 0x32
+                    }
+                },
+                "digitLiteralInAllCandidates"
+            )
+        },
+
+        TestCase("digits_neverSteerVariants_t2oteNotRetroflex") { ctx in
+            // `t` + literal `2` + `ote`: the `2` must appear as a digit
+            // in every candidate. The retroflex variant ဋ can still
+            // surface (it's a normal candidate-panel alternate for `t`),
+            // but it must be paired with the literal `2`, never as
+            // ဋုတ် via the `t2` internal key.
+            let engine = BurmeseEngine()
+            let state = engine.update(buffer: "t2ote", context: [])
+            ctx.assertFalse(state.candidates.isEmpty, "hasCandidates")
+            ctx.assertFalse(
+                state.candidates.contains { $0.surface == "ဋုတ်" },
+                "noT2AsVariantSelector",
+                detail: "top=\(state.candidates.first?.surface ?? "")"
+            )
+            ctx.assertTrue(
+                state.candidates.allSatisfy { cand in
+                    cand.surface.unicodeScalars.contains { s in
+                        s.value == 0x1042 || s.value == 0x32
+                    }
+                },
+                "digitLiteralInAllCandidates"
+            )
+        },
+
+        TestCase("digits_neverSteerVariants_u2NotIndependentU") { ctx in
+            // `u2` is the internal key for ဦ; user input `u2` must stay
+            // literal (u + digit), not emit ဦ.
+            let engine = BurmeseEngine()
+            let state = engine.update(buffer: "u2", context: [])
+            ctx.assertFalse(state.candidates.isEmpty, "hasCandidates")
+            ctx.assertFalse(
+                state.candidates.contains { $0.surface == "ဦ" },
+                "noLongIndependentUFromDigit",
+                detail: "top=\(state.candidates.first?.surface ?? "")"
+            )
+            ctx.assertTrue(
+                state.candidates.allSatisfy { cand in
+                    cand.surface.unicodeScalars.contains { s in
+                        s.value == 0x1042 || s.value == 0x32
+                    }
+                },
+                "digitLiteralInAllCandidates"
+            )
+        },
+
         TestCase("digits_trailingLiteralAfterLexiconMatch") { ctx in
             let engine = BurmeseEngine()
             let state = engine.update(buffer: "min+galarpar2", context: [])

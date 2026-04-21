@@ -301,11 +301,19 @@ surface of the chosen candidate, and `SQLiteUserHistoryStore` records
 the pick so the learned history promotes it next time the same
 digitless reading is typed.
 
-ASCII digits in the user-input buffer are always literal. Typing `2`
-produces Myanmar digit `၂` (with ASCII `2` as an alternate). Typing
-`min+galar2par2` produces `မင်္ဂလာ၂ပါ၂` — the two `၂`s at the
-positions the user typed `2`, not variant disambiguators. The numeric
-suffixes appear only inside:
+ASCII digits in the user-input buffer are **always literal** at the
+position typed, **never** variant selectors — even when the surrounding
+letters would otherwise complete an internal variant key. Digits render
+as Myanmar numerals (`၀`–`၉`) or ASCII digits depending on which
+candidate the user picks; both are offered. Examples:
+
+- `min+galar2par2` → `မင်္ဂလာ၂ပါ၂` (or `မင်္ဂလာ2ပါ2`).
+- `ky2an` → `ကြ၂န်` (or `ကြ2န်`), **never** `ကျန်`. Users who want
+  `ကျန်` type `kyan` or `jan` and pick from the panel.
+- `t2ote`, `u2`, `nay2day`, `pa2` — every `2`/`3` stays at the typed
+  position as a literal digit.
+
+The numeric suffixes appear only inside:
 
 - `Romanization.consonantRules` / `vowelRules` rule keys (internal)
 - `ReverseRomanizer` output when there is no canonical digit-less
@@ -314,7 +322,10 @@ suffixes appear only inside:
 - SQLite `reading_alias_index.alias_reading` rows compiled from
   reverse-romanized readings
 
-The user→parser path must never interpret a digit as a variant selector.
+Enforcement: [`BurmeseEngine.splitComposablePrefix`](Packages/BurmeseIMECore/Sources/BurmeseIMECore/BurmeseEngine.swift)
+breaks the composable run on any ASCII digit, and `normalizeForParser`
+filters digits before they can reach the parser. The user→parser path
+never interprets a digit as a variant selector.
 
 ## Working in this repo
 

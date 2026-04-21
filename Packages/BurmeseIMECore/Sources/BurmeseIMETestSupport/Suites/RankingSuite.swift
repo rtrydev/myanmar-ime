@@ -267,35 +267,18 @@ public enum RankingSuite {
             }
         })
 
-        cases.append(TestCase("issueD_standaloneVowelDigitSuffixIsConsumed") { ctx in
-            // Typing the variant-suffix form of a standalone independent
-            // vowel in isolation must not leak the `2` as a literal
-            // Myanmar digit. `u2` selects ဦ, `ay2` selects ဧ, and the
-            // `u2:` compound picks up ဦး.
-            let engine = BurmeseEngine()
-            let expectations: [(key: String, expected: String)] = [
-                ("u2", "ဦ"),
-                ("ay2", "ဧ"),
-                ("u2:", "ဦး"),
-            ]
-            for expectation in expectations {
-                let top = engine.update(buffer: expectation.key, context: []).candidates.first?.surface ?? ""
-                ctx.assertEqual(top, expectation.expected, "standaloneDigit.\(expectation.key)")
-                let scalars = top.unicodeScalars.map(\.value)
-                ctx.assertFalse(
-                    scalars.contains(0x1042),
-                    "standaloneDigit.\(expectation.key).noLiteralDigit",
-                    detail: "top=\(top) scalars=\(scalars)"
-                )
-            }
-        })
+        // MARK: - Issue E: digit always literal, never a variant selector
+        //
+        // ASCII digits typed by the user are always literal Myanmar/Arabic
+        // numerals at the position typed. They never route to an internal
+        // variant key (`ky2`, `t2`, `u2`, `ay2`, …) — users pick variants
+        // from the candidate panel after typing the digit-less reading.
 
-        // MARK: - Issue E: mid-buffer digit selects variant when the
-        // letters+digit form a known rule-key prefix; stays literal otherwise.
-
-        cases.append(TestCase("issueE_ky2arSelectsYaPinVariant") { ctx in
-            // "ky2ar" should route through the ya-pin onset (103B), not
-            // leak a literal Myanmar digit (1042) mid-syllable.
+        cases.append(TestCase("issueE_ky2arKeepsDigitLiteral") { ctx in
+            // `ky2ar`: the `2` must render as a literal digit (U+1042),
+            // not steer the parser to the ya-pin (103B) variant. The
+            // composable prefix is `ky` (ya-yit → 103C) and `2ar` is
+            // literal tail; `ar` re-composes within the tail.
             let engine = BurmeseEngine()
             let state = engine.update(buffer: "ky2ar", context: [])
             guard let top = state.candidates.first else {
@@ -304,25 +287,16 @@ public enum RankingSuite {
             }
             let scalars = top.surface.unicodeScalars.map(\.value)
             ctx.assertTrue(
-                scalars.contains(0x103B),
-                "ky2ar_topHasYaPin",
-                detail: "missing 103B; top=\(top.surface) scalars=\(scalars)"
-            )
-            ctx.assertFalse(
                 scalars.contains(0x1042),
-                "ky2ar_topHasNoMyanmarDigit2",
-                detail: "1042 present; top=\(top.surface) scalars=\(scalars)"
-            )
-            ctx.assertFalse(
-                scalars.contains(0x103C),
-                "ky2ar_topHasNoYaYit",
-                detail: "103C present; top=\(top.surface) scalars=\(scalars)"
+                "ky2ar_topHasLiteralDigit",
+                detail: "expected 1042; top=\(top.surface) scalars=\(scalars)"
             )
         })
 
-        cases.append(TestCase("issueE_t2aaSelectsRetroflex") { ctx in
-            // "t2aa" should produce the Pali retroflex ဋ (100B) with aa,
-            // not ta + literal digit + ah.
+        cases.append(TestCase("issueE_t2aaKeepsDigitLiteral") { ctx in
+            // `t2aa`: the `2` must render as a literal digit (U+1042),
+            // not steer the parser to the retroflex (`t2` → ဋ U+100B)
+            // variant. Users who want ဋ type `ta` and pick from the panel.
             let engine = BurmeseEngine()
             let state = engine.update(buffer: "t2aa", context: [])
             guard let top = state.candidates.first else {
@@ -331,14 +305,14 @@ public enum RankingSuite {
             }
             let scalars = top.surface.unicodeScalars.map(\.value)
             ctx.assertTrue(
-                scalars.first == 0x100B,
-                "t2aa_topStartsWithRetroflexT",
-                detail: "expected 100B first; top=\(top.surface) scalars=\(scalars)"
+                scalars.contains(0x1042),
+                "t2aa_topHasLiteralDigit",
+                detail: "expected 1042; top=\(top.surface) scalars=\(scalars)"
             )
             ctx.assertFalse(
-                scalars.contains(0x1042),
-                "t2aa_topHasNoMyanmarDigit2",
-                detail: "1042 present; top=\(top.surface) scalars=\(scalars)"
+                state.candidates.contains { $0.surface == "ဋာ" },
+                "t2aa_noRetroflexTFromDigit",
+                detail: "top=\(top.surface) scalars=\(scalars)"
             )
         })
 

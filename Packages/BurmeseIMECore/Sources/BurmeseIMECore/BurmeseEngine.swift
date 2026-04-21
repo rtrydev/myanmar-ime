@@ -1667,8 +1667,13 @@ public final class BurmeseEngine: @unchecked Sendable {
     }
 
     private static func normalizeForParser(_ input: String) -> String {
+        // Digits are always literal in user input (never variant
+        // selectors), so the parser must never see `2`/`3`. They get
+        // peeled by `splitComposablePrefix` upstream; this is a
+        // belt-and-suspenders filter in case a digit sneaks in via
+        // a different caller.
         let filtered = String(input.lowercased().filter {
-            Romanization.composingCharacters.contains($0) || Romanization.isNumericAliasMarker($0)
+            Romanization.composingCharacters.contains($0)
         })
         return collapseConnectorRuns(filtered)
     }
@@ -1850,39 +1855,21 @@ public final class BurmeseEngine: @unchecked Sendable {
 
     /// Split a buffer into its leading run of composing characters and the
     /// remainder (starting at the first non-composing character). ASCII
-    /// digits (`2`/`3`) pass through as part of the composable prefix when
-    /// the letters immediately before the digit plus the digit walk a
-    /// known onset/vowel trie key — mid-buffer variant selectors like the
-    /// `2` in `ky2ar` (ya-pin) or `t2aa` (Pali retroflex) get routed to
-    /// the parser. Otherwise the digit peels off as literal tail (e.g. the
-    /// trailing `2` in `kya2` becomes `၂`).
+    /// digits always break the composable run — they are literal Myanmar/
+    /// Arabic numerals at the position typed, never variant selectors for
+    /// internal alias keys (`ky2`, `t2`, `ay2`, `u2`, …). Users
+    /// disambiguate variants via the candidate panel, not by typing `2`
+    /// or `3`.
     private func splitComposablePrefix(_ buffer: String) -> (composable: String, literal: String) {
         var composable = ""
-        var letterRun: [Character] = []
         var iterator = buffer.makeIterator()
         var splitIndex = buffer.startIndex
         var current = buffer.startIndex
         while let ch = iterator.next() {
             defer { current = buffer.index(after: current) }
-            if Romanization.composingCharacters.contains(ch) {
-                composable.append(ch)
-                if ch.isLetter {
-                    letterRun.append(ch)
-                } else {
-                    letterRun.removeAll(keepingCapacity: true)
-                }
-                splitIndex = buffer.index(after: current)
-                continue
-            }
-            if Romanization.isNumericAliasMarker(ch),
-               !letterRun.isEmpty,
-               parser.canDigitSelectMeaningfulVariant(afterLetters: letterRun, digit: ch) {
-                composable.append(ch)
-                letterRun.append(ch)
-                splitIndex = buffer.index(after: current)
-                continue
-            }
-            break
+            guard Romanization.composingCharacters.contains(ch) else { break }
+            composable.append(ch)
+            splitIndex = buffer.index(after: current)
         }
         return (composable, String(buffer[splitIndex...]))
     }
