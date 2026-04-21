@@ -1457,7 +1457,7 @@ private func precomputeOnsetMatches(_ chars: [Character]) -> [[OnsetMatch]] {
                 if prev.value == 0x103A {
                     let twoBack = i >= 2 ? indices[i - 2].value : 0
                     if twoBack != 0x1004 { return false }
-                } else if Romanization.consonantToRoman[Character(prev)] == nil {
+                } else if !isConsonantBase(prev.value) {
                     return false
                 }
                 guard i + 1 < n else { return false }
