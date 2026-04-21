@@ -661,6 +661,30 @@ public enum LexiconRankingSuite {
                            detail: failures.joined(separator: " | "))
         })
 
+        cases.append(TestCase("windowedTail_promotesLexiconWord") { ctx in
+            // Regression guard for edge-long-text-no-lexicon-promotion.
+            // When the buffer exceeds the sliding-window threshold, the
+            // engine splits it into a frozen prefix + active tail. Even
+            // in that branch, a lexicon word matching the tail must still
+            // reach the top of the panel — otherwise long sentences lose
+            // lexicon-corrected renderings entirely (`hrin` devolves to
+            // the literal consonant walk `ဟရင်` instead of ရှင်).
+            guard let lexPath = BundledArtifacts.lexiconPath,
+                  let store = SQLiteCandidateStore(path: lexPath) else {
+                ctx.assertTrue(true, "skipped_noBundledLexicon")
+                return
+            }
+            let engine = BurmeseEngine(candidateStore: store)
+            let buffer = "mingalarparmingalarparhrin"
+            ctx.assertTrue(buffer.count > 20,
+                           detail: "test buffer must exceed window size")
+            let state = engine.update(buffer: buffer, context: [])
+            let top = state.candidates.first?.surface ?? ""
+            let stripped = stripZW(top)
+            ctx.assertTrue(stripped.hasSuffix("ရှင်"),
+                           detail: "top=\(top) candidates=\(state.candidates.prefix(5).map(\.surface))")
+        })
+
         return TestSuite(name: "LexiconRanking", cases: cases)
     }()
 }

@@ -703,15 +703,49 @@ public final class BurmeseEngine: @unchecked Sendable {
             }
         }
 
-        // Skip lexicon lookup entirely when a frozen prefix is in play:
-        // multi-word lexicon hits past the window boundary aren't useful,
-        // and the prefix lookup would be dominated by the cached output.
+        // When windowed, run one lexicon lookup against the active tail
+        // and compose each hit with the frozen-prefix branches — otherwise
+        // long sentences lose lexicon-corrected renderings entirely (the
+        // tail-only parser produces literal digraphs like `s+h` where a
+        // real word like `ရှ` should appear). Outside windowing, look up
+        // the full buffer as before.
         let previousSurface = context.last
         let aliasPrefix = Romanization.aliasReading(normalized)
         let composePrefix = Romanization.composeLookupKey(normalized)
-        let lexiconCandidates: [Candidate] = effectiveWindowed
-            ? []
-            : candidateStore.lookup(prefix: aliasPrefix, previousSurface: previousSurface)
+        let lexiconCandidates: [Candidate]
+        if effectiveWindowed {
+            let tailAlias = Romanization.aliasReading(effectiveParseInput)
+            let branchPrevSurface = effectivePrefixBranches.first?.contextWords.last
+                ?? previousSurface
+            let tailHits = candidateStore.lookup(
+                prefix: tailAlias,
+                previousSurface: branchPrevSurface
+            )
+            // Only promote lexicon entries whose reading is exactly the
+            // tail — partial prefix matches would drift keystroke-to-keystroke
+            // and destabilize the frozen-prefix anchor for long sentences.
+            let exactTailHits = tailHits.filter {
+                Romanization.aliasReading($0.reading) == tailAlias
+            }
+            var composed: [Candidate] = []
+            composed.reserveCapacity(exactTailHits.count * effectivePrefixBranches.count)
+            for branch in effectivePrefixBranches {
+                for hit in exactTailHits {
+                    composed.append(Candidate(
+                        surface: branch.output + hit.surface,
+                        reading: branch.reading + hit.reading,
+                        source: hit.source,
+                        score: hit.score
+                    ))
+                }
+            }
+            lexiconCandidates = composed
+        } else {
+            lexiconCandidates = candidateStore.lookup(
+                prefix: aliasPrefix,
+                previousSurface: previousSurface
+            )
+        }
         // History lookup uses the same alias key as the lexicon so stored
         // reads (written by `recordSelection`) line up exactly with reads.
         // Unlike lexicon candidates, history entries carry a self-contained
