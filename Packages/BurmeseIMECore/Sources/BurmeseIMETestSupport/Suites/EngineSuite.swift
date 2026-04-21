@@ -561,6 +561,55 @@ public enum EngineSuite {
             ctx.assertEqual(parseTop("*"), "\u{200C}\u{103A}")
         },
 
+        // MARK: - Leading `a` + consonant emits independent vowel (task 01)
+
+        TestCase("leadingA_standaloneAlone_emitsIndependent") { ctx in
+            let state = BurmeseEngine().update(buffer: "a", context: [])
+            ctx.assertEqual(state.candidates.first?.surface, "\u{1021}")
+        },
+
+        TestCase("leadingA_plusConsonantVowel_emitsIndependentThenSyllable") { ctx in
+            let state = BurmeseEngine().update(buffer: "atar", context: [])
+            ctx.assertEqual(state.candidates.first?.surface,
+                            "\u{1021}\u{1010}\u{102C}", "atar_top")
+        },
+
+        TestCase("leadingA_plusConsonantNoVowel_emitsIndependentThenBareConsonant") { ctx in
+            let state = BurmeseEngine().update(buffer: "ata", context: [])
+            ctx.assertEqual(state.candidates.first?.surface,
+                            "\u{1021}\u{1010}", "ata_top")
+        },
+
+        TestCase("leadingA_plusConsonantDescender_emitsIndependent") { ctx in
+            let state = BurmeseEngine().update(buffer: "apa", context: [])
+            ctx.assertEqual(state.candidates.first?.surface,
+                            "\u{1021}\u{1015}", "apa_top")
+        },
+
+        TestCase("leadingA_plusKar_emitsIndependent") { ctx in
+            let state = BurmeseEngine().update(buffer: "akar", context: [])
+            ctx.assertEqual(state.candidates.first?.surface,
+                            "\u{1021}\u{1000}\u{102C}", "akar_top")
+        },
+
+        TestCase("leadingA_plusMar_emitsIndependent") { ctx in
+            let state = BurmeseEngine().update(buffer: "amar", context: [])
+            ctx.assertEqual(state.candidates.first?.surface,
+                            "\u{1021}\u{1019}\u{102C}", "amar_top")
+        },
+
+        TestCase("leadingA_plusNar_emitsIndependent") { ctx in
+            let state = BurmeseEngine().update(buffer: "anar", context: [])
+            ctx.assertEqual(state.candidates.first?.surface,
+                            "\u{1021}\u{1014}\u{102C}", "anar_top")
+        },
+
+        TestCase("leadingA_plusLa_emitsIndependent") { ctx in
+            let state = BurmeseEngine().update(buffer: "ala", context: [])
+            ctx.assertEqual(state.candidates.first?.surface,
+                            "\u{1021}\u{101C}", "ala_top")
+        },
+
         // MARK: - Standard Burmese character coverage
 
         TestCase("standardChar_gha_types") { ctx in

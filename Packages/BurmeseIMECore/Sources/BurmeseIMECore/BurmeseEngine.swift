@@ -573,7 +573,11 @@ public final class BurmeseEngine: @unchecked Sendable {
         var effectiveParseInput = parseInput
         var effectivePrefixBranches = prefixBranches
         var effectiveWindowed = windowed
-        var grammarParses = parser.parseCandidates(effectiveParseInput, maxResults: Self.grammarCandidateBudget)
+        var grammarParses = parser.parseCandidates(
+            effectiveParseInput,
+            maxResults: Self.grammarCandidateBudget,
+            isFullBuffer: !effectiveWindowed
+        )
         grammarParses.removeAll { Self.hasInterleavedLatin($0.output) }
         // `windowFallback` is set when the tail-only parse failed so we
         // retried with the full buffer. In that case the anchor is still
@@ -587,7 +591,11 @@ public final class BurmeseEngine: @unchecked Sendable {
             effectivePrefixBranches = []
             effectiveWindowed = false
             windowFallback = true
-            grammarParses = parser.parseCandidates(effectiveParseInput, maxResults: Self.grammarCandidateBudget)
+            grammarParses = parser.parseCandidates(
+                effectiveParseInput,
+                maxResults: Self.grammarCandidateBudget,
+                isFullBuffer: !effectiveWindowed
+            )
             grammarParses.removeAll { Self.hasInterleavedLatin($0.output) }
         }
 
@@ -680,7 +688,11 @@ public final class BurmeseEngine: @unchecked Sendable {
             }
             var seenExtras = existingSurfaces
             for alt in altInputs {
-                let altParses = parser.parseCandidates(alt, maxResults: 2)
+                let altParses = parser.parseCandidates(
+                    alt,
+                    maxResults: 2,
+                    isFullBuffer: !effectiveWindowed
+                )
                 for parse in altParses where !Self.hasInterleavedLatin(parse.output)
                     && !seenExtras.contains(parse.output) {
                     seenExtras.insert(parse.output)

@@ -510,7 +510,19 @@ public final class SyllableParser: Sendable {
     }
 
     /// Parse a romanized buffer into multiple Burmese candidates.
-    public func parseCandidates(_ input: String, maxResults: Int = 8) -> [SyllableParse] {
+    ///
+    /// - Parameter isFullBuffer: when `true`, a leading empty-output
+    ///   standalone `a` before further content is promoted to an explicit
+    ///   U+1021 (independent vowel) so buffers like `atar` render as
+    ///   အတာ rather than consuming the `a` silently into the next onset.
+    ///   When `false` (e.g. a sliding-window active-tail parse), the
+    ///   promotion is suppressed so the tail does not spuriously inject
+    ///   an independent vowel in the middle of the user's buffer.
+    public func parseCandidates(
+        _ input: String,
+        maxResults: Int = 8,
+        isFullBuffer: Bool = true
+    ) -> [SyllableParse] {
         let normalized = Self.normalizeForParser(input)
         guard !normalized.isEmpty, maxResults > 0 else { return [] }
 
@@ -528,7 +540,8 @@ public final class SyllableParser: Sendable {
             arena: arena,
             finalIndices: finalIndices,
             limit: maxResults,
-            requestedReading: normalized
+            requestedReading: normalized,
+            isFullBuffer: isFullBuffer
         )
     }
 
@@ -1313,7 +1326,8 @@ public final class SyllableParser: Sendable {
         arena: [ParseState],
         finalIndices: [Int32],
         limit: Int,
-        requestedReading: String
+        requestedReading: String,
+        isFullBuffer: Bool = true
     ) -> [SyllableParse] {
         // "Non-empty" under the legacy code meant `!output.isEmpty`; here that
         // is precisely `syllableCount > 0` because every emitted output
@@ -1377,7 +1391,7 @@ public final class SyllableParser: Sendable {
             return p
         }
         for idx in filteredIndices {
-            let (output, reading) = materialize(stateIdx: idx, arena: arena)
+            let (output, reading) = materialize(stateIdx: idx, arena: arena, promoteLeadingA: isFullBuffer)
             materialized.append(MaterializedState(
                 state: arena[Int(idx)],
                 output: output,
@@ -1565,7 +1579,11 @@ public final class SyllableParser: Sendable {
     /// transition's contribution, then concatenate forward into a single
     /// `output`/`reading` pair. Only called for the handful of states that
     /// survive finalizing pre-filters.
-    private func materialize(stateIdx: Int32, arena: [ParseState]) -> (output: String, reading: String) {
+    private func materialize(
+        stateIdx: Int32,
+        arena: [ParseState],
+        promoteLeadingA: Bool = true
+    ) -> (output: String, reading: String) {
         var refs: [MatchRef] = []
         var cur = stateIdx
         while cur >= 0 {
@@ -1582,26 +1600,53 @@ public final class SyllableParser: Sendable {
         output.reserveCapacity(refs.count * 4)
         reading.reserveCapacity(refs.count * 4)
 
+        // A leading `a` standalone vowel emits empty output by design so
+        // that bare `a` / `aa` fall into `remapEmptyToInherent`. When more
+        // composable material follows, the empty emission is silently
+        // absorbed into the next syllable (`atar` → တာ instead of အတာ).
+        // Promote the first empty-output inherent-`a` run to U+1021 when
+        // there is any downstream non-skip ref. Suppressed for
+        // sliding-window tail parses — the tail does not start at the
+        // user's buffer origin, so injecting U+1021 there would appear
+        // mid-output as a spurious independent vowel.
+        var sawLeadingA = false
+        var promotedLeadingA = false
         for ref in refs {
             switch ref {
             case .seed, .skip:
                 continue
             case .onsetOnly(let onsetId):
                 let entry = onsetTerminals[Int(onsetId)]
+                if promoteLeadingA && !promotedLeadingA && output.isEmpty && sawLeadingA {
+                    output.unicodeScalars.append(Unicode.Scalar(0x1021)!)
+                    promotedLeadingA = true
+                }
                 output.append(entry.myanmar)
                 reading.append(entry.canonicalRoman)
                 reading.append("a")
             case .onsetVowel(let onsetId, let vowelId):
                 let onset = onsetTerminals[Int(onsetId)]
                 let vowel = vowelTerminals[Int(vowelId)]
+                if promoteLeadingA && !promotedLeadingA && output.isEmpty && sawLeadingA {
+                    output.unicodeScalars.append(Unicode.Scalar(0x1021)!)
+                    promotedLeadingA = true
+                }
                 output.append(onset.myanmar)
                 output.append(vowel.myanmar)
                 reading.append(onset.canonicalRoman)
                 reading.append(vowel.canonicalRoman)
             case .vowelOnly(let vowelId):
                 let entry = vowelTerminals[Int(vowelId)]
+                if promoteLeadingA && !promotedLeadingA && output.isEmpty && sawLeadingA
+                    && !(entry.canonicalRoman == "a" && entry.myanmar.isEmpty) {
+                    output.unicodeScalars.append(Unicode.Scalar(0x1021)!)
+                    promotedLeadingA = true
+                }
                 output.append(entry.myanmar)
                 reading.append(entry.canonicalRoman)
+                if entry.canonicalRoman == "a" && entry.myanmar.isEmpty {
+                    sawLeadingA = true
+                }
             }
         }
         return (Self.stripSpuriousAsatBeforeVirama(Self.canonicalizeMedialOrder(output)), reading)
