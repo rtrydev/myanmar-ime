@@ -183,6 +183,7 @@ public enum Romanization {
     public static let vowels: [VowelEntry] = [
         // Special: stacker and asat (standalone: legal without consonant onset)
         .init("+", "\u{1039}", standalone: true),  // ္ virama (stacking)
+        .init("+", "", standalone: true),  // soft boundary fallback — gated by DP
         .init("*", "\u{103A}", standalone: true),  // ် asat
 
         // Null vowels (inherent 'a') — standalone: legal as connectors

@@ -102,6 +102,14 @@ public final class SyllableParser: Sendable {
     /// stack contexts with an integer compare rather than a string compare.
     private let viramaVowelId: Int32
 
+    /// `VowelMatchEntry.id` of the empty-emission `+` fallback — a "soft
+    /// syllable boundary" used when the virama stack is illegal but the
+    /// consonant after `+` starts a multi-character digraph whose root is
+    /// not stackable (e.g. `pyin+thit` → the `t` of `th` shouldn't be
+    /// consumed as subscript, leaving an orphan `h`). Only emitted when
+    /// gating in the DP succeeds.
+    private let softBoundaryViramaVowelId: Int32
+
     /// Per-vowel: non-zero when the vowel's rendered Myanmar ends with
     /// U+103A (asat) and contains at least two scalars; the value is the
     /// scalar immediately preceding the trailing asat. Used by the
@@ -285,6 +293,7 @@ public final class SyllableParser: Sendable {
 
         var vowelOnlyLegalities = [Int](repeating: 0, count: builtVowelTrie.terminals.count)
         var foundViramaId: Int32 = -1
+        var foundSoftBoundaryId: Int32 = -1
         var vowelEndsAsat = [Bool](repeating: false, count: builtVowelTrie.terminals.count)
         var vowelPreAsat = [UInt32](repeating: 0, count: builtVowelTrie.terminals.count)
         for (idx, entry) in builtVowelTrie.terminals.enumerated() {
@@ -293,8 +302,12 @@ public final class SyllableParser: Sendable {
                 medials: [],
                 vowelRoman: entry.canonicalRoman
             )
-            if foundViramaId < 0 && entry.canonicalRoman == "+" {
-                foundViramaId = entry.id
+            if entry.canonicalRoman == "+" {
+                if entry.myanmar.isEmpty {
+                    if foundSoftBoundaryId < 0 { foundSoftBoundaryId = entry.id }
+                } else if foundViramaId < 0 {
+                    foundViramaId = entry.id
+                }
             }
             let scalars = Array(entry.myanmar.unicodeScalars)
             if let last = scalars.last, last.value == 0x103A {
@@ -306,6 +319,7 @@ public final class SyllableParser: Sendable {
         }
         self.vowelOnlyLegality = vowelOnlyLegalities
         self.viramaVowelId = foundViramaId
+        self.softBoundaryViramaVowelId = foundSoftBoundaryId
         self.vowelEndsWithAsat = vowelEndsAsat
         self.vowelPreAsatScalar = vowelPreAsat
 
@@ -683,6 +697,12 @@ public final class SyllableParser: Sendable {
 
                     let vowelMatches = vowelMatchesByStart[onsetEnd]
                     for (vowelEnd, vowelEntry) in vowelMatches {
+                        // Soft-boundary `+` fallback is only ever emitted as
+                        // a standalone vowelOnly transition, where its
+                        // emission is gated on a digraph-collision check
+                        // (see below). Skipping it here prevents redundant
+                        // onset-glued pair states that would bypass the gate.
+                        if vowelEntry.id == softBoundaryViramaVowelId { continue }
                         let key = Self.packPair(onsetEntry.id, vowelEntry.id)
                         let pairLegalityRaw: Int
                         if let cached = pairLegality[key] {
@@ -724,6 +744,36 @@ public final class SyllableParser: Sendable {
                 }
 
                 for (vowelEnd, vowelEntry) in standaloneVowels where !vowelEntry.isPureMedial {
+                    // Gate the empty-emission `+` fallback to the digraph-
+                    // collision case: the primary virama path would consume
+                    // the first char of a multi-char onset digraph whose
+                    // root is unstackable, leaving an orphan remainder.
+                    // Requires: (a) the prior state would supply a stackable
+                    // upper for `+`, (b) at least one onset at `vowelEnd` is
+                    // length 1 with a root that forms a legal stack with
+                    // upper, and (c) at least one onset at `vowelEnd` is
+                    // length ≥ 2 with a root outside the stack class.
+                    if vowelEntry.id == softBoundaryViramaVowelId {
+                        guard let upper = viramaUpper(previous: previous, arena: arena),
+                              Grammar.stackableConsonants.contains(upper) else {
+                            continue
+                        }
+                        var hasShortLegal = false
+                        var hasLongUnstackable = false
+                        for (oEnd, oEntry) in onsetMatchesByStart[vowelEnd] {
+                            let len = oEnd - vowelEnd
+                            if len == 1
+                                && Grammar.isValidStack(upper: upper, lower: oEntry.onset) {
+                                hasShortLegal = true
+                            }
+                            if len >= 2
+                                && !Grammar.stackableConsonants.contains(oEntry.onset) {
+                                hasLongUnstackable = true
+                            }
+                        }
+                        guard hasShortLegal && hasLongUnstackable else { continue }
+                    }
+
                     var legality = vowelOnlyLegality[Int(vowelEntry.id)]
 
                     // Kinzi rule: U+103A (asat) immediately before U+1039
@@ -882,6 +932,38 @@ public final class SyllableParser: Sendable {
 
         default:
             return .none
+        }
+    }
+
+    /// Derive the would-be stack upper for a hypothetical virama transition
+    /// from `previous`. Parallels `viramaContext` but returns a bare
+    /// `Character?` for use at the vowel-match step (before the virama is
+    /// actually emitted), so the soft-boundary gate can decide whether to
+    /// admit an empty-emission `+` alternative based on the stackability
+    /// of the upper. Returns `nil` when the previous state has no valid
+    /// upper (seed, plain dependent vowel, etc.).
+    private func viramaUpper(
+        previous: ParseState,
+        arena: [ParseState]
+    ) -> Character? {
+        switch previous.matchRef {
+        case let .onsetOnly(onsetId):
+            return onsetTerminals[Int(onsetId)].onset
+
+        case let .onsetVowel(onsetId, vowelId):
+            guard vowelEndsWithAsat[Int(vowelId)] else { return nil }
+            let pre = vowelPreAsatScalar[Int(vowelId)]
+            let scalar = pre != 0 ? pre : onsetLastScalar[Int(onsetId)]
+            return Unicode.Scalar(scalar).map(Character.init)
+
+        case let .vowelOnly(vowelId):
+            guard vowelEndsWithAsat[Int(vowelId)] else { return nil }
+            let pre = vowelPreAsatScalar[Int(vowelId)]
+            guard pre != 0 else { return nil }
+            return Unicode.Scalar(pre).map(Character.init)
+
+        default:
+            return nil
         }
     }
 

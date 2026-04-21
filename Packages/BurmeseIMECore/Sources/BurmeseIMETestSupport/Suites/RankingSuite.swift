@@ -371,6 +371,75 @@ public enum RankingSuite {
             )
         })
 
+        // MARK: - Issue F: kinzi cross-class fallback
+        //
+        // "pyin+thit" should parse as ပြင် (py + in) + kinzi stack + သစ်
+        // (th + it), producing a surface with U+101E (tha). The previous
+        // behavior consumed the `t` of `th` as a stack subscript via the
+        // same-class na/ta path, leaving an orphan `h` that surfaced as a
+        // standalone U+101F (ha) injection. Kinzi allows nga as a stack
+        // upper over any consonant class — relaxing the stack rule for
+        // nga restores the expected reading.
+        cases.append(TestCase("issueF_pyinPlusThitRendersThaNotHa") { ctx in
+            let engine = BurmeseEngine()
+            let state = engine.update(buffer: "pyin+thit", context: [])
+            guard let top = state.candidates.first else {
+                ctx.fail("pyinThit_noCandidates", detail: "panel empty")
+                return
+            }
+            let scalars = top.surface.unicodeScalars.map(\.value)
+            ctx.assertFalse(
+                scalars.contains(0x101F),
+                "pyinThit_noStandaloneHa",
+                detail: "expected no 101F; top=\(top.surface) scalars=\(scalars)"
+            )
+            ctx.assertTrue(
+                scalars.contains(0x101E),
+                "pyinThit_hasTha",
+                detail: "expected 101E (tha); top=\(top.surface) scalars=\(scalars)"
+            )
+        })
+
+        cases.append(TestCase("issueF_hninPlusThitRendersThaNotHa") { ctx in
+            let engine = BurmeseEngine()
+            let state = engine.update(buffer: "hnin+thit", context: [])
+            guard let top = state.candidates.first else {
+                ctx.fail("hninThit_noCandidates", detail: "panel empty")
+                return
+            }
+            let scalars = top.surface.unicodeScalars.map(\.value)
+            ctx.assertFalse(
+                scalars.contains(0x101F),
+                "hninThit_noStandaloneHa",
+                detail: "expected no 101F; top=\(top.surface) scalars=\(scalars)"
+            )
+            ctx.assertTrue(
+                scalars.contains(0x101E),
+                "hninThit_hasTha",
+                detail: "expected 101E (tha); top=\(top.surface) scalars=\(scalars)"
+            )
+        })
+
+        cases.append(TestCase("issueF_myanPlusTharRendersThaNotHa") { ctx in
+            let engine = BurmeseEngine()
+            let state = engine.update(buffer: "myan+thar", context: [])
+            guard let top = state.candidates.first else {
+                ctx.fail("myanThar_noCandidates", detail: "panel empty")
+                return
+            }
+            let scalars = top.surface.unicodeScalars.map(\.value)
+            ctx.assertFalse(
+                scalars.contains(0x101F),
+                "myanThar_noStandaloneHa",
+                detail: "expected no 101F; top=\(top.surface) scalars=\(scalars)"
+            )
+            ctx.assertTrue(
+                scalars.contains(0x101E),
+                "myanThar_hasTha",
+                detail: "expected 101E (tha); top=\(top.surface) scalars=\(scalars)"
+            )
+        })
+
         return TestSuite(name: "Ranking", cases: cases)
     }()
 }
