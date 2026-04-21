@@ -295,41 +295,53 @@ public enum GrammarSuite {
         },
 
         // MARK: - Virama Stack End-to-End (Parser)
+        //
+        // When `+` targets a non-stackable lower (semi-vowel, sibilant) the
+        // virama stack itself is still malformed. Under the task 02 fix the
+        // parser degrades `+` to a syllable break, so the *top* parse must
+        // surface without any virama at all — the invalid stack is
+        // dropped from the beam rather than emitted at rank 0.
 
-        TestCase("parse_invalidStack_kya_isIllegal") { ctx in
+        TestCase("parse_invalidStack_kya_noViramaInTop") { ctx in
             let result = SyllableParser().parse("k+ya").first
-            ctx.assertEqual(result?.legalityScore ?? -1, 0,
-                "k+ya should not pass the legality threshold")
+            let scalars = result?.output.unicodeScalars.map(\.value) ?? []
+            ctx.assertFalse(scalars.contains(0x1039),
+                "k+ya top parse must not contain a virama stack; got \(scalars.map { String(format: "%04X", $0) })")
         },
 
-        TestCase("parse_invalidStack_kwa_isIllegal") { ctx in
+        TestCase("parse_invalidStack_kwa_noViramaInTop") { ctx in
             let result = SyllableParser().parse("k+wa").first
-            ctx.assertEqual(result?.legalityScore ?? -1, 0,
-                "k+wa should not pass the legality threshold")
+            let scalars = result?.output.unicodeScalars.map(\.value) ?? []
+            ctx.assertFalse(scalars.contains(0x1039),
+                "k+wa top parse must not contain a virama stack; got \(scalars.map { String(format: "%04X", $0) })")
         },
 
-        TestCase("parse_invalidStack_knya_isIllegal") { ctx in
+        TestCase("parse_invalidStack_knya_noViramaInTop") { ctx in
             let result = SyllableParser().parse("k+nya").first
-            ctx.assertEqual(result?.legalityScore ?? -1, 0,
-                "k+nya should not pass the legality threshold")
+            let scalars = result?.output.unicodeScalars.map(\.value) ?? []
+            ctx.assertFalse(scalars.contains(0x1039),
+                "k+nya top parse must not contain a virama stack; got \(scalars.map { String(format: "%04X", $0) })")
         },
 
-        TestCase("parse_invalidStack_kla_isIllegal") { ctx in
+        TestCase("parse_invalidStack_kla_noViramaInTop") { ctx in
             let result = SyllableParser().parse("k+la").first
-            ctx.assertEqual(result?.legalityScore ?? -1, 0,
-                "k+la should not pass the legality threshold")
+            let scalars = result?.output.unicodeScalars.map(\.value) ?? []
+            ctx.assertFalse(scalars.contains(0x1039),
+                "k+la top parse must not contain a virama stack; got \(scalars.map { String(format: "%04X", $0) })")
         },
 
-        TestCase("parse_invalidStack_kra_isIllegal") { ctx in
+        TestCase("parse_invalidStack_kra_noViramaInTop") { ctx in
             let result = SyllableParser().parse("k+ra").first
-            ctx.assertEqual(result?.legalityScore ?? -1, 0,
-                "k+ra should not pass the legality threshold")
+            let scalars = result?.output.unicodeScalars.map(\.value) ?? []
+            ctx.assertFalse(scalars.contains(0x1039),
+                "k+ra top parse must not contain a virama stack; got \(scalars.map { String(format: "%04X", $0) })")
         },
 
-        TestCase("parse_invalidStack_kss_isIllegal") { ctx in
+        TestCase("parse_invalidStack_kss_noViramaInTop") { ctx in
             let result = SyllableParser().parse("k+ss").first
-            ctx.assertEqual(result?.legalityScore ?? -1, 0,
-                "k+ss should not pass the legality threshold")
+            let scalars = result?.output.unicodeScalars.map(\.value) ?? []
+            ctx.assertFalse(scalars.contains(0x1039),
+                "k+ss top parse must not contain a virama stack; got \(scalars.map { String(format: "%04X", $0) })")
         },
 
         TestCase("parse_validStack_kka_isLegal") { ctx in

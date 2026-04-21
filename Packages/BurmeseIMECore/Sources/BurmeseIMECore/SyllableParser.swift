@@ -853,13 +853,17 @@ public final class SyllableParser: Sendable {
                     if vowelEntry.id == softBoundaryViramaVowelId {
                         let sbCtx = softBoundaryContext(previous: previous, arena: arena)
                         // Admission rule depends on predecessor category:
-                        //   - seedOnset(stackable): user intent is stack;
-                        //     don't fire soft-boundary (keeps `k+ya` ill).
+                        //   - seedOnset(stackable): stacker when a same-
+                        //     class lower follows; cross-class or non-
+                        //     stackable lower falls through to a break
+                        //     so the tail isn't right-shrunk away.
                         //   - seedOnset(non-stackable): stack is
                         //     structurally impossible (`ah+dhi`); admit
                         //     whenever a valid onset follows.
-                        //   - asatVowel: fire on digraph collision only
-                        //     (kinzi/coda shapes like `pyin+thit`).
+                        //   - asatVowel: fire on digraph collision or
+                        //     cross-class illegal stack — either makes
+                        //     the user-typed `+` a break rather than an
+                        //     impossible virama.
                         //   - plainVowel: fire on cross-class illegal or
                         //     digraph collision (`ka+ta+pa`, `mar+ta`).
                         enum AdmitMode { case unconditional, digraphOnly, crossClassOrDigraph }
@@ -869,24 +873,22 @@ public final class SyllableParser: Sendable {
                         case .none:
                             continue
                         case .seedOnset(let ch):
-                            // Seed onset with a stackable base: user's
-                            // first keystrokes are `C+…`, so `+` is
-                            // clearly a stacker. Non-stackable base
-                            // (independent vowel, semivowel) falls
-                            // through to a syllable break.
-                            if Grammar.stackableConsonants.contains(ch) {
-                                continue
-                            }
-                            upperForGate = nil
-                            admit = .unconditional
-                        case .asatVowel(let ch):
-                            // Asat-ending or coda-like predecessor:
-                            // digraph collision is the only legitimate
-                            // soft-boundary trigger when the base could
-                            // legally stack.
+                            // Stackable seed onset: honour the stack when
+                            // a same-class lower is available, otherwise
+                            // admit the break so `k+tar`, `p+tar`, etc.
+                            // survive as two syllables instead of being
+                            // pruned by right-shrink.
                             if Grammar.stackableConsonants.contains(ch) {
                                 upperForGate = ch
-                                admit = .digraphOnly
+                                admit = .crossClassOrDigraph
+                            } else {
+                                upperForGate = nil
+                                admit = .unconditional
+                            }
+                        case .asatVowel(let ch):
+                            if Grammar.stackableConsonants.contains(ch) {
+                                upperForGate = ch
+                                admit = .crossClassOrDigraph
                             } else {
                                 upperForGate = nil
                                 admit = .unconditional

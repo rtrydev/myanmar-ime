@@ -926,5 +926,63 @@ public enum EngineSuite {
                             [0x1000, 0x1004, 0x103A, 0x1039, 0x1002],
                             "kin+ga must still produce ကင်္ဂ at rank 1")
         },
+
+        // MARK: - Cross-class `+` degrades to syllable break (task 02)
+        //
+        // When the user types an explicit `+` but the resulting virama
+        // stack is orthographically impossible (cross-class or lower is
+        // a non-stackable semi-vowel), the `+` must act as a syllable
+        // break instead of forcing right-shrink to drop the tail.
+
+        TestCase("engine_crossClass_kPlusTar_emitsSyllableBreak_task02") { ctx in
+            let state = BurmeseEngine().update(buffer: "k+tar", context: [])
+            let top = state.candidates.first?.surface ?? ""
+            ctx.assertEqual(top.unicodeScalars.map(\.value),
+                            [0x1000, 0x1010, 0x102C],
+                            "k+tar must produce ကတာ as two syllables; got '\(top)'")
+        },
+
+        TestCase("engine_crossClass_shinPlusByar_emitsSyllableBreak_task02") { ctx in
+            // shin = ရှင်, byar = ဘြ + aa (short-aa retained; bha is not
+            // a descender-aa onset, so no tall-aa rewrite fires).
+            let state = BurmeseEngine().update(buffer: "shin+byar", context: [])
+            let top = state.candidates.first?.surface ?? ""
+            ctx.assertEqual(top.unicodeScalars.map(\.value),
+                            [0x101B, 0x103E, 0x1004, 0x103A, 0x1018, 0x103C, 0x102C],
+                            "shin+byar must produce ရှင်ဘြာ; got '\(top)'")
+        },
+
+        TestCase("engine_crossClass_shinPlusPar_emitsSyllableBreak_task02") { ctx in
+            // shin + par: ပ is a descender onset, so aa-shape correction
+            // writes U+102B (tall-aa).
+            let state = BurmeseEngine().update(buffer: "shin+par", context: [])
+            let top = state.candidates.first?.surface ?? ""
+            ctx.assertEqual(top.unicodeScalars.map(\.value),
+                            [0x101B, 0x103E, 0x1004, 0x103A, 0x1015, 0x102B],
+                            "shin+par must produce ရှင်ပါ; got '\(top)'")
+        },
+
+        TestCase("engine_crossClass_yaPlusPPlusGa_emitsSyllableBreaks_task02") { ctx in
+            // ya + p + ga: both `+` connectors are structurally impossible
+            // stacks. Top candidate must not contain a cross-class virama.
+            let state = BurmeseEngine().update(buffer: "ya+p+ga", context: [])
+            let top = state.candidates.first?.surface ?? ""
+            let scalars = top.unicodeScalars.map(\.value)
+            // Must not contain virama U+1039 — every `+` here is impossible.
+            ctx.assertFalse(scalars.contains(0x1039),
+                            "ya+p+ga must not contain a virama stack; got '\(top)' scalars=\(scalars.map { String(format: "%04X", $0) })")
+            // Must retain all three onset consonants in order.
+            ctx.assertTrue(scalars.contains(0x101A) && scalars.contains(0x1015) && scalars.contains(0x1002),
+                           "ya+p+ga must preserve y/p/g onsets; got '\(top)'")
+        },
+
+        TestCase("engine_crossClass_pPlusTar_emitsSyllableBreak_task02") { ctx in
+            // Labial + dental is cross-class illegal; soft-boundary path.
+            let state = BurmeseEngine().update(buffer: "p+tar", context: [])
+            let top = state.candidates.first?.surface ?? ""
+            ctx.assertEqual(top.unicodeScalars.map(\.value),
+                            [0x1015, 0x1010, 0x102C],
+                            "p+tar must produce ပတာ as two syllables; got '\(top)'")
+        },
     ])
 }
