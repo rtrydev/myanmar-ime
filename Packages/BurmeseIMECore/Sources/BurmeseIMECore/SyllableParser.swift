@@ -1299,6 +1299,14 @@ public final class SyllableParser: Sendable {
         let state: ParseState
         let output: String
         let reading: String
+        /// `adjustLeadingVowel(output)` — precomputed because dedup, the
+        /// final sort comparator, and the demotion-window map all reference
+        /// it; without the cache each MaterializedState would pay 3+ adjust
+        /// calls, and the sort amplifies that by the comparator count.
+        let adjustedOutput: String
+        /// Cached marker penalty so the dedup pass and the final sort can
+        /// skip the dictionary lookup per comparison.
+        var markerPenalty: Int
     }
 
     private func finalizeStates(
@@ -1347,47 +1355,53 @@ public final class SyllableParser: Sendable {
         // place output/reading are ever built.
         var materialized: [MaterializedState] = []
         materialized.reserveCapacity(filteredIndices.count)
+        // Fast-path: if the requested reading has no numeric alias markers
+        // (the common case for plain Roman input like "mingal"), every
+        // candidate's marker penalty is 0 and we can skip placement math.
+        // When markers are present, precompute `requestedPlacements` once
+        // instead of rebuilding it per candidate, and memoize by reading.
+        let requestedHasMarkers = requestedReading.contains { Romanization.isNumericAliasMarker($0) }
+        let requestedPlacements: Set<NumericMarkerPlacement>
+        if requestedHasMarkers {
+            requestedPlacements = Self.numericMarkerPlacements(in: requestedReading)
+        } else {
+            requestedPlacements = []
+        }
+        var penaltyByReading: [String: Int] = [:]
+        @inline(__always) func penalty(for reading: String) -> Int {
+            if !requestedHasMarkers { return 0 }
+            if let cached = penaltyByReading[reading] { return cached }
+            let cand = Self.numericMarkerPlacements(in: reading)
+            let p = requestedPlacements.symmetricDifference(cand).count
+            penaltyByReading[reading] = p
+            return p
+        }
         for idx in filteredIndices {
             let (output, reading) = materialize(stateIdx: idx, arena: arena)
             materialized.append(MaterializedState(
                 state: arena[Int(idx)],
                 output: output,
-                reading: reading
+                reading: reading,
+                adjustedOutput: adjustLeadingVowel(output),
+                markerPenalty: penalty(for: reading)
             ))
         }
 
-        var markerPenaltyForReading: [String: Int] = [:]
-        for state in materialized {
-            markerPenaltyForReading[state.reading] = Self.explicitMarkerPenalty(
-                requested: requestedReading,
-                candidate: state.reading
-            )
-        }
-
-        // Sort + dedup by `adjustLeadingVowel(output)`, matching legacy.
+        // Sort + dedup by `adjustedOutput`, matching legacy.
         materialized.sort {
-            isBetter(
-                $0,
-                markerPenalty: markerPenaltyForReading[$0.reading] ?? Int.max,
-                than: $1,
-                markerPenalty: markerPenaltyForReading[$1.reading] ?? Int.max
-            )
+            isBetter($0, markerPenalty: $0.markerPenalty,
+                     than: $1, markerPenalty: $1.markerPenalty)
         }
 
         var deduplicated: [String: MaterializedState] = [:]
         for m in materialized {
-            let adjustedOutput = adjustLeadingVowel(m.output)
-            if let existing = deduplicated[adjustedOutput] {
-                if isBetter(
-                    m,
-                    markerPenalty: markerPenaltyForReading[m.reading] ?? Int.max,
-                    than: existing,
-                    markerPenalty: markerPenaltyForReading[existing.reading] ?? Int.max
-                ) {
-                    deduplicated[adjustedOutput] = m
+            if let existing = deduplicated[m.adjustedOutput] {
+                if isBetter(m, markerPenalty: m.markerPenalty,
+                            than: existing, markerPenalty: existing.markerPenalty) {
+                    deduplicated[m.adjustedOutput] = m
                 }
             } else {
-                deduplicated[adjustedOutput] = m
+                deduplicated[m.adjustedOutput] = m
             }
         }
 
@@ -1400,11 +1414,11 @@ public final class SyllableParser: Sendable {
         let sortedFinal = deduplicated.values.sorted { lhs, rhs in
             isBetter(
                 lhs,
-                rarity: rarityFor[adjustLeadingVowel(lhs.output)] ?? 0,
-                markerPenalty: markerPenaltyForReading[lhs.reading] ?? Int.max,
+                rarity: rarityFor[lhs.adjustedOutput] ?? 0,
+                markerPenalty: lhs.markerPenalty,
                 than: rhs,
-                rarity: rarityFor[adjustLeadingVowel(rhs.output)] ?? 0,
-                markerPenalty: markerPenaltyForReading[rhs.reading] ?? Int.max
+                rarity: rarityFor[rhs.adjustedOutput] ?? 0,
+                markerPenalty: rhs.markerPenalty
             )
         }
         // Materialize SyllableParse for the top window (oversampled so a
@@ -1413,14 +1427,8 @@ public final class SyllableParser: Sendable {
         // parse is illegal after demotion).
         let demotionWindow = max(limit, 4)
         let mapped: [SyllableParse] = sortedFinal.prefix(demotionWindow).map { m in
-            let adjustedRaw = adjustLeadingVowel(m.output)
-            let adjusted = Self.remapEmptyToInherent(adjustedRaw)
-            let viramaClean = !Self.hasMalformedViramaStack(adjusted)
-            let asatClean = !Self.hasAsatWithoutConsonantBase(adjusted)
-            let indepVowelClean = !Self.hasDepSignAfterIndependentVowel(adjusted)
-            let stackDepthClean = !Self.hasTripleViramaStack(adjusted)
-            let legal = m.state.isLegal && viramaClean && asatClean
-                && indepVowelClean && stackDepthClean
+            let adjusted = Self.remapEmptyToInherent(m.adjustedOutput)
+            let legal = m.state.isLegal && Self.scanOutputLegality(adjusted)
             return SyllableParse(
                 output: adjusted,
                 reading: m.reading,
@@ -1443,55 +1451,6 @@ public final class SyllableParser: Sendable {
         return Array(legalFirst.prefix(limit))
     }
 
-    /// Returns true if `output` contains a U+1039 (virama) whose left
-    /// neighbour is not a base consonant and is not the asat-half of a
-    /// kinzi marker (U+1004 U+103A U+1039), or whose right neighbour is
-    /// not a base consonant. Virama orthographically only bonds
-    /// consonant-to-consonant; attaching it to a vowel sign, independent
-    /// vowel, anusvara, or leaving it dangling with no right-hand scalar
-    /// produces a scalar run no Myanmar shaper renders sensibly. Parses
-    /// that contain such a sequence are demoted to `legalityScore = 0` so
-    /// cleaner alternatives win.
-    private static func hasMalformedViramaStack(_ output: String) -> Bool {
-        let scalars = Array(output.unicodeScalars)
-        for i in 0..<scalars.count where scalars[i].value == 0x1039 {
-            guard i >= 1 else { return true }
-            let prev = scalars[i - 1]
-            if prev.value == 0x103A {
-                let twoBack = i >= 2 ? scalars[i - 2].value : 0
-                if twoBack != 0x1004 { return true }
-            } else if Romanization.consonantToRoman[Character(prev)] == nil {
-                return true
-            }
-            guard i + 1 < scalars.count else { return true }
-            let next = scalars[i + 1]
-            let isConsonantBase = (next.value >= 0x1000 && next.value <= 0x1021)
-                || next.value == 0x103F
-            if !isConsonantBase { return true }
-        }
-        return false
-    }
-
-    /// Returns true if `output` contains an independent vowel
-    /// (U+1023–U+102A) immediately followed by a dependent vowel sign
-    /// (U+102B–U+1032). Independent vowels already encode a full vowel
-    /// cluster, so attaching another dependent vowel on top is
-    /// orthographically invalid. Tone marks (U+1037/U+1038) and anusvara
-    /// (U+1036) remain valid suffixes and are intentionally not matched.
-    /// A second independent vowel is allowed because it represents a new
-    /// syllable (e.g. ဪဤ across a tone-marked boundary).
-    private static func hasDepSignAfterIndependentVowel(_ output: String) -> Bool {
-        let scalars = Array(output.unicodeScalars)
-        guard scalars.count >= 2 else { return false }
-        for i in 0..<(scalars.count - 1) {
-            let v = scalars[i].value
-            guard v >= 0x1023 && v <= 0x102A else { continue }
-            let next = scalars[i + 1].value
-            if next >= 0x102B && next <= 0x1032 { return true }
-        }
-        return false
-    }
-
     /// If `output` is empty, returns U+1021 (`အ`) so a bare-vowel reading
     /// like `a` / `aa` / `aaa` produces a visible inherent-consonant
     /// candidate instead of an empty surface. Empty surfaces would
@@ -1503,56 +1462,65 @@ public final class SyllableParser: Sendable {
         return output
     }
 
-    /// Returns true if `output` contains a stack chain of three or more
-    /// consonants joined by virama (U+1039), or a kinzi marker
-    /// (U+1004 U+103A U+1039) that immediately precedes another stack.
-    /// Modern Burmese and mainstream Pali orthography never stack more
-    /// than a pair, and the kinzi already counts as the upper of a stack,
-    /// so chaining a second virama onto its lower is illegal. The scan
-    /// detects two viramas separated by exactly one consonant scalar:
-    /// `U+1039 <C> U+1039`.
-    private static func hasTripleViramaStack(_ output: String) -> Bool {
-        let scalars = Array(output.unicodeScalars)
-        guard scalars.count >= 3 else { return false }
-        let isConsonantBase: (UInt32) -> Bool = { v in
-            (v >= 0x1000 && v <= 0x1021) || v == 0x103F
+    /// Bundles the scalar-level orthographic checks the parser runs at
+    /// materialize time. Replaces four separate scans (malformed virama
+    /// stack, asat without consonant base, dependent vowel after
+    /// independent vowel, triple virama stack) with a single pass that
+    /// allocates the scalar array once. Short-circuits once any flag is
+    /// set since downstream callers only inspect `isLegal`.
+    private static func scanOutputLegality(_ output: String) -> Bool {
+        // Reuse the scalars view directly — materializing an Array is pure
+        // overhead when most outputs never hit any of the guarded scalar
+        // values. The asat backward-walk uses the indices() view, which
+        // supports random access without an intermediate allocation.
+        let scalars = output.unicodeScalars
+        if scalars.isEmpty { return true }
+        let indices = Array(scalars)
+        let n = indices.count
+        @inline(__always) func isConsonantBase(_ v: UInt32) -> Bool {
+            return (v >= 0x1000 && v <= 0x1021) || v == 0x103F
         }
-        for i in 0..<(scalars.count - 2) {
-            if scalars[i].value == 0x1039
-                && isConsonantBase(scalars[i + 1].value)
-                && scalars[i + 2].value == 0x1039 {
-                return true
+        for i in 0..<n {
+            let v = indices[i].value
+            // Fast path: only 0x1023–0x102A and 0x1039/0x103A need inspection.
+            // Skip scalars outside those ranges with a single range test.
+            if v < 0x1023 || v > 0x103A { continue }
+            if v == 0x1039 {
+                guard i >= 1 else { return false }
+                let prev = indices[i - 1]
+                if prev.value == 0x103A {
+                    let twoBack = i >= 2 ? indices[i - 2].value : 0
+                    if twoBack != 0x1004 { return false }
+                } else if Romanization.consonantToRoman[Character(prev)] == nil {
+                    return false
+                }
+                guard i + 1 < n else { return false }
+                if !isConsonantBase(indices[i + 1].value) { return false }
+                // Triple-stack guard: two viramas separated by one consonant.
+                if i >= 2
+                    && indices[i - 2].value == 0x1039
+                    && isConsonantBase(indices[i - 1].value) {
+                    return false
+                }
+            } else if v == 0x103A {
+                var j = i - 1
+                while j >= 0 {
+                    let w = indices[j].value
+                    let isSkippable = (w >= 0x102B && w <= 0x1032)
+                        || (w >= 0x1036 && w <= 0x1038)
+                        || (w >= 0x103B && w <= 0x103E)
+                    if isSkippable { j -= 1 } else { break }
+                }
+                guard j >= 0 else { return false }
+                if !isConsonantBase(indices[j].value) { return false }
+            } else if v >= 0x1023 && v <= 0x102A {
+                if i + 1 < n {
+                    let next = indices[i + 1].value
+                    if next >= 0x102B && next <= 0x1032 { return false }
+                }
             }
         }
-        return false
-    }
-
-    /// Returns true if `output` contains a U+103A (asat) whose base does
-    /// not walk back to a base consonant. Asat silences a preceding
-    /// consonant, so its base — reached by skipping dependent vowel signs,
-    /// medials, tone marks, and anusvara — must be in the consonant range
-    /// (U+1000–U+1021, U+103F). Asat on an independent vowel, two
-    /// consecutive asats, or a leading asat with nothing to its left all
-    /// fail this check. Parses that contain such a sequence are demoted to
-    /// `legalityScore = 0`.
-    private static func hasAsatWithoutConsonantBase(_ output: String) -> Bool {
-        let scalars = Array(output.unicodeScalars)
-        for i in 0..<scalars.count where scalars[i].value == 0x103A {
-            var j = i - 1
-            while j >= 0 {
-                let v = scalars[j].value
-                let isSkippable = (v >= 0x102B && v <= 0x1032)
-                    || (v >= 0x1036 && v <= 0x1038)
-                    || (v >= 0x103B && v <= 0x103E)
-                if isSkippable { j -= 1 } else { break }
-            }
-            guard j >= 0 else { return true }
-            let baseValue = scalars[j].value
-            let isConsonantBase = (baseValue >= 0x1000 && baseValue <= 0x1021)
-                || baseValue == 0x103F
-            if !isConsonantBase { return true }
-        }
-        return false
+        return true
     }
 
     /// Count rare-codepoint usages in an output surface so the final
@@ -1591,15 +1559,6 @@ public final class SyllableParser: Sendable {
             }
         }
         return placements
-    }
-
-    private static func explicitMarkerPenalty(requested: String, candidate: String) -> Int {
-        guard requested.contains(where: { Romanization.isNumericAliasMarker($0) }) else {
-            return 0
-        }
-        let requestedPlacements = numericMarkerPlacements(in: requested)
-        let candidatePlacements = numericMarkerPlacements(in: candidate)
-        return requestedPlacements.symmetricDifference(candidatePlacements).count
     }
 
     /// Walk the `parentIdx` chain backward to the seed, collect each
