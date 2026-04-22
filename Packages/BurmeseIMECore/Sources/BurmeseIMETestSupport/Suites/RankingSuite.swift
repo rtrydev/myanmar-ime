@@ -253,7 +253,7 @@ public enum RankingSuite {
             let engine = BurmeseEngine()
             let expectations: [(key: String, expected: String)] = [
                 ("u.", "ဥ"),
-                ("u", "ဦ"),
+                ("u", "ဥ"),
                 ("ay", "ဧ"),
             ]
 
@@ -586,9 +586,11 @@ public enum RankingSuite {
         }
 
         // Group 1: independent-vowel rank 1 exists; orphan ZWNJ forms must
-        // be removed from the panel.
+        // be removed from the panel. Bare `u` resolves to `ဥ` (short u)
+        // per tasks/ 03; the long-u `ဦ` stays in the panel as an
+        // alternate.
         for (buffer, expected) in [
-            ("u", "ဦ"),
+            ("u", "ဥ"),
             ("u:", "ဦး"),
             ("u.", "ဥ"),
             ("ay", "ဧ"),
@@ -802,9 +804,9 @@ public enum RankingSuite {
         // Trailing digits after a complete syllable must keep the current
         // behaviour: digit appears at the end, no surface rewriting.
         for (buffer, expectedTop) in [
-            ("u2",   "ဦ၂"),
+            ("u2",   "ဥ၂"),
             ("u.2",  "ဥ၂"),
-            ("u2:",  "ဦ၂:"),
+            ("u2:",  "ဥ၂:"),
             ("pa2",  "ပ၂"),
         ] {
             cases.append(TestCase("task10_trailingDigit_\(buffer)") { ctx in
@@ -927,6 +929,46 @@ public enum RankingSuite {
                 )
             })
         }
+
+        // tasks/ 03: bare `i`, `ee`, `u` surface the short-form
+        // independent vowel / implicit-a realization at the top, not the
+        // coda-cluster (ည် / ယ်ယ်) or long-u (ဦ) that the DP would pick
+        // on raw rule order.
+        for (buffer, expectedTop) in [
+            ("i",  "\u{1021}\u{102D}"),  // အိ (implicit-a + short i)
+            ("ee", "\u{1021}\u{102E}"),  // အီ (implicit-a + long i)
+            ("u",  "\u{1025}"),          // ဥ (short independent u)
+        ] {
+            cases.append(TestCase("tasksDir03_bareVowelPrimary_\(buffer)") { ctx in
+                let state = BurmeseEngine().update(buffer: buffer, context: [])
+                let top = state.candidates.first?.surface ?? ""
+                ctx.assertEqual(
+                    top, expectedTop,
+                    "tasksDir03_bareVowelPrimaryTop_\(buffer)"
+                )
+            })
+        }
+
+        // tasks/ 03: existing alternate surfaces must remain reachable in
+        // the panel — promotion is a ranking change, not a delete.
+        cases.append(TestCase("tasksDir03_bareVowelAlternates_u_retainsBwaUh") { ctx in
+            let state = BurmeseEngine().update(buffer: "u", context: [])
+            let surfaces = state.candidates.map(\.surface)
+            ctx.assertTrue(
+                surfaces.contains("\u{1026}"),
+                "tasksDir03_uKeepsLongIndependent",
+                detail: "long ဦ must remain in the panel for 'u'; got: \(surfaces)"
+            )
+        })
+        cases.append(TestCase("tasksDir03_bareVowelAlternates_i_retainsNyaCoda") { ctx in
+            let state = BurmeseEngine().update(buffer: "i", context: [])
+            let surfaces = state.candidates.map(\.surface)
+            ctx.assertTrue(
+                surfaces.contains("\u{100A}\u{103A}"),
+                "tasksDir03_iKeepsCoda",
+                detail: "ည် must remain available for 'i'; got: \(surfaces)"
+            )
+        })
 
         return TestSuite(name: "Ranking", cases: cases)
     }()

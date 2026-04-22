@@ -1007,6 +1007,23 @@ public final class BurmeseEngine: @unchecked Sendable {
             }
         }
 
+        // tasks/ 03: bare `i`, `ee`, `u` — route to the independent-vowel
+        // short-form realization instead of the coda cluster / long-u
+        // that raw DP order produces. Alternates stay in the panel.
+        if let bareVowelSurface = Self.bareVowelOverrideSurface(for: normalized) {
+            if let existing = merged.firstIndex(where: { $0.surface == bareVowelSurface }) {
+                let keeper = merged.remove(at: existing)
+                merged.insert(keeper, at: 0)
+            } else {
+                merged.insert(Candidate(
+                    surface: bareVowelSurface,
+                    reading: normalized,
+                    source: .grammar,
+                    score: 100
+                ), at: 0)
+            }
+        }
+
         // History promotion: the user previously committed these surfaces
         // under the same alias key, so float them to the top. Walk lowest
         // score first so the highest-scoring history entry lands at index 0
@@ -2157,6 +2174,30 @@ public final class BurmeseEngine: @unchecked Sendable {
         case "an":  return "\u{1021}\u{1036}"
         case "an.": return "\u{1021}\u{1036}\u{1037}"
         case "an:": return "\u{1021}\u{1036}\u{1038}"
+        default: return nil
+        }
+    }
+
+    /// Bare-vowel keys whose natural DP parse surfaces a coda cluster or
+    /// the "long" dependent-vowel realization, but where typists reaching
+    /// for an independent vowel expect the short / bare form.
+    ///
+    /// * `i` → `အိ` (implicit-a + short i). Without this override the
+    ///   parser lands on `ီ` (long i dep-vowel) or the coda cluster `ည်`.
+    /// * `ee` → `အီ` (implicit-a + long i). Without this override the
+    ///   parser decomposes `ee` into two `e` codas (`ယ်ယ်`).
+    /// * `u` → `ဥ` (short independent u). Corpus frequency puts short u
+    ///   above long u for the bare reading; the long-u `ဦ` remains in the
+    ///   panel as an alternate.
+    ///
+    /// The override only fires when the buffer exactly matches one of
+    /// the listed bare-vowel keys — any surrounding consonants route
+    /// through the normal DP path unchanged.
+    private static func bareVowelOverrideSurface(for normalized: String) -> String? {
+        switch normalized {
+        case "i":  return "\u{1021}\u{102D}"
+        case "ee": return "\u{1021}\u{102E}"
+        case "u":  return "\u{1025}"
         default: return nil
         }
     }
