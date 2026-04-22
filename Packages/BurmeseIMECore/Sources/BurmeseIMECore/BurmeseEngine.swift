@@ -65,6 +65,24 @@ public final class BurmeseEngine: @unchecked Sendable {
     /// only the tail is re-parsed on each keystroke. The window covers
     /// `maxOnsetLen + maxVowelLen` plus a safety margin so no rule can
     /// span the prefix/tail boundary.
+    ///
+    /// Known divergence classes at the current window size (see
+    /// `PropertySuite.slidingWindowKnownDivergent`):
+    ///
+    /// * **Long `mingalarpar` chains (≥ 3 repetitions)** — single-shot
+    ///   and incremental parse pick different middle-segment shapes
+    ///   when the boundary lands inside a repeated unit. The canonical
+    ///   full-buffer output corrupts one unit as `မီငလာပါ` /
+    ///   `မင်ဂလရပါ`; incremental keeps the clean form.
+    /// * **`lay2mingalarparshinbyar`** — `ay2` is a standalone-vowel
+    ///   variant selector, which lengthens the composable prefix past
+    ///   the boundary so the leading `လေ` vs `လ` choice diverges.
+    ///
+    /// Widening the window to 24–28 eliminates both divergences but
+    /// regresses the `incremental` benchmark (p95/p99) past the 20 %
+    /// / 30 % guard. A narrower fix would overlap `correctAaShape`'s
+    /// context across the frozen/active split — left for a future
+    /// change.
     private let compositionWindowSize: Int
 
     /// Top-K LM-scored renderings of the frozen prefix. Caching K branches

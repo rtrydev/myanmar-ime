@@ -10,6 +10,64 @@ public enum PropertySuite {
         String(s.unicodeScalars.filter { $0.value != 0x200B && $0.value != 0x200C })
     }
 
+    /// Long buffers for which the single-shot parse and the
+    /// character-by-character incremental parse must produce the same
+    /// top candidate. Any divergence is a sliding-window regression.
+    private static let slidingWindowWhitelist: [String] = [
+        "mingalarparshinbyar",
+        "mingalarparshinbyarthwar",
+        "thankyoushinbyar",
+        "kyawzawnainglay",
+        "myanmarpyaeparpyar",
+        "htayhninsaparpar",
+        "kyemaminbyar",
+        "ngarmyartawbyar",
+        "parhartamin",
+        "shinbyarmingalarpar",
+        "pyaepyaemingalarpar",
+        "kyawzaw2tharwa",
+        "kyawnainglay2",
+        "thankyoushinbyarpar",
+        "arpegaparshinpyar",
+        "bawamingalarpar",
+        "kyemyarmingalarpar",
+        "arpegahtwatpyar",
+        "kyawnaingtharway2",
+    ]
+
+    /// Long buffers whose single-shot and sliding-window parses are
+    /// known to diverge at the current window size
+    /// (`compositionWindowSize = 20`). Each entry is a live bug — the
+    /// divergence is accepted because widening the window to eliminate
+    /// it costs more `incremental` benchmark p95/p99 than the 20 %/30 %
+    /// regression guard allows.
+    ///
+    /// Characterized divergence classes:
+    ///
+    /// * **Repeated `mingalarpar` chains (≥ 3 repetitions).** One of
+    ///   the middle `mingalarpar` units surfaces corrupted as
+    ///   `မီငလာပါ` or `မင်ဂလရပါ` depending on which exact boundary
+    ///   position the window split lands on. Incremental parse keeps
+    ///   the right segmentation because every intermediate state stays
+    ///   within the full-buffer DP path.
+    /// * **`lay2mingalarparshinbyar`** — removed from the whitelist in
+    ///   an earlier commit because `ay2` routes through the parser as
+    ///   a standalone-vowel variant selector, pushing the composable
+    ///   prefix past the current window boundary. The full-buffer and
+    ///   incremental picks diverge on `လ` vs `လေ` for the leading
+    ///   syllable.
+    ///
+    /// Removing an entry here should happen only when the underlying
+    /// divergence is fixed (either by widening the window safely or by
+    /// teaching `correctAaShape` / the DP split to see across the
+    /// frozen boundary). Add the buffer to `slidingWindowWhitelist`
+    /// instead.
+    private static let slidingWindowKnownDivergent: [String] = [
+        "lay2mingalarparshinbyar",
+        String(repeating: "mingalarpar", count: 3),
+        String(repeating: "mingalarpar", count: 5),
+    ]
+
     /// Returns true if `surface` contains ASCII *interleaved* with Myanmar —
     /// i.e., an ASCII character appears before a Myanmar character. Trailing
     /// literal tail is allowed (the engine keeps unparseable suffixes verbatim).
@@ -122,38 +180,10 @@ public enum PropertySuite {
         // For each whitelisted buffer the single-shot top-1 and the
         // character-by-character top-1 must agree.
         cases.append(TestCase("property_slidingWindow_matchesSingleShot_onWhitelist") { ctx in
-            let whitelist = [
-                "mingalarparshinbyar",
-                "mingalarparshinbyarthwar",
-                "thankyoushinbyar",
-                "kyawzawnainglay",
-                "myanmarpyaeparpyar",
-                "htayhninsaparpar",
-                "kyemaminbyar",
-                "ngarmyartawbyar",
-                "parhartamin",
-                "shinbyarmingalarpar",
-                "pyaepyaemingalarpar",
-                "kyawzaw2tharwa",
-                "kyawnainglay2",
-                "thankyoushinbyarpar",
-                "arpegaparshinpyar",
-                "bawamingalarpar",
-                "kyemyarmingalarpar",
-                // Previously "lay2mingalarparshinbyar", but `ay2` is now
-                // routed through the parser as a standalone-vowel variant
-                // selector (ဧ). That lengthens the composable prefix past
-                // the sliding-window boundary, which surfaces the same
-                // shin-digraph ambiguity as the other whitelist cases;
-                // the specific boundary happens to differ between
-                // incremental and full-buffer modes here, so drop it.
-                "arpegahtwatpyar",
-                "kyawnaingtharway2",
-            ]
             let engine = BurmeseEngine()
             var mismatches = 0
             var firstFailure: String?
-            for buf in whitelist {
+            for buf in Self.slidingWindowWhitelist {
                 let state = engine.update(buffer: buf, context: [])
                 guard let topFull = state.candidates.first else { continue }
                 var rebuilt = engine.update(buffer: "", context: [])
@@ -175,6 +205,37 @@ public enum PropertySuite {
             }
             ctx.assertEqual(mismatches, 0,
                             "slidingWindow_\(firstFailure ?? "ok")")
+        })
+
+        // tasks/ 06: the `slidingWindowKnownDivergent` set carries
+        // buffers for which single-shot and incremental parse intentionally
+        // disagree. Each entry here is a live bug report: if the
+        // divergence ever disappears, the entry can be moved up to the
+        // whitelist. Guard against silent drift by asserting that each
+        // listed buffer is *still* divergent.
+        cases.append(TestCase("property_slidingWindow_knownDivergent_staysDivergent") { ctx in
+            var stillConverged: [String] = []
+            for buf in Self.slidingWindowKnownDivergent {
+                // Fresh engines: the anchor / frozen-prefix state from a
+                // previous call would otherwise mask divergences that
+                // appear only when typing the buffer from scratch.
+                let fullEngine = BurmeseEngine()
+                let state = fullEngine.update(buffer: buf, context: [])
+                guard let topFull = state.candidates.first else { continue }
+                let incrEngine = BurmeseEngine()
+                var rebuilt = incrEngine.update(buffer: "", context: [])
+                for i in 1...buf.count {
+                    rebuilt = incrEngine.update(buffer: String(buf.prefix(i)), context: [])
+                }
+                guard let topIncremental = rebuilt.candidates.first else { continue }
+                if stripInvisibles(topFull.surface) == stripInvisibles(topIncremental.surface) {
+                    stillConverged.append(buf)
+                }
+            }
+            ctx.assertTrue(stillConverged.isEmpty,
+                           "slidingWindow_knownDivergent_drift",
+                           detail: "these buffers are no longer divergent and can be " +
+                               "promoted to the whitelist: \(stillConverged)")
         })
 
         // MARK: - Property 5: anchor monotonicity (bounded tolerance)
