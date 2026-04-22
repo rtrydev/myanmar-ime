@@ -1220,6 +1220,12 @@ public final class BurmeseEngine: @unchecked Sendable {
         return result
     }
 
+    /// Hoisted out of `correctAaShape` so the ~7-element set isn't
+    /// rebuilt on every candidate surface the engine post-processes.
+    private static let tallAaScalarSet: Set<UInt32> = Set(
+        Grammar.requiresTallAa.compactMap { $0.unicodeScalars.first?.value }
+    )
+
     /// Walk a surface string and rewrite each ာ/ါ to the shape appropriate
     /// for its preceding consonant. Medials and signs between the
     /// consonant and the aa sign are skipped over.
@@ -1232,8 +1238,17 @@ public final class BurmeseEngine: @unchecked Sendable {
     private static func correctAaShape(_ text: String) -> String {
         let shortAa: UInt32 = 0x102C
         let tallAa: UInt32 = 0x102B
+        // Most surfaces have no aa sign at all (garbage-bash buffers, or
+        // syllables whose vowel is not `a`). Skip the scalar-array
+        // allocation and nested walk for those.
+        var hasAa = false
+        for scalar in text.unicodeScalars where scalar.value == shortAa || scalar.value == tallAa {
+            hasAa = true
+            break
+        }
+        guard hasAa else { return text }
         var scalars = Array(text.unicodeScalars)
-        let tallAaSet: Set<UInt32> = Set(Grammar.requiresTallAa.compactMap { $0.unicodeScalars.first?.value })
+        let tallAaSet = tallAaScalarSet
         for i in 0..<scalars.count {
             let v = scalars[i].value
             guard v == shortAa || v == tallAa else { continue }
@@ -1640,6 +1655,15 @@ public final class BurmeseEngine: @unchecked Sendable {
     static func extractMidBufferDigits(
         _ buffer: String
     ) -> (cleaned: String, insertions: [(offset: Int, digit: Character)]) {
+        // Quick exit: no ASCII digits means nothing to extract, no
+        // allocation, no char-array walk.
+        var hasDigit = false
+        for scalar in buffer.unicodeScalars
+        where scalar.value >= 0x30 && scalar.value <= 0x39 {
+            hasDigit = true
+            break
+        }
+        guard hasDigit else { return (buffer, []) }
         let chars = Array(buffer)
         var cleaned: [Character] = []
         cleaned.reserveCapacity(chars.count)
@@ -2082,6 +2106,12 @@ public final class BurmeseEngine: @unchecked Sendable {
         _ input: String
     ) -> (input: String, insertions: Int)? {
         guard !input.contains("+") else { return nil }
+        // Every plausible stack site hinges on the coda letter `n`
+        // (the `-an` / `-in` / `-on` / `-un` / `-ein` / `-ain` / `-own`
+        // endings). Skip the char-array allocation when there's no `n`
+        // at all — the rest of the scan would walk the buffer for
+        // nothing.
+        guard input.contains("n") else { return nil }
         let chars = Array(input)
         guard chars.count >= 3 else { return nil }
         let vowelLetters: Set<Character> = ["a", "e", "i", "o", "u", "w"]
