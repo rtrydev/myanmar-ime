@@ -949,6 +949,24 @@ public enum RankingSuite {
             })
         }
 
+        // tasks/ 08: `Romanization.normalize` lowercases the buffer before
+        // anything else runs, so an uppercase letter can never appear in a
+        // composed surface. Lock the contract: typing an uppercase buffer
+        // must produce the same composed output as its lowercase
+        // equivalent (no raw A–Z leaking through).
+        cases.append(TestCase("tasksDir08_uppercaseNormalization_KAR") { ctx in
+            let upper = BurmeseEngine().update(buffer: "KAR", context: []).candidates.first?.surface ?? ""
+            let lower = BurmeseEngine().update(buffer: "kar", context: []).candidates.first?.surface ?? ""
+            ctx.assertEqual(upper, lower, "tasksDir08_KAR_matchesLowerKar")
+            for scalar in upper.unicodeScalars {
+                ctx.assertFalse(
+                    scalar.value >= 0x41 && scalar.value <= 0x5A,
+                    "tasksDir08_KAR_noUppercaseLeak",
+                    detail: "surface '\(upper)' contains uppercase Latin"
+                )
+            }
+        })
+
         // tasks/ 05: canonical Pali-loanword stacked forms must rank 1
         // for readings whose `<C>an+<C>` / `<C>ad+<C>` layout is the
         // authentic orthography. The grammar parser generates both

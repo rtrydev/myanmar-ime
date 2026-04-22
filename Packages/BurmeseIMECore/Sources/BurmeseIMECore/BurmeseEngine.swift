@@ -2461,9 +2461,14 @@ public final class BurmeseEngine: @unchecked Sendable {
             lastMyanmarIdx = i
         }
         guard lastMyanmarIdx >= 0 else { return false }
+        // `Romanization.normalize` lowercases the buffer up-stream, so a
+        // composed surface can only contain lowercase ASCII letters —
+        // uppercase never reaches this check. Narrowing to 0x61..0x7A
+        // (tasks/ 08) surfaces a regression if that invariant ever
+        // breaks rather than silently masking it with a broader range.
         for i in 0..<lastMyanmarIdx {
             let value = scalars[i].value
-            if value < 0x80 && value >= 0x41 && value <= 0x7A {
+            if value >= 0x61 && value <= 0x7A {
                 return true
             }
         }

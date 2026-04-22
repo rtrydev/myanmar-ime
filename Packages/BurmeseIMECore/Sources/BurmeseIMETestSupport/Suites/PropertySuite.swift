@@ -79,9 +79,14 @@ public enum PropertySuite {
             lastMyanmarIdx = i
         }
         guard lastMyanmarIdx >= 0 else { return false }
+        // Upstream `Romanization.normalize` lowercases every buffer
+        // before composition, so surfaces can only carry lowercase
+        // ASCII letters. Narrowed to 0x61..0x7A (tasks/ 08) — any
+        // uppercase leak is now a visible regression rather than a
+        // silent miss.
         for i in 0..<lastMyanmarIdx {
             let v = scalars[i].value
-            if v < 0x80 && (v >= 0x41 && v <= 0x7A) {
+            if v >= 0x61 && v <= 0x7A {
                 // Latin letter before the last Myanmar char = interleaving.
                 return true
             }
