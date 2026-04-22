@@ -3,60 +3,60 @@
       {
     "scenario": "short",
     "iterations": 1000,
-    "p50_us": 55.33,
-    "p95_us": 58.96,
-    "p99_us": 67.17,
-    "max_us": 84.67,
+    "p50_us": 83.12,
+    "p95_us": 95.08,
+    "p99_us": 105.04,
+    "max_us": 127.79,
     "allocations": 0
   },
           {
     "scenario": "medium",
     "iterations": 1000,
-    "p50_us": 209.79,
-    "p95_us": 227.50,
-    "p99_us": 247.58,
-    "max_us": 333.54,
+    "p50_us": 470.21,
+    "p95_us": 510.08,
+    "p99_us": 576.71,
+    "max_us": 722.42,
     "allocations": 0
   },
           {
     "scenario": "long",
     "iterations": 500,
-    "p50_us": 873.21,
-    "p95_us": 922.29,
-    "p99_us": 952.67,
-    "max_us": 1006.38,
+    "p50_us": 2153.25,
+    "p95_us": 2198.96,
+    "p99_us": 2248.83,
+    "max_us": 2316.50,
     "allocations": 0
   },
           {
     "scenario": "incremental",
     "iterations": 481,
-    "p50_us": 287.67,
-    "p95_us": 766.21,
-    "p99_us": 822.62,
-    "max_us": 845.71,
+    "p50_us": 406.08,
+    "p95_us": 1395.08,
+    "p99_us": 1469.96,
+    "max_us": 1595.46,
     "allocations": 0
   },
           {
     "scenario": "garbage",
     "iterations": 200,
-    "p50_us": 269.79,
-    "p95_us": 286.62,
-    "p99_us": 308.67,
-    "max_us": 319.12,
+    "p50_us": 352.12,
+    "p95_us": 367.88,
+    "p99_us": 375.96,
+    "max_us": 380.04,
     "allocations": 0
   },
           {
     "scenario": "garbage_incremental",
     "iterations": 496,
-    "p50_us": 161.25,
-    "p95_us": 261.71,
-    "p99_us": 275.96,
-    "max_us": 283.92,
+    "p50_us": 192.67,
+    "p95_us": 342.58,
+    "p99_us": 367.38,
+    "max_us": 372.83,
     "allocations": 0
   }
   ],
   "meta": {
-    "commit": "83e9cd8",
-    "date": "2026-04-17T14:49:53Z"
+    "commit": "aac3313",
+    "date": "2026-04-22T09:23:27Z"
   }
 }
