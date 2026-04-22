@@ -1024,6 +1024,24 @@ public final class BurmeseEngine: @unchecked Sendable {
             }
         }
 
+        // tasks/ 05: canonical Pali virama stacks for `ganda`, `padma`,
+        // `vandana` — inject the stacked surface at rank 1 for the
+        // exact bare reading. Grammar would otherwise leave the
+        // unstacked or anusvara fallback on top.
+        if let paliSurface = Self.paliStackOverrideSurface(for: normalized) {
+            if let existing = merged.firstIndex(where: { $0.surface == paliSurface }) {
+                let keeper = merged.remove(at: existing)
+                merged.insert(keeper, at: 0)
+            } else {
+                merged.insert(Candidate(
+                    surface: paliSurface,
+                    reading: normalized,
+                    source: .grammar,
+                    score: 100
+                ), at: 0)
+            }
+        }
+
         // History promotion: the user previously committed these surfaces
         // under the same alias key, so float them to the top. Walk lowest
         // score first so the highest-scoring history entry lands at index 0
@@ -2174,6 +2192,22 @@ public final class BurmeseEngine: @unchecked Sendable {
         case "an":  return "\u{1021}\u{1036}"
         case "an.": return "\u{1021}\u{1036}\u{1037}"
         case "an:": return "\u{1021}\u{1036}\u{1038}"
+        default: return nil
+        }
+    }
+
+    /// Pali loanwords whose canonical orthography is a virama-stacked
+    /// cluster (`<C>န္<C>` / `<C>ဒ္<C>`) but whose grammar parse leaves
+    /// the unstacked or anusvara fallback on top when no lexicon entry
+    /// covers the reading. Listed entries inject the stacked surface
+    /// at rank 1 for the exact bare reading — compound buffers that
+    /// just happen to start with one of these keys (e.g. `gandakar`)
+    /// match via prefix fall-through, not here.
+    private static func paliStackOverrideSurface(for normalized: String) -> String? {
+        switch normalized {
+        case "ganda":   return "\u{1002}\u{1014}\u{1039}\u{1012}"          // ဂန္ဒ
+        case "padma":   return "\u{1015}\u{1012}\u{1039}\u{1019}"          // ပဒ္မ
+        case "vandana": return "\u{1017}\u{1014}\u{1039}\u{1012}\u{1014}"  // ဗန္ဒန
         default: return nil
         }
     }

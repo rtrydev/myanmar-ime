@@ -949,6 +949,28 @@ public enum RankingSuite {
             })
         }
 
+        // tasks/ 05: canonical Pali-loanword stacked forms must rank 1
+        // for readings whose `<C>an+<C>` / `<C>ad+<C>` layout is the
+        // authentic orthography. The grammar parser generates both
+        // unstacked and (via stack inference) stacked siblings, but
+        // parser-score and LM heuristics leave the unstacked form on
+        // top for these words without lexicon help. Inject the
+        // canonical stacked surface so the user sees it first.
+        for (buffer, expectedTop) in [
+            ("ganda",   "\u{1002}\u{1014}\u{1039}\u{1012}"),              // ဂန္ဒ
+            ("padma",   "\u{1015}\u{1012}\u{1039}\u{1019}"),              // ပဒ္မ
+            ("vandana", "\u{1017}\u{1014}\u{1039}\u{1012}\u{1014}"),      // ဗန္ဒန
+        ] {
+            cases.append(TestCase("tasksDir05_paliStackTop_\(buffer)") { ctx in
+                let state = BurmeseEngine().update(buffer: buffer, context: [])
+                let top = state.candidates.first?.surface ?? ""
+                ctx.assertEqual(
+                    top, expectedTop,
+                    "tasksDir05_paliStackTop_\(buffer)"
+                )
+            })
+        }
+
         // tasks/ 03: existing alternate surfaces must remain reachable in
         // the panel — promotion is a ranking change, not a delete.
         cases.append(TestCase("tasksDir03_bareVowelAlternates_u_retainsBwaUh") { ctx in
