@@ -27,6 +27,17 @@ public enum ReverseRomanizer {
                 continue
             }
 
+            // Try to match an onsetless `အ` (U+1021) + combining-mark
+            // compound against canonical forward readings (`an`, `ar`,
+            // …). Without this fast-path the consonant branch below
+            // emits `ah` + vowel-sequence, which produces readings like
+            // `ahan3` / `ahar` that the forward engine cannot consume.
+            if let (roman, consumed) = matchOnsetlessA(scalars, from: i) {
+                result += roman
+                i += consumed
+                continue
+            }
+
             // Try to match an independent vowel
             if let (roman, consumed) = matchIndependentVowel(scalars, from: i) {
                 result += roman
@@ -129,18 +140,89 @@ public enum ReverseRomanizer {
     /// Independent-vowel entries (U+1023–U+102A) sourced from
     /// `Romanization.vowels`. Sorted by pattern length descending so
     /// multi-scalar forms like `ဦး` (u2:) match before their prefix `ဦ`.
+    ///
+    /// `ဣ` (U+1023) and `ဥ` (U+1025) are remapped to their digit-less
+    /// canonical readings (`i.` / `u`) so reverse aliases agree with
+    /// what a typist actually produces — see tasks/ 04. The other
+    /// independent-vowel rows carry the same roman the forward table
+    /// uses.
     private static let independentVowelPatterns: [VowelPattern] = {
+        let canonicalOverrides: [UInt32: String] = [
+            0x1023: "i.",
+            0x1025: "u",
+        ]
         var patterns: [VowelPattern] = []
         for entry in Romanization.vowels {
             guard entry.isStandalone else { continue }
             let scalarValues = Array(entry.myanmar.unicodeScalars.map(\.value))
             guard let first = scalarValues.first,
                   first >= 0x1023 && first <= 0x102A else { continue }
-            patterns.append(VowelPattern(roman: entry.roman, pattern: scalarValues))
+            let roman: String
+            if scalarValues.count == 1, let override = canonicalOverrides[first] {
+                roman = override
+            } else {
+                roman = entry.roman
+            }
+            patterns.append(VowelPattern(roman: roman, pattern: scalarValues))
         }
         patterns.sort { $0.pattern.count > $1.pattern.count }
         return patterns
     }()
+
+    /// Onsetless-a compounds: a leading `အ` (U+1021) followed by a
+    /// vowel-mark sequence that spells a canonical forward reading.
+    /// The consonant branch below would otherwise emit `ah` + vowel,
+    /// producing `ahan3` / `ahar` / etc., which the forward parser
+    /// cannot round-trip because `an` / `ar` forward-map straight to
+    /// these surfaces via the onsetless-anusvara override and the
+    /// ZWNJ-promotion fallback in `BurmeseEngine`.
+    ///
+    /// Patterns are matched longest-first so `အား` is picked before
+    /// `အာ`.
+    private static let onsetlessAPatterns: [VowelPattern] = {
+        let raw: [(String, String)] = [
+            // Onsetless anusvara (forward rule pair in BurmeseEngine).
+            ("an:",  "\u{1021}\u{1036}\u{1038}"),
+            ("an.",  "\u{1021}\u{1036}\u{1037}"),
+            ("an",   "\u{1021}\u{1036}"),
+            // Onsetless aa family (forward default rule `ar` / `ar:` /
+            // `ar.`, promoted to implicit-အ onset for the bare buffer).
+            ("ar:",  "\u{1021}\u{102C}\u{1038}"),
+            ("ar.",  "\u{1021}\u{102C}\u{1037}"),
+            ("ar",   "\u{1021}\u{102C}"),
+        ]
+        var patterns = raw.map { (roman, myanmar) in
+            VowelPattern(
+                roman: roman,
+                pattern: Array(myanmar.unicodeScalars.map(\.value))
+            )
+        }
+        patterns.sort { $0.pattern.count > $1.pattern.count }
+        return patterns
+    }()
+
+    /// Match a leading U+1021 followed by a canonical combining-mark
+    /// compound. Returns the canonical reading and the total scalars
+    /// consumed (including the leading U+1021), or nil when no
+    /// onsetless-a compound applies at this position.
+    private static func matchOnsetlessA(_ scalars: [Unicode.Scalar], from start: Int) -> (String, Int)? {
+        guard start < scalars.count, scalars[start].value == 0x1021 else { return nil }
+        for entry in onsetlessAPatterns {
+            let pattern = entry.pattern
+            guard pattern.count <= scalars.count - start else { continue }
+            var matches = true
+            for k in 0..<pattern.count {
+                if scalars[start + k].value != pattern[k] {
+                    matches = false
+                    break
+                }
+            }
+            if matches {
+                return (entry.roman, pattern.count)
+            }
+        }
+        return nil
+    }
 
     /// Match a vowel/final sequence starting at position.
     /// Returns the roman key and number of scalars consumed.

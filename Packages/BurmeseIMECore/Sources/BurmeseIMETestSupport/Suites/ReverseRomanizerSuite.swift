@@ -150,7 +150,32 @@ public enum ReverseRomanizerSuite {
         },
 
         TestCase("reverse_shortIndependentI") { ctx in
-            ctx.assertEqual(ReverseRomanizer.romanize("ဣ"), "ii.")
+            // tasks/ 04: canonical forward reading for ဣ is `i.` (short
+            // independent i), not the `ii.` that raw standalone-vowel
+            // rules previously emitted.
+            ctx.assertEqual(ReverseRomanizer.romanize("ဣ"), "i.")
+        },
+
+        TestCase("reverse_shortIndependentU") { ctx in
+            // tasks/ 04: ဥ reverses to `u` (short u) so the lexicon
+            // alias agrees with what a typist produces for bare `u`.
+            ctx.assertEqual(ReverseRomanizer.romanize("ဥ"), "u")
+        },
+
+        TestCase("reverse_onsetlessA_an") { ctx in
+            // tasks/ 04: `အံ` family → `an` family, matching the forward
+            // rules added in commit 083c428.
+            ctx.assertEqual(ReverseRomanizer.romanize("\u{1021}\u{1036}"), "an")
+            ctx.assertEqual(ReverseRomanizer.romanize("\u{1021}\u{1036}\u{1037}"), "an.")
+            ctx.assertEqual(ReverseRomanizer.romanize("\u{1021}\u{1036}\u{1038}"), "an:")
+        },
+
+        TestCase("reverse_onsetlessA_ar") { ctx in
+            // tasks/ 04: `အာ` / `အား` reverse to `ar` / `ar:`, matching
+            // the forward-default vowel rule rather than the `ahar`
+            // compound the consonant path emits.
+            ctx.assertEqual(ReverseRomanizer.romanize("\u{1021}\u{102C}"), "ar")
+            ctx.assertEqual(ReverseRomanizer.romanize("\u{1021}\u{102C}\u{1038}"), "ar:")
         },
 
         TestCase("reverse_longIndependentI") { ctx in
@@ -189,8 +214,11 @@ public enum ReverseRomanizerSuite {
             let parser = SyllableParser()
             let forward = parser.parse("ii.").first?.output ?? ""
             ctx.assertEqual(forward, "\u{1023}")
+            // Reverse returns the canonical short-i reading `i.` rather
+            // than the forward `ii.` rule — both forward-parse back to
+            // `ဣ` via the engine's override (see tasks/ 04).
             let reversed = ReverseRomanizer.romanize(forward)
-            ctx.assertEqual(reversed, "ii.")
+            ctx.assertEqual(reversed, "i.")
         },
 
         TestCase("roundTrip_longIndependentI") { ctx in

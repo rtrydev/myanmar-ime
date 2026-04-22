@@ -298,10 +298,15 @@ public enum ComprehensiveRankingSuite {
               gloss: "during thingyan the whole family gathers at home and plays with water",
               surface: "သင်္ကြန်ပွဲတော်မှာမိသားစုအားလုံးစုရုံးပြီးအိမ်မှာရေကစားကြမယ်",
               alternatives: [
-                // Lead kinzi is now emitted implicitly (task 09); the
-                // `ahar:` / `ahain` bare-vowel sites still rank `ဟ`
-                // above `အ`, which is a separate pending LM issue.
+                // Lead kinzi is now emitted implicitly (task 09). With
+                // tasks/ 04 in place the `အား` site round-trips cleanly
+                // via the onsetless-`ar:` reading, but the `အိမ်` site
+                // still rank-loses to `ဟိမ်` on LM probability (a
+                // separate pending LM issue). Accept the all-`ဟ` form
+                // for the whole sentence or the mixed form where only
+                // the `အိမ်` site drifts.
                 "သင်္ကြန်ပွဲတော်မှာမိသားစုဟားလုံးစုရုံးပြီးဟိမ်မှာရေကစားကြမယ်",
+                "သင်္ကြန်ပွဲတော်မှာမိသားစုအားလုံးစုရုံးပြီးဟိမ်မှာရေကစားကြမယ်",
               ], topK: 10),
 
         // --- long sentences that embed the standard-orthography
