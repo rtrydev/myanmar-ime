@@ -859,6 +859,75 @@ public enum RankingSuite {
             })
         }
 
+        // tasks/ 01: onsetless bare-vowel buffers must never surface a ZWNJ
+        // orphan at the top. The engine promotes the parser's
+        // ZWNJ-prefixed dependent-vowel sequence to an implicit U+1021 (အ)
+        // onset so a legal independent-vowel syllable is available.
+        @Sendable func startsWithZwnj(_ surface: String) -> Bool {
+            guard let first = surface.unicodeScalars.first else { return false }
+            return first.value == 0x200C
+        }
+        for buffer in [
+            "ain", "ain.", "ain:",
+            "ar", "ar:",
+            "on", "oun",
+            "ote", "ate", "owk",
+        ] {
+            cases.append(TestCase("tasksDir01_onsetlessBareVowel_\(buffer)") { ctx in
+                let state = BurmeseEngine().update(buffer: buffer, context: [])
+                let top = state.candidates.first?.surface ?? ""
+                ctx.assertFalse(
+                    top.isEmpty,
+                    "tasksDir01_nonEmpty_\(buffer)",
+                    detail: "expected top candidate for onsetless \(buffer)"
+                )
+                ctx.assertFalse(
+                    startsWithZwnj(top),
+                    "tasksDir01_noZwnjTop_\(buffer)",
+                    detail: "top candidate for \(buffer) begins with U+200C: '\(top)'"
+                )
+            })
+        }
+
+        // Specific surface assertions where the parser has a canonical
+        // vowel rule and promotion yields a single-syllable independent-
+        // vowel form.
+        for (buffer, expectedTop) in [
+            ("ar",    "\u{1021}\u{102C}"),               // အာ
+            ("ain",   "\u{1021}\u{102D}\u{1014}\u{103A}"), // အိန်
+            ("ain.",  "\u{1021}\u{102D}\u{1014}\u{1037}\u{103A}"), // အိန့်
+            ("ain:",  "\u{1021}\u{102D}\u{1014}\u{103A}\u{1038}"), // အိန်း
+            ("ote",   "\u{1021}\u{102F}\u{1010}\u{103A}"), // အုတ်
+            ("ate",   "\u{1021}\u{102D}\u{1010}\u{103A}"), // အိတ်
+        ] {
+            cases.append(TestCase("tasksDir01_onsetlessBareVowelSurface_\(buffer)") { ctx in
+                let state = BurmeseEngine().update(buffer: buffer, context: [])
+                let top = state.candidates.first?.surface ?? ""
+                ctx.assertEqual(
+                    top, expectedTop,
+                    "tasksDir01_onsetlessBareVowelSurfaceTop_\(buffer)"
+                )
+            })
+        }
+
+        // tasks/ 02: `aung`, `aung.`, `aung:` must produce the expected
+        // `အောင်` family surfaces, not the multi-syllable garbage parses
+        // that formerly won on score.
+        for (buffer, expectedTop) in [
+            ("aung",  "\u{1021}\u{1031}\u{102C}\u{1004}\u{103A}"),        // အောင်
+            ("aung.", "\u{1021}\u{1031}\u{102C}\u{1004}\u{1037}\u{103A}"),// အောင့်
+            ("aung:", "\u{1021}\u{1031}\u{102C}\u{1004}\u{103A}\u{1038}"),// အောင်း
+        ] {
+            cases.append(TestCase("tasksDir02_onsetlessAung_\(buffer)") { ctx in
+                let state = BurmeseEngine().update(buffer: buffer, context: [])
+                let top = state.candidates.first?.surface ?? ""
+                ctx.assertEqual(
+                    top, expectedTop,
+                    "tasksDir02_onsetlessAungTop_\(buffer)"
+                )
+            })
+        }
+
         return TestSuite(name: "Ranking", cases: cases)
     }()
 }

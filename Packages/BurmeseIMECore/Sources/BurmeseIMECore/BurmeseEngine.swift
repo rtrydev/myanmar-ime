@@ -616,6 +616,20 @@ public final class BurmeseEngine: @unchecked Sendable {
             isFullBuffer: !effectiveWindowed
         )
         grammarParses.removeAll { Self.hasInterleavedLatin($0.output) }
+        // Tasks 01 / 02: for every ZWNJ-prefixed orphan parse (bare-vowel
+        // or dependent-vowel sequence with no onset consonant), generate
+        // a sibling with an implicit U+1021 (အ) onset in place of the
+        // ZWNJ. The promoted form is a legal single-syllable
+        // independent-vowel surface, so it beats multi-syllable garbage
+        // parses on `syllableCount` / `rarityPenalty`, and the
+        // `sanitizeOrphanZwnj` step later drops the original orphan once
+        // a legal sibling exists.
+        let originalGrammarParseCount = grammarParses.count
+        for i in 0..<originalGrammarParseCount {
+            if let promoted = Self.promoteOrphanZwnjToImplicitA(grammarParses[i]) {
+                grammarParses.append(promoted)
+            }
+        }
         // Stack inference (task 09): when the buffer carries no explicit
         // `+` but has an orthographic kinzi / virama-stack site
         // (`<V>n<C>`), re-parse with the inferred `+` injected and merge
@@ -2304,13 +2318,46 @@ public final class BurmeseEngine: @unchecked Sendable {
         let scalars = Array(surface.unicodeScalars)
         guard scalars.count >= 2, scalars[0].value == 0x200C else { return false }
         let v = scalars[1].value
-        return v >= 0x102B && v <= 0x103A
+        // Covers dependent vowels (102B–1039), asat (103A), and the
+        // medials ya-pin / ya-yit / wa-hswe / ha-htoe (103B–103E). Any of
+        // these following a ZWNJ base is an onset-less orphan that is
+        // never legal Burmese orthography.
+        return v >= 0x102B && v <= 0x103E
     }
 
     private static func sanitizeOrphanZwnj(_ candidates: [Candidate]) -> [Candidate] {
         let hasLegal = candidates.contains { !isOrphanZwnjMark($0.surface) }
         guard hasLegal else { return candidates }
         return candidates.filter { !isOrphanZwnjMark($0.surface) }
+    }
+
+    /// Build a sibling parse where the leading ZWNJ orphan has been
+    /// replaced with U+1021 (အ, the independent "a" onset). Returns nil
+    /// when `parse.output` is not a ZWNJ + combining-mark orphan. The
+    /// sibling inherits the original scoring so it competes with other
+    /// parses on merits (structure, syllable count, rarity) rather than
+    /// dominating automatically — the advantage is that it is a
+    /// structurally legal independent-vowel syllable, which beats
+    /// multi-syllable fallback garbage on the grammar comparator.
+    private static func promoteOrphanZwnjToImplicitA(_ parse: SyllableParse) -> SyllableParse? {
+        let scalars = Array(parse.output.unicodeScalars)
+        guard scalars.count >= 2, scalars[0].value == 0x200C else { return nil }
+        let mark = scalars[1].value
+        guard mark >= 0x102B && mark <= 0x103E else { return nil }
+        var replaced = scalars
+        replaced[0] = Unicode.Scalar(0x1021)!
+        var scalarView = String.UnicodeScalarView()
+        scalarView.append(contentsOf: replaced)
+        return SyllableParse(
+            output: String(scalarView),
+            reading: parse.reading,
+            aliasCost: parse.aliasCost,
+            legalityScore: parse.legalityScore,
+            score: parse.score,
+            structureCost: parse.structureCost,
+            syllableCount: max(1, parse.syllableCount),
+            rarityPenalty: parse.rarityPenalty
+        )
     }
 
     private static func hasInterleavedLatin(_ output: String) -> Bool {
