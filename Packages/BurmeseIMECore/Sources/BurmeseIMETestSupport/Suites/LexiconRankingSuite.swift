@@ -745,6 +745,66 @@ public enum LexiconRankingSuite {
             })
         }
 
+        // MARK: - Task 12: onsetless independent vowel + anusvara must rank 1
+
+        // Bare `an`, `an.`, `an:` are common standalone forms (`အံ`
+        // exclamation stem, `အံ့` the exclamation particle, `အံး` elongated).
+        // Without this rule they fall through to the consonant-coda rule
+        // family (`န်` / `န့်` / `န်း`) because the parser has no onset to
+        // attach the anusvara to.
+        let task12Cases: [(buffer: String, expected: String, gloss: String)] = [
+            ("an",  "\u{1021}\u{1036}", "independent vowel + anusvara"),
+            ("an.", "\u{1021}\u{1036}\u{1037}", "+ dot-below (aukmyit)"),
+            ("an:", "\u{1021}\u{1036}\u{1038}", "+ shay-pauk (visarga)"),
+        ]
+        for (buffer, expected, gloss) in task12Cases {
+            cases.append(TestCase("task12_onsetlessAnusvara_\(buffer)") { ctx in
+                guard let lexPath = BundledArtifacts.lexiconPath,
+                      let store = SQLiteCandidateStore(path: lexPath),
+                      let lmPath = BundledArtifacts.trigramLMPath,
+                      let lm = try? TrigramLanguageModel(path: lmPath) else {
+                    ctx.assertTrue(true, "skipped_noBundledArtifacts")
+                    return
+                }
+                let engine = BurmeseEngine(candidateStore: store, languageModel: lm)
+                let state = engine.update(buffer: buffer, context: [])
+                guard let top = state.candidates.first else {
+                    ctx.assertTrue(false, detail: "buffer='\(buffer)' no candidates")
+                    return
+                }
+                ctx.assertEqual(
+                    stripZW(top.surface), expected,
+                    "top1_expected_\(buffer)_\(gloss)"
+                )
+            })
+        }
+
+        // Consonant-onset controls — post-task-03 behaviour must hold.
+        let task12Controls: [(buffer: String, expected: String)] = [
+            ("than", "\u{101E}\u{1036}"),         // သံ
+            ("kan",  "\u{1000}\u{1014}\u{103A}"), // ကန် (rank 1 from engine today)
+            ("chan", "\u{1001}\u{103B}\u{1036}"), // ချံ — rank 1 with LM
+            ("pyan", "\u{1015}\u{103C}\u{1014}\u{103A}"), // ပြန် — rank 1 with LM
+        ]
+        for (buffer, expected) in task12Controls {
+            cases.append(TestCase("task12_onsetControl_\(buffer)") { ctx in
+                guard let lexPath = BundledArtifacts.lexiconPath,
+                      let store = SQLiteCandidateStore(path: lexPath),
+                      let lmPath = BundledArtifacts.trigramLMPath,
+                      let lm = try? TrigramLanguageModel(path: lmPath) else {
+                    ctx.assertTrue(true, "skipped_noBundledArtifacts")
+                    return
+                }
+                let engine = BurmeseEngine(candidateStore: store, languageModel: lm)
+                let state = engine.update(buffer: buffer, context: [])
+                let top5 = state.candidates.prefix(5).map { stripZW($0.surface) }
+                ctx.assertTrue(
+                    top5.contains(expected),
+                    detail: "buffer='\(buffer)' expected='\(expected)' top5=\(top5)"
+                )
+            })
+        }
+
         return TestSuite(name: "LexiconRanking", cases: cases)
     }()
 }

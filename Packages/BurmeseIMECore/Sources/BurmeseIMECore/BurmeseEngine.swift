@@ -938,6 +938,29 @@ public final class BurmeseEngine: @unchecked Sendable {
             merged.append(grammarCandidate.candidate)
         }
 
+        // Task 12: onsetless independent-vowel + anusvara. Bare `an`,
+        // `an.`, `an:` have no consonant to attach the anusvara to, so
+        // the parser's coda rules produce `န်` / `န့်` / `န်း` as the
+        // top grammar parse. Lexicon has `အံ` / `အံ့` / `အံး` with
+        // override readings but the LM scores Shan-digit noise (`႐ံ`)
+        // higher than the real Burmese form for the bare `an` case,
+        // sinking it below the panel. Float the independent-vowel
+        // surface to rank 1 for this narrow buffer set; sanitizer and
+        // consonant-onset parses stay untouched.
+        if let anusvaraSurface = Self.onsetlessAnusvaraSurface(for: normalized) {
+            if let existing = merged.firstIndex(where: { $0.surface == anusvaraSurface }) {
+                let keeper = merged.remove(at: existing)
+                merged.insert(keeper, at: 0)
+            } else {
+                merged.insert(Candidate(
+                    surface: anusvaraSurface,
+                    reading: normalized,
+                    source: .grammar,
+                    score: 100
+                ), at: 0)
+            }
+        }
+
         // History promotion: the user previously committed these surfaces
         // under the same alias key, so float them to the top. Walk lowest
         // score first so the highest-scoring history entry lands at index 0
@@ -2078,6 +2101,18 @@ public final class BurmeseEngine: @unchecked Sendable {
             }
         }
         return false
+    }
+
+    /// Onsetless independent-vowel + anusvara surface for the three bare
+    /// buffers `an`, `an.`, `an:`. Returns `nil` for any other buffer so
+    /// consonant-onset parses keep their existing rankings untouched.
+    private static func onsetlessAnusvaraSurface(for normalized: String) -> String? {
+        switch normalized {
+        case "an":  return "\u{1021}\u{1036}"
+        case "an.": return "\u{1021}\u{1036}\u{1037}"
+        case "an:": return "\u{1021}\u{1036}\u{1038}"
+        default: return nil
+        }
     }
 
     /// Returns true when `output` chains two viramas (U+1039) separated by
