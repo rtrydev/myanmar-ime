@@ -779,6 +779,100 @@ public enum LexiconRankingSuite {
             })
         }
 
+        // MARK: - Task 13: remaining ya-pin audit (kywan, kyay, kyi, khyay, khyin)
+
+        // Ya-pin surfaces whose canonical readings carry the `2`/`3`
+        // disambiguator lose to ya-yit siblings on DP + LM alone. Each
+        // row below must be rank 1 for its user-typed buffer. Unlike
+        // task 08 which only asserts top-5 presence, this suite demands
+        // top-1 because that is where the attested ya-pin form belongs.
+        let task13Top1Cases: [(buffer: String, expected: String, gloss: String)] = [
+            ("kywan", "\u{1000}\u{103B}\u{103D}\u{1014}\u{103A}", "servant/slave"),
+            ("kyay",  "\u{1000}\u{103B}\u{1031}",                  "pleased"),
+            ("kyi",   "\u{1000}\u{103B}\u{102E}",                  "glance"),
+            ("khyay", "\u{1001}\u{103B}\u{1031}",                  "defeat/settle"),
+            ("khyin", "\u{1001}\u{103B}\u{1004}\u{103A}",          "want"),
+        ]
+        for (buffer, expected, gloss) in task13Top1Cases {
+            cases.append(TestCase("task13_yapin_\(buffer)_top1") { ctx in
+                guard let lexPath = BundledArtifacts.lexiconPath,
+                      let store = SQLiteCandidateStore(path: lexPath),
+                      let lmPath = BundledArtifacts.trigramLMPath,
+                      let lm = try? TrigramLanguageModel(path: lmPath) else {
+                    ctx.assertTrue(true, "skipped_noBundledArtifacts")
+                    return
+                }
+                let engine = BurmeseEngine(candidateStore: store, languageModel: lm)
+                let state = engine.update(buffer: buffer, context: [])
+                guard let top = state.candidates.first else {
+                    ctx.assertTrue(false, detail: "buffer='\(buffer)' no candidates")
+                    return
+                }
+                let top5 = state.candidates.prefix(5).map { stripZW($0.surface) }
+                ctx.assertTrue(
+                    stripZW(top.surface) == expected,
+                    detail: "buffer='\(buffer)' (\(gloss)) got='\(stripZW(top.surface))' top5=\(top5)"
+                )
+            })
+        }
+
+        // Ya-yit siblings that must still be reachable in the panel —
+        // task 13 is a ranking flip, not a substitution.
+        let task13YayitAccessible: [(buffer: String, yayit: String)] = [
+            ("kyay",  "\u{1000}\u{103C}\u{1031}"),                 // ကြေ
+            ("kyi",   "\u{1000}\u{103C}\u{102E}"),                 // ကြီ (may be replaced by ကြီး in panel — check either)
+            ("khyay", "\u{1001}\u{103C}\u{1031}"),                 // ခြေ
+            ("khyin", "\u{1001}\u{103C}\u{1004}\u{103A}\u{1038}"), // ခြင်း
+        ]
+        for (buffer, yayit) in task13YayitAccessible {
+            cases.append(TestCase("task13_yayit_still_in_panel_\(buffer)") { ctx in
+                guard let lexPath = BundledArtifacts.lexiconPath,
+                      let store = SQLiteCandidateStore(path: lexPath),
+                      let lmPath = BundledArtifacts.trigramLMPath,
+                      let lm = try? TrigramLanguageModel(path: lmPath) else {
+                    ctx.assertTrue(true, "skipped_noBundledArtifacts")
+                    return
+                }
+                let engine = BurmeseEngine(candidateStore: store, languageModel: lm)
+                let state = engine.update(buffer: buffer, context: [])
+                let panel = state.candidates.map { stripZW($0.surface) }
+                ctx.assertTrue(
+                    panel.contains(yayit),
+                    detail: "buffer='\(buffer)' yayit='\(yayit)' panel=\(panel.prefix(8))"
+                )
+            })
+        }
+
+        // Ya-yit controls that must stay at rank 1 — no ya-pin promotion
+        // should leak into consonants whose attested form is ya-yit.
+        let task13YayitControls: [(buffer: String, expected: String)] = [
+            ("pyan",   "\u{1015}\u{103C}\u{1014}\u{103A}"),                     // ပြန်
+            ("pyat",   "\u{1015}\u{103C}\u{1010}\u{103A}"),                     // ပြတ်
+            ("pyaung", "\u{1015}\u{103C}\u{1031}\u{102C}\u{1004}\u{103A}"),     // ပြောင်
+        ]
+        for (buffer, expected) in task13YayitControls {
+            cases.append(TestCase("task13_yayitControl_\(buffer)_top1") { ctx in
+                guard let lexPath = BundledArtifacts.lexiconPath,
+                      let store = SQLiteCandidateStore(path: lexPath),
+                      let lmPath = BundledArtifacts.trigramLMPath,
+                      let lm = try? TrigramLanguageModel(path: lmPath) else {
+                    ctx.assertTrue(true, "skipped_noBundledArtifacts")
+                    return
+                }
+                let engine = BurmeseEngine(candidateStore: store, languageModel: lm)
+                let state = engine.update(buffer: buffer, context: [])
+                guard let top = state.candidates.first else {
+                    ctx.assertTrue(false, detail: "buffer='\(buffer)' no candidates")
+                    return
+                }
+                let top5 = state.candidates.prefix(5).map { stripZW($0.surface) }
+                ctx.assertTrue(
+                    stripZW(top.surface) == expected,
+                    detail: "buffer='\(buffer)' got='\(stripZW(top.surface))' top5=\(top5)"
+                )
+            })
+        }
+
         // Consonant-onset controls — post-task-03 behaviour must hold.
         let task12Controls: [(buffer: String, expected: String)] = [
             ("than", "\u{101E}\u{1036}"),         // သံ

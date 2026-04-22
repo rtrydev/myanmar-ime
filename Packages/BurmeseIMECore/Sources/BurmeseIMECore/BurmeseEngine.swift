@@ -881,6 +881,17 @@ public final class BurmeseEngine: @unchecked Sendable {
 
         var uniqueLexiconCandidates: [RankedLexiconCandidate] = []
         var seenLexiconSurfaces: Set<String> = []
+        // Task 13: track the highest-score exact-alias (alias_penalty 0)
+        // lexicon entry that gets absorbed into a grammar candidate. The
+        // grammar comparator weighs aliasCost (ya-yit < ya-pin) ahead of
+        // `candidate.score`, so absorption alone can't lift a ya-pin
+        // surface past its ya-yit sibling even when a curated override
+        // gives the ya-pin entry a clean canonical reading + strong
+        // frequency. We revisit this tracker after merging and promote
+        // the surface to rank 1 when the lexicon disagrees with the
+        // grammar order. Penalty-0 gating keeps the promotion aligned
+        // with curated overrides rather than rarity-disambiguated siblings.
+        var absorbedExactAliasTop: (surface: String, score: Double)? = nil
 
         for lexiconCandidate in lexiconCandidates {
             if let grammarIndex = grammarSurfaceIndex[lexiconCandidate.surface] {
@@ -890,6 +901,14 @@ public final class BurmeseEngine: @unchecked Sendable {
                     source: .grammar,
                     score: grammarCandidates[grammarIndex].candidate.score + lexiconCandidate.score
                 )
+                let lexPenalty = Romanization.aliasPenaltyCount(for: lexiconCandidate.reading)
+                let lexAlias = Romanization.aliasReading(lexiconCandidate.reading)
+                if lexPenalty == 0 && lexAlias == aliasPrefix {
+                    if absorbedExactAliasTop == nil
+                        || lexiconCandidate.score > absorbedExactAliasTop!.score {
+                        absorbedExactAliasTop = (lexiconCandidate.surface, lexiconCandidate.score)
+                    }
+                }
                 continue
             }
 
@@ -936,6 +955,19 @@ public final class BurmeseEngine: @unchecked Sendable {
 
         for grammarCandidate in remainingGrammar where merged.count < candidatePageSize {
             merged.append(grammarCandidate.candidate)
+        }
+
+        // Task 13: promote the absorbed exact-alias surface when the
+        // grammar comparator left a different surface at index 0. See
+        // the note by `absorbedExactAliasTop` for why the score-based
+        // tiebreaker can't fix this without help. Sequenced ahead of
+        // the onsetless-anusvara rule so that the more specific task 12
+        // override wins if both would fire on the same buffer.
+        if let absorbed = absorbedExactAliasTop,
+           merged.first?.surface != absorbed.surface,
+           let existing = merged.firstIndex(where: { $0.surface == absorbed.surface }) {
+            let keeper = merged.remove(at: existing)
+            merged.insert(keeper, at: 0)
         }
 
         // Task 12: onsetless independent-vowel + anusvara. Bare `an`,
