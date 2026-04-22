@@ -37,6 +37,16 @@ public final class BurmeseEngine: @unchecked Sendable {
     /// ≈1024 — still comfortably sub-millisecond on an M-series Mac.
     private static let grammarCandidateBudget = 24
 
+    /// Budget for the second `parseCandidates` call that
+    /// `inferImplicitStackMarkers` makes when an implicit stack site is
+    /// detected. The primary parse already enumerates every unstacked
+    /// interpretation, so this pass only needs to surface the stacked
+    /// top pick plus a small set of medial alternates. A narrower beam
+    /// here is the single biggest lever on the `long` / `incremental`
+    /// regression that task 09 introduced — the second parse is what
+    /// ~doubled per-keystroke cost on kinzi-bearing buffers.
+    private static let stackInferenceBudget = 20
+
     /// Maximum natural-log-probability gap a candidate may trail the best
     /// LM-ranked candidate before being dropped. 8 ≈ factor ~3000×; well
     /// below that and the candidate is almost certainly nonsense noise
@@ -629,10 +639,11 @@ public final class BurmeseEngine: @unchecked Sendable {
         // lexicon result is strictly better than anything inference
         // could add here, so bow out.
         if !hasExactLexiconMatch,
+           !Self.hasStackedSurface(grammarParses),
            let inferred = Self.inferImplicitStackMarkers(effectiveParseInput) {
             let inferredParses = parser.parseCandidates(
                 inferred.input,
-                maxResults: Self.grammarCandidateBudget,
+                maxResults: Self.stackInferenceBudget,
                 isFullBuffer: !effectiveWindowed
             )
             let existingOutputs = Set(grammarParses.map(\.output))
@@ -1704,15 +1715,25 @@ public final class BurmeseEngine: @unchecked Sendable {
     ) -> [Candidate] {
         guard !insertions.isEmpty else { return candidates }
         let cleanedChars = Array(cleaned)
+        // Runs of adjacent digits share a splice offset — "t23ote" produces
+        // two insertions both at offset 1. Memoise by offset so the prefix
+        // parse runs once per unique site instead of once per digit.
+        var positionByOffset: [Int: Int] = [:]
         let splicePositions: [Int] = insertions.map { insertion in
+            if let cached = positionByOffset[insertion.offset] { return cached }
             let prefixChars = cleanedChars.prefix(insertion.offset)
             let prefix = String(prefixChars)
             let normalized = Self.normalizeForParser(prefix)
-            if normalized.isEmpty { return 0 }
-            if let parse = parser.parseCandidates(normalized, maxResults: 1).first {
-                return parse.output.unicodeScalars.count
+            let position: Int
+            if normalized.isEmpty {
+                position = 0
+            } else if let parse = parser.parseCandidates(normalized, maxResults: 1).first {
+                position = parse.output.unicodeScalars.count
+            } else {
+                position = prefix.unicodeScalars.count
             }
-            return prefix.unicodeScalars.count
+            positionByOffset[insertion.offset] = position
+            return position
         }
         let burmeseDigits: [Unicode.Scalar] = insertions.map { insertion in
             let raw = insertion.digit.unicodeScalars.first!.value
@@ -2043,6 +2064,22 @@ public final class BurmeseEngine: @unchecked Sendable {
         return sawVirama
     }
 
+    /// True when any parse in `parses` already surfaces a kinzi or
+    /// virama-stack glyph. `inferImplicitStackMarkers` re-parses the
+    /// buffer with `+` injected so the stacked surface enters the
+    /// ranking pool — but when the primary N-best already contains
+    /// such a surface (e.g. the user typed `+` explicitly, or a
+    /// lexicon-reached alias produced one), the second parse is pure
+    /// duplication. Bail out before paying the DP cost.
+    private static func hasStackedSurface(_ parses: [SyllableParse]) -> Bool {
+        for parse in parses {
+            for scalar in parse.output.unicodeScalars where scalar.value == 0x1039 {
+                return true
+            }
+        }
+        return false
+    }
+
     /// Returns true when `output` chains two viramas (U+1039) separated by
     /// exactly one consonant scalar. This catches both literal triple
     /// stacks (`<C> 1039 <C> 1039 <C>`) and a kinzi marker that
@@ -2112,9 +2149,35 @@ public final class BurmeseEngine: @unchecked Sendable {
         // at all — the rest of the scan would walk the buffer for
         // nothing.
         guard input.contains("n") else { return nil }
+        // Second fast-exit: confirm the buffer has *any* candidate stack
+        // site (`<V> n <C>` where `<C>` starts the next syllable) before
+        // paying the per-site `Array(input)` / `lastIndex(of: "+")` /
+        // medial-onset scan. Walk scalars once; bail out the moment we
+        // either find a site or prove none exists.
+        let vowelLetters: Set<Character> = ["a", "e", "i", "o", "u", "w"]
+        let scalars = input.unicodeScalars
+        var sawCandidateSite = false
+        var prev: UInt32 = 0
+        var cur: UInt32 = 0
+        for scalar in scalars {
+            let value = scalar.value
+            if cur == 0x6E, // 'n'
+               let prevChar = Unicode.Scalar(prev).map(Character.init),
+               vowelLetters.contains(prevChar) {
+                let nextChar = Character(scalar)
+                if nextChar.isLetter,
+                   !vowelLetters.contains(nextChar),
+                   nextChar != "n" {
+                    sawCandidateSite = true
+                    break
+                }
+            }
+            prev = cur
+            cur = value
+        }
+        guard sawCandidateSite else { return nil }
         let chars = Array(input)
         guard chars.count >= 3 else { return nil }
-        let vowelLetters: Set<Character> = ["a", "e", "i", "o", "u", "w"]
         let medialLetters: Set<Character> = ["y", "r", "w"]
         var insertAt: [Int] = []
         for i in 1..<(chars.count - 1) where chars[i] == "n" {

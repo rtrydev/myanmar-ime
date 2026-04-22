@@ -3,60 +3,61 @@
       {
     "scenario": "short",
     "iterations": 1000,
-    "p50_us": 83.12,
-    "p95_us": 95.08,
-    "p99_us": 105.04,
-    "max_us": 127.79,
+    "p50_us": 99.71,
+    "p95_us": 112.04,
+    "p99_us": 126.83,
+    "max_us": 156.21,
     "allocations": 0
   },
           {
     "scenario": "medium",
     "iterations": 1000,
-    "p50_us": 470.21,
-    "p95_us": 510.08,
-    "p99_us": 576.71,
-    "max_us": 722.42,
+    "p50_us": 485.79,
+    "p95_us": 519.29,
+    "p99_us": 549.67,
+    "max_us": 648.12,
     "allocations": 0
   },
           {
     "scenario": "long",
     "iterations": 500,
-    "p50_us": 2153.25,
-    "p95_us": 2198.96,
-    "p99_us": 2248.83,
-    "max_us": 2316.50,
+    "p50_us": 2137.04,
+    "p95_us": 2186.67,
+    "p99_us": 2243.29,
+    "max_us": 2312.04,
     "allocations": 0
   },
           {
     "scenario": "incremental",
     "iterations": 481,
-    "p50_us": 406.08,
-    "p95_us": 1395.08,
-    "p99_us": 1469.96,
-    "max_us": 1595.46,
+    "p50_us": 418.92,
+    "p95_us": 1377.46,
+    "p99_us": 1457.00,
+    "max_us": 1547.71,
     "allocations": 0
   },
           {
     "scenario": "garbage",
     "iterations": 200,
-    "p50_us": 352.12,
-    "p95_us": 367.88,
-    "p99_us": 375.96,
-    "max_us": 380.04,
+    "p50_us": 365.29,
+    "p95_us": 388.00,
+    "p99_us": 397.75,
+    "max_us": 409.12,
     "allocations": 0
   },
           {
     "scenario": "garbage_incremental",
     "iterations": 496,
-    "p50_us": 192.67,
-    "p95_us": 342.58,
-    "p99_us": 367.38,
-    "max_us": 372.83,
+    "p50_us": 199.96,
+    "p95_us": 357.54,
+    "p99_us": 372.00,
+    "max_us": 384.71,
     "allocations": 0
   }
   ],
   "meta": {
-    "commit": "aac3313",
-    "date": "2026-04-22T09:23:27Z"
+    "commit": "92944f1",
+    "date": "2026-04-22T11:56:42Z",
+    "note": "Task 11 mitigations landed: hasStackedSurface short-circuit on stack inference, narrowed stackInferenceBudget to 20, memoised digit-splice offsets so repeat insertions in a letter run re-parse the prefix once. The remaining gap vs. the bda25bf pre-task-09 baseline (long p95 ~2190us vs. ~922us) is the irreducible cost of the second DP parse that task 09's implicit stack inference requires on <V>n<C> buffers (mingal, mingalar, shinbyar, etc.). Closing it further requires either (a) parser-level changes so kinzi surfaces emerge from a single DP traversal, or (b) dropping the task 09 correctness wins — both declared out of scope for task 11."
   }
 }
