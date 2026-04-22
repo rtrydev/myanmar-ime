@@ -761,6 +761,104 @@ public enum RankingSuite {
             })
         }
 
+        // Task 10: a mid-buffer ASCII digit must not strand a dependent
+        // vowel or medial behind a ZWNJ. The digit is literal — it splices
+        // into the composed surface at the scalar offset corresponding to
+        // the letters typed before it, while the letters on both sides
+        // parse as a unified syllable.
+        for (buffer, expectedTop) in [
+            ("t2ote",    "တ၂ုတ်"),
+            ("p2ote",    "ပ၂ုတ်"),
+            ("k2ote",    "က၂ုတ်"),
+            ("th2ar",    "သ၂ာ"),
+            ("n2ay",     "န၂ေ"),
+            ("k3aung",   "က၃ောင်"),
+            ("ky2un",    "ကြ၂ူန"),
+        ] {
+            cases.append(TestCase("task10_midDigit_\(buffer)") { ctx in
+                let engine = BurmeseEngine()
+                let state = engine.update(buffer: buffer, context: [])
+                let top = state.candidates.first?.surface ?? ""
+                ctx.assertEqual(
+                    top, expectedTop,
+                    "task10_midDigitTop_\(buffer)"
+                )
+                // Belt-and-suspenders: no candidate may emit ZWNJ + mark.
+                for candidate in state.candidates {
+                    let scalars = Array(candidate.surface.unicodeScalars)
+                    for i in 0..<(scalars.count - 1) where scalars[i].value == 0x200C {
+                        let next = scalars[i + 1].value
+                        let isDepMark = (0x102B...0x103A).contains(next)
+                        ctx.assertFalse(
+                            isDepMark,
+                            "task10_noZwnjMark_\(buffer)",
+                            detail: "candidate '\(candidate.surface)' has ZWNJ+mark at \(i)"
+                        )
+                    }
+                }
+            })
+        }
+
+        // Trailing digits after a complete syllable must keep the current
+        // behaviour: digit appears at the end, no surface rewriting.
+        for (buffer, expectedTop) in [
+            ("u2",   "ဦ၂"),
+            ("u.2",  "ဥ၂"),
+            ("u2:",  "ဦ၂:"),
+            ("pa2",  "ပ၂"),
+        ] {
+            cases.append(TestCase("task10_trailingDigit_\(buffer)") { ctx in
+                let engine = BurmeseEngine()
+                let state = engine.update(buffer: buffer, context: [])
+                let top = state.candidates.first?.surface ?? ""
+                ctx.assertEqual(
+                    top, expectedTop,
+                    "task10_trailingDigitTop_\(buffer)"
+                )
+            })
+        }
+
+        // `ta2in` used to silently drop the `i` because `in` alone parsed
+        // as the -ng coda and the `a` vowel got lost. After the mid-digit
+        // strip, `tain` parses as one syllable with the `i` preserved.
+        cases.append(TestCase("task10_taIn_preservesI") { ctx in
+            let engine = BurmeseEngine()
+            let state = engine.update(buffer: "ta2in", context: [])
+            let top = state.candidates.first?.surface ?? ""
+            ctx.assertEqual(top, "တ၂ိန်", "task10_ta2inTop")
+            // The `ိ` (U+102D) must survive somewhere in the surface.
+            let hasI = top.unicodeScalars.contains { $0.value == 0x102D }
+            ctx.assertTrue(hasI, "task10_ta2in_retainsDepVowelI")
+        })
+
+        // Mid-digit after a kinzi connector must round-trip: the kinzi
+        // stack on the letter side stays intact, and the digit lands
+        // after the stacked cluster.
+        cases.append(TestCase("task10_kinziPlusDigit_mingGa2lar") { ctx in
+            let engine = BurmeseEngine()
+            let state = engine.update(buffer: "min+ga2lar", context: [])
+            let top = state.candidates.first?.surface ?? ""
+            ctx.assertEqual(top, "မင်္ဂ၂လာ", "task10_minGa2larTop")
+        })
+
+        // Digit between an onset consonant and a medial letter (rarer
+        // shape from the task spec). The medial must stay attached to
+        // the onset rather than promoting to a standalone consonant.
+        for (buffer, expectedTop) in [
+            ("k2yun",  "က၂ြူန"),
+            ("l2wann", "လ၂ွန်န"),
+        ] {
+            cases.append(TestCase("task10_digitBetweenMedial_\(buffer)") { ctx in
+                let engine = BurmeseEngine()
+                let state = engine.update(buffer: buffer, context: [])
+                let top = state.candidates.first?.surface ?? ""
+                ctx.assertEqual(
+                    top, expectedTop,
+                    "task10_digitBetweenMedialTop_\(buffer)"
+                )
+            })
+        }
+
         return TestSuite(name: "Ranking", cases: cases)
     }()
 }

@@ -268,6 +268,24 @@ public final class BurmeseEngine: @unchecked Sendable {
             return CompositionState(committedContext: context)
         }
         let displayBuffer = buffer.lowercased()
+        // Task 10: Peel mid-buffer ASCII digits (letter-digit-letter) off
+        // the buffer before the rest of the pipeline runs, then splice
+        // them back into each candidate surface at the scalar position
+        // corresponding to the letters typed before the digit. Without
+        // this, `splitComposablePrefix` breaks at the digit and the
+        // post-digit letters fall back to ZWNJ + dependent-mark orphans.
+        let (midCleanedBuffer, midInsertions) =
+            Self.extractMidBufferDigits(displayBuffer)
+        if !midInsertions.isEmpty {
+            var state = update(buffer: midCleanedBuffer, context: context)
+            state.rawBuffer = displayBuffer
+            state.candidates = spliceMidBufferDigits(
+                into: state.candidates,
+                cleaned: midCleanedBuffer,
+                insertions: midInsertions
+            )
+            return state
+        }
         // If punct mapping is on and the buffer contains a mapped-punct
         // char that is NOT just at the very tail, everything up to and
         // including the *last* such punct becomes a frozen rendering
@@ -1599,6 +1617,138 @@ public final class BurmeseEngine: @unchecked Sendable {
             return false
         }
         return scalar.value >= 0x30 && scalar.value <= 0x39
+    }
+
+    private static func isAsciiLowerLetter(_ ch: Character) -> Bool {
+        guard let scalar = ch.unicodeScalars.first, ch.unicodeScalars.count == 1 else {
+            return false
+        }
+        return scalar.value >= 0x61 && scalar.value <= 0x7A
+    }
+
+    /// Strip ASCII digit runs that sit between two composable letters, so
+    /// the surrounding letters parse as a unified syllable rather than
+    /// being severed at the digit. Each stripped digit is recorded with
+    /// the character offset into the cleaned buffer where it was found;
+    /// the caller splices it back into the composed surface at the
+    /// scalar position corresponding to that prefix.
+    ///
+    /// A digit run is "mid-buffer" only when framed by `a`–`z` letters on
+    /// both sides. Trailing-digit shapes (`u2`, `pa2`) and digits sitting
+    /// beside non-letter composables (`u2:`, `u.2`, `min2+ga`) keep the
+    /// existing literal-tail behaviour.
+    static func extractMidBufferDigits(
+        _ buffer: String
+    ) -> (cleaned: String, insertions: [(offset: Int, digit: Character)]) {
+        let chars = Array(buffer)
+        var cleaned: [Character] = []
+        cleaned.reserveCapacity(chars.count)
+        var insertions: [(Int, Character)] = []
+        var i = 0
+        while i < chars.count {
+            if isAsciiDigit(chars[i]) {
+                var j = i
+                while j < chars.count, isAsciiDigit(chars[j]) { j += 1 }
+                let precededByLetter = i >= 1 && isAsciiLowerLetter(chars[i - 1])
+                let followedByLetter = j < chars.count && isAsciiLowerLetter(chars[j])
+                if precededByLetter && followedByLetter {
+                    for k in i..<j {
+                        insertions.append((cleaned.count, chars[k]))
+                    }
+                } else {
+                    cleaned.append(contentsOf: chars[i..<j])
+                }
+                i = j
+            } else {
+                cleaned.append(chars[i])
+                i += 1
+            }
+        }
+        return (String(cleaned), insertions)
+    }
+
+    /// Splice mid-buffer digits back into candidate surfaces. For each
+    /// insertion, computes a scalar splice position by re-parsing the
+    /// letter prefix (up to that offset in the cleaned buffer) with
+    /// single-best parse and counting scalars in the result. Emits a
+    /// Myanmar-digit primary and ASCII-digit secondary variant per
+    /// candidate, matching trailing-digit behaviour.
+    private func spliceMidBufferDigits(
+        into candidates: [Candidate],
+        cleaned: String,
+        insertions: [(offset: Int, digit: Character)]
+    ) -> [Candidate] {
+        guard !insertions.isEmpty else { return candidates }
+        let cleanedChars = Array(cleaned)
+        let splicePositions: [Int] = insertions.map { insertion in
+            let prefixChars = cleanedChars.prefix(insertion.offset)
+            let prefix = String(prefixChars)
+            let normalized = Self.normalizeForParser(prefix)
+            if normalized.isEmpty { return 0 }
+            if let parse = parser.parseCandidates(normalized, maxResults: 1).first {
+                return parse.output.unicodeScalars.count
+            }
+            return prefix.unicodeScalars.count
+        }
+        let burmeseDigits: [Unicode.Scalar] = insertions.map { insertion in
+            let raw = insertion.digit.unicodeScalars.first!.value
+            return Unicode.Scalar(0x1040 + (raw - 0x30))!
+        }
+        let asciiDigits: [Unicode.Scalar] = insertions.map {
+            $0.digit.unicodeScalars.first!
+        }
+        var result: [Candidate] = []
+        var seen: Set<String> = []
+        for candidate in candidates {
+            let burmese = Self.insertScalars(
+                into: candidate.surface,
+                scalars: burmeseDigits,
+                at: splicePositions
+            )
+            if seen.insert(burmese).inserted {
+                result.append(Candidate(
+                    surface: burmese,
+                    reading: candidate.reading,
+                    source: candidate.source,
+                    score: candidate.score
+                ))
+            }
+            let ascii = Self.insertScalars(
+                into: candidate.surface,
+                scalars: asciiDigits,
+                at: splicePositions
+            )
+            if ascii != burmese, seen.insert(ascii).inserted {
+                result.append(Candidate(
+                    surface: ascii,
+                    reading: candidate.reading,
+                    source: candidate.source,
+                    score: candidate.score
+                ))
+            }
+        }
+        return result
+    }
+
+    /// Insert `scalars[i]` at scalar offset `positions[i]` in `surface`.
+    /// Applies splices in descending position order so earlier offsets
+    /// remain valid as later ones shift.
+    private static func insertScalars(
+        into surface: String,
+        scalars: [Unicode.Scalar],
+        at positions: [Int]
+    ) -> String {
+        precondition(scalars.count == positions.count)
+        var working = Array(surface.unicodeScalars)
+        let ordered = zip(positions, scalars)
+            .sorted(by: { $0.0 > $1.0 })
+        for (pos, scalar) in ordered {
+            let clamped = max(0, min(pos, working.count))
+            working.insert(scalar, at: clamped)
+        }
+        var view = String.UnicodeScalarView()
+        view.append(contentsOf: working)
+        return String(view)
     }
 
     /// True when the tail begins with an ASCII digit. Digits at the very
