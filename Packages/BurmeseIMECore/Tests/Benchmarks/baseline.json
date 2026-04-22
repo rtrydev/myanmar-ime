@@ -3,61 +3,61 @@
       {
     "scenario": "short",
     "iterations": 1000,
-    "p50_us": 99.71,
-    "p95_us": 112.04,
-    "p99_us": 126.83,
-    "max_us": 156.21,
+    "p50_us": 84.04,
+    "p95_us": 96.25,
+    "p99_us": 108.75,
+    "max_us": 145.17,
     "allocations": 0
   },
           {
     "scenario": "medium",
     "iterations": 1000,
-    "p50_us": 485.79,
-    "p95_us": 519.29,
-    "p99_us": 549.67,
-    "max_us": 648.12,
+    "p50_us": 456.75,
+    "p95_us": 492.92,
+    "p99_us": 525.75,
+    "max_us": 640.29,
     "allocations": 0
   },
           {
     "scenario": "long",
     "iterations": 500,
-    "p50_us": 2137.04,
-    "p95_us": 2186.67,
-    "p99_us": 2243.29,
-    "max_us": 2312.04,
+    "p50_us": 1877.38,
+    "p95_us": 1924.29,
+    "p99_us": 1959.83,
+    "max_us": 2106.50,
     "allocations": 0
   },
           {
     "scenario": "incremental",
     "iterations": 481,
-    "p50_us": 418.92,
-    "p95_us": 1377.46,
-    "p99_us": 1457.00,
-    "max_us": 1547.71,
+    "p50_us": 396.46,
+    "p95_us": 1328.79,
+    "p99_us": 1383.50,
+    "max_us": 1447.29,
     "allocations": 0
   },
           {
     "scenario": "garbage",
     "iterations": 200,
-    "p50_us": 365.29,
-    "p95_us": 388.00,
-    "p99_us": 397.75,
-    "max_us": 409.12,
+    "p50_us": 354.88,
+    "p95_us": 375.67,
+    "p99_us": 385.21,
+    "max_us": 418.96,
     "allocations": 0
   },
           {
     "scenario": "garbage_incremental",
     "iterations": 496,
-    "p50_us": 199.96,
-    "p95_us": 357.54,
-    "p99_us": 372.00,
-    "max_us": 384.71,
+    "p50_us": 200.12,
+    "p95_us": 349.25,
+    "p99_us": 363.38,
+    "max_us": 381.50,
     "allocations": 0
   }
   ],
   "meta": {
-    "commit": "92944f1",
-    "date": "2026-04-22T11:56:42Z",
-    "note": "Task 11 mitigations landed: hasStackedSurface short-circuit on stack inference, narrowed stackInferenceBudget to 20, memoised digit-splice offsets so repeat insertions in a letter run re-parse the prefix once. The remaining gap vs. the bda25bf pre-task-09 baseline (long p95 ~2190us vs. ~922us) is the irreducible cost of the second DP parse that task 09's implicit stack inference requires on <V>n<C> buffers (mingal, mingalar, shinbyar, etc.). Closing it further requires either (a) parser-level changes so kinzi surfaces emerge from a single DP traversal, or (b) dropping the task 09 correctness wins — both declared out of scope for task 11."
+    "commit": "fefd248",
+    "date": "2026-04-22T14:41:13Z",
+    "note": "Task 14 landed: onset trie now stores only canonical-order medial entries (629 terminals / 406 nodes, down from 1654 / 1071). The ~1025 init-time permuted entries are gone; the DP canonicalizes the medial run at lookup time instead. Net improvement across all scenarios (e.g. long p95 2187us -> 1924us, short p95 112us -> 96us) because narrower per-node terminal ranges mean fewer DP transitions to score at each onset match. Behavioral parity verified byte-identical against a 6272-case probe that enumerates every base x medial-order x vowel combo supported pre-refactor."
   }
 }
