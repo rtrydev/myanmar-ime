@@ -266,7 +266,12 @@ public enum ComprehensiveRankingSuite {
               gloss: "on sunday i plan to meet friends and watch a movie together",
               surface: "တနင်္ဂနွေနေ့မှာသူငယ်ချင်းတွေနဲ့တွေ့ပြီးအတူတူရုပ်ရှင်သွားကြည့်ဖို့စီစဉ်ထားတယ်",
               alternatives: [
-                "တနီငန်ဝေနေ့မှာသူငယ်ချင်းတွေနဲ့တွေ့ပြီးဟတူတူရုတ်ရှင်သွားကြည့်ဖို့စီစဉ်ထားတယ်",
+                // Kinzi on the lead syllable is now covered by the
+                // task 09 stack-inference path, so the alternative
+                // retains kinzi but still falls through to `ဟ` on the
+                // standalone `ahatutu` — bare-vowel aa ranking is a
+                // separate pending LM issue, not task 09's scope.
+                "တနင်္ဂနွေနေ့မှာသူငယ်ချင်းတွေနဲ့တွေ့ပြီးဟတူတူရုတ်ရှင်သွားကြည့်ဖို့စီစဉ်ထားတယ်",
               ], topK: 10),
         .init(id: "longArticle_careerAndFamily",
               gloss: "after school i want to land a job and support my family",
@@ -293,7 +298,10 @@ public enum ComprehensiveRankingSuite {
               gloss: "during thingyan the whole family gathers at home and plays with water",
               surface: "သင်္ကြန်ပွဲတော်မှာမိသားစုအားလုံးစုရုံးပြီးအိမ်မှာရေကစားကြမယ်",
               alternatives: [
-                "တဟင်ကြန်ပွဲတော်မှာမိသားစုဟားလုံးစုရုံးပြီးဟိမ်မှာရေကစားကြမယ်",
+                // Lead kinzi is now emitted implicitly (task 09); the
+                // `ahar:` / `ahain` bare-vowel sites still rank `ဟ`
+                // above `အ`, which is a separate pending LM issue.
+                "သင်္ကြန်ပွဲတော်မှာမိသားစုဟားလုံးစုရုံးပြီးဟိမ်မှာရေကစားကြမယ်",
               ], topK: 10),
 
         // --- long sentences that embed the standard-orthography

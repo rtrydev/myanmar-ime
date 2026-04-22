@@ -696,6 +696,71 @@ public enum RankingSuite {
             })
         }
 
+        // Task 09 — implicit kinzi / virama stack inference.
+        //
+        // When a buffer has an orthographic same-class stack site
+        // (coda `n`/`ng` followed by a same-class onset), the stacked
+        // form must appear within the top 3 candidates without the user
+        // having to type `+`. Cross-class or non-stackable sites must
+        // leave the unstacked form at the top (negative controls).
+        for (buffer, stacked) in [
+            ("minga",       "မင်္ဂ"),
+            ("mingalar",    "မင်္ဂလာ"),
+            ("mingalarpar", "မင်္ဂလာပါ"),
+            ("singa",       "စင်္ဂ"),
+            ("sanda",       "စန္ဒ"),
+        ] {
+            cases.append(TestCase("task09_impliedStack_\(buffer)") { ctx in
+                let engine = BurmeseEngine()
+                let state = engine.update(buffer: buffer, context: [])
+                let top3 = Array(state.candidates.prefix(3)).map(\.surface)
+                ctx.assertTrue(
+                    top3.contains(stacked),
+                    "task09_stacked_\(buffer)",
+                    detail: "expected \(stacked) in top3; got: \(top3); all: \(state.candidates.map(\.surface))"
+                )
+            })
+        }
+
+        // Negative controls: inputs whose context does not produce a
+        // legal same-class stack must keep the unstacked form at rank 1.
+        for (buffer, expectedTop) in [
+            ("min",       "မင်"),
+            ("san",       "စန်"),
+            ("sin",       "စင်"),
+            ("minmin",    "မင်မင်"),
+            ("kanlay",    "ကန်လေ"),
+            ("kaung",     "ကောင်"),
+        ] {
+            cases.append(TestCase("task09_noStack_\(buffer)") { ctx in
+                let engine = BurmeseEngine()
+                let state = engine.update(buffer: buffer, context: [])
+                let top = state.candidates.first?.surface ?? ""
+                ctx.assertEqual(
+                    top, expectedTop,
+                    "task09_noStackTop_\(buffer)"
+                )
+            })
+        }
+
+        // Explicit `+` disambiguator must continue to produce the same
+        // stacked top candidate as before. Regression guard for the fix.
+        for (buffer, stacked) in [
+            ("min+galar", "မင်္ဂလာ"),
+            ("sin+ga",    "စင်္ဂ"),
+            ("san+da",    "စန္ဒ"),
+        ] {
+            cases.append(TestCase("task09_explicitPlus_\(buffer)") { ctx in
+                let engine = BurmeseEngine()
+                let state = engine.update(buffer: buffer, context: [])
+                let top = state.candidates.first?.surface ?? ""
+                ctx.assertEqual(
+                    top, stacked,
+                    "task09_explicitPlusTop_\(buffer)"
+                )
+            })
+        }
+
         return TestSuite(name: "Ranking", cases: cases)
     }()
 }

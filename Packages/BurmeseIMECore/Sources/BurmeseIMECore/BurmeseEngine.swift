@@ -588,6 +588,64 @@ public final class BurmeseEngine: @unchecked Sendable {
             isFullBuffer: !effectiveWindowed
         )
         grammarParses.removeAll { Self.hasInterleavedLatin($0.output) }
+        // Stack inference (task 09): when the buffer carries no explicit
+        // `+` but has an orthographic kinzi / virama-stack site
+        // (`<V>n<C>`), re-parse with the inferred `+` injected and merge
+        // the resulting parses so the stacked surface enters the
+        // ranking pool alongside the unstacked one. The parser's
+        // soft-boundary gate turns cross-class sites into plain
+        // syllable breaks, so over-insertion is safe.
+        //
+        // Each injected `+` materialises as a DP vowelOnly transition
+        // that bumps `syllableCount` by 1 even when the site resolves
+        // to a stack — so the stacked parse would lose the
+        // `syllableCount` tiebreaker against the shorter unstacked
+        // parse of the same buffer. Decrement the inferred parse's
+        // `syllableCount` by the number of injected `+`s so the count
+        // reflects what the user perceives (a stacked compound is one
+        // syllable, not two).
+        // Skip stack inference when the lexicon already holds the exact
+        // buffer — the curated form carries source=.lexicon, and a
+        // parallel grammar parse with the same surface would steal the
+        // lexicon source when the merge dedupes by surface. The
+        // lexicon result is strictly better than anything inference
+        // could add here, so bow out.
+        if !hasExactLexiconMatch,
+           let inferred = Self.inferImplicitStackMarkers(effectiveParseInput) {
+            let inferredParses = parser.parseCandidates(
+                inferred.input,
+                maxResults: Self.grammarCandidateBudget,
+                isFullBuffer: !effectiveWindowed
+            )
+            let existingOutputs = Set(grammarParses.map(\.output))
+            for parse in inferredParses
+            where !Self.hasInterleavedLatin(parse.output)
+                && !existingOutputs.contains(parse.output) {
+                // Neutralise the bookkeeping bump each injected `+` adds:
+                // the parser treats a soft-boundary transition as a new
+                // vowel slot, so it contributes +1 `syllableCount` and a
+                // per-syllable `legalityScore` step (~+100) regardless of
+                // whether the site actually stacked. Reverting both keeps
+                // the inferred parse on equal footing with the original
+                // no-`+` parse, so the two compete on their real merits
+                // (parser score, alias cost, LM) rather than on ghost
+                // legality the `+` produced.
+                let adjustedCount = max(1, parse.syllableCount - inferred.insertions)
+                let adjustedLegality = parse.legalityScore > 0
+                    ? max(1, parse.legalityScore - 100 * inferred.insertions)
+                    : parse.legalityScore
+                grammarParses.append(SyllableParse(
+                    output: parse.output,
+                    reading: parse.reading,
+                    aliasCost: parse.aliasCost,
+                    legalityScore: adjustedLegality,
+                    score: parse.score,
+                    structureCost: parse.structureCost,
+                    syllableCount: adjustedCount,
+                    rarityPenalty: parse.rarityPenalty
+                ))
+            }
+        }
         // `windowFallback` is set when the tail-only parse failed so we
         // retried with the full buffer. In that case the anchor is still
         // the authoritative rendering of the prefix — we just couldn't
@@ -1846,6 +1904,65 @@ public final class BurmeseEngine: @unchecked Sendable {
         let vowelChars: Set<Character> = ["a", "e", "i", "o", "u"]
         guard next.isLetter, !vowelChars.contains(next) else { return nil }
         return String(chars.dropFirst())
+    }
+
+    /// Return `input` with implicit kinzi / virama-stack markers (`+`)
+    /// inserted at every orthographically plausible stack site, plus
+    /// the insertion count, or nil when the input already carries a
+    /// `+` (respect the user's explicit signal) or has no detectable
+    /// site.
+    ///
+    /// A site is `<simple-onset> <vowel-letter> n <consonant-letter>`:
+    /// the `n` could be the coda of an `-an` / `-in` / `-on` / `-un`
+    /// / `-ein` / `-ain` / `-own` vowel key, and the following
+    /// consonant could be the upper of a stack. Inference is gated on
+    /// the preceding onset being "simple" — no `y` / `r` / `w` medial
+    /// letters between the first consonant and the vowel. Modern
+    /// polysyllable words with medial-heavy onsets (e.g. `kwyantaw`
+    /// → ကျွန်တော်) conventionally spell the nasal coda with asat, not
+    /// a stack, so inferring one there would pick the wrong form.
+    ///
+    /// The inserted `+` is then resolved by the parser's
+    /// `softBoundaryContext` gate: same-class stacks materialise as
+    /// kinzi / virama forms, cross-class lowers degrade to a plain
+    /// syllable break — so over-insertion is safe, the unstacked
+    /// reading is preserved via the existing no-`+` parse that also
+    /// runs for the same buffer.
+    private static func inferImplicitStackMarkers(
+        _ input: String
+    ) -> (input: String, insertions: Int)? {
+        guard !input.contains("+") else { return nil }
+        let chars = Array(input)
+        guard chars.count >= 3 else { return nil }
+        let vowelLetters: Set<Character> = ["a", "e", "i", "o", "u", "w"]
+        let medialLetters: Set<Character> = ["y", "r", "w"]
+        var insertAt: [Int] = []
+        for i in 1..<(chars.count - 1) where chars[i] == "n" {
+            let prev = chars[i - 1]
+            let next = chars[i + 1]
+            guard vowelLetters.contains(prev) else { continue }
+            guard next.isLetter,
+                  !vowelLetters.contains(next),
+                  next != "n"
+            else { continue }
+            // Reject medial-heavy onsets. The preceding syllable starts
+            // at buffer head or the most recent `+`; any `y`/`r`/`w`
+            // between positions 1 and `i-1` means the onset has at
+            // least one medial. `h` is ambiguous (onset digraph `th`
+            // vs medial `hm`) so it is excluded from the medial set.
+            let onsetStart = chars[..<i].lastIndex(of: "+").map { $0 + 1 } ?? 0
+            let onsetHasMedial = onsetStart + 1 < i - 1
+                && (onsetStart + 1..<i - 1).contains(where: { medialLetters.contains(chars[$0]) })
+            guard !onsetHasMedial else { continue }
+            insertAt.append(i + 1)
+        }
+        guard !insertAt.isEmpty else { return nil }
+        var result = input
+        for idx in insertAt.reversed() {
+            let si = result.index(result.startIndex, offsetBy: idx)
+            result.insert("+", at: si)
+        }
+        return (result, insertAt.count)
     }
 
     /// Return `input` with the first kinzi-forming `+` removed, or nil if
