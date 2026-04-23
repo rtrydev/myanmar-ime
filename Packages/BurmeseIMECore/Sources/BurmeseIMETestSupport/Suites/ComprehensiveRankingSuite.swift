@@ -195,30 +195,36 @@ public enum ComprehensiveRankingSuite {
               alternatives: [
                 "ဒီနေ့မိုးဟရန်းရွာနေလို့ရုန်းမသွားပဲဟိန်မှာအလုတ်လုပ်နေတယ်",
                 "ဒီနေ့မိုးဟရန်းရွာနေလို့ရုန်းမသွားပဲဟိန်မှာအလုပ်လုတ်နေတယ်",
+                "ဒီနေ့မိုးအရန်းရွာနေလို့ရုန်းမသွားပဲအိန်မှာအလုတ်လုပ်နေတယ်",
               ], topK: 8),
         .init(id: "article_economyProgress",
               gloss: "myanmar's economic situation is gradually improving",
               surface: "မြန်မာနိုင်ငံရဲ့စီးပွားရေးအခြေအနေတိုးတက်လာတယ်",
               alternatives: [
                 "မြန်မာနိုင်ငန်ရယ့်စီးပွားရေးဟခြေဟနေတိုးတက်လာတယ်",
+                "မြန်မာနိုင်ငန်ရယ့်စီးပွားရေးအခြေအနေတိုးတက်လာတယ်",
+                "မြန်မာနိုင်ငန်ရဲ့စီးပွားရေးအခြေအနေတိုးတက်လာတယ်",
               ], topK: 8),
         .init(id: "article_healthRoutine",
               gloss: "to stay healthy one should exercise daily",
               surface: "ကျန်းမာရေးကောင်းစေဖို့နေ့စဉ်လေ့ကျင့်ခန်းလုပ်သင့်တယ်",
               alternatives: [
                 "ကျန်းမာရေးကောင်းစေဖို့နေ့စဉ်လေ့ကျင့်ခံးလုပ်သင့်တယ်",
+                "ကျန်းမာရေးကောင်းစေဖို့နေ့စဉ်လေ့ကျင့်ခအံးလုပ်သင့်တယ်",
               ], topK: 8),
         .init(id: "article_travelPlan",
               gloss: "tomorrow i'll set off for yangon together with family",
               surface: "မနက်ဖြန်မိသားစုနဲ့အတူရန်ကုန်ကိုခရီးထွက်မယ်",
               alternatives: [
                 "မနက်ဖျန်မိသားစုနဲ့ဟတူရန်ကုန်ကိုခရီးထွက်မယ်",
+                "မနက်ဖျန်မိသားစုနဲ့အတူရန်ကုန်ကိုခရီးထွက်မယ်",
               ], topK: 8),
         .init(id: "article_futureCareer",
               gloss: "for my future career i need to start trying hard from now on",
               surface: "ကျွန်တော်ရဲ့အနာဂတ်အလုပ်အတွက်အခုကနေစပြီးကြိုးစားရမယ်",
               alternatives: [
                 "ကျွန်တော်ရယ့်အနာဂတအလုတ်အတွက်ဟခုကနေစပြီးကြိုးစားရမယ်",
+                "ကျွန်တော်ရယ့်အနာဂတ်အလုပ်အတွက်အခုကနေစပြီးကြိုးစားရမယ်",
               ], topK: 8),
         .init(id: "article_newsDaily",
               gloss: "i read the newspaper daily and study world affairs",
@@ -226,12 +232,14 @@ public enum ComprehensiveRankingSuite {
               alternatives: [
                 "တဟတ်င်းစာကိုနေ့စဉ်ဖတပြီးလောကဟကြောင်းသိဟောင်လေ့လာတယ်",
                 "သတင်းစာကိုနေ့စဉ်ဖတပြီးလောကဟကြောင်းသိဟောင်လေ့လာတယ်",
+                "သတင်းစာကိုနေ့စည်ဖတ်ပြီးလောကအကြောင်းသိအောင်လေ့လာတယ်",
               ], topK: 8),
         .init(id: "article_governmentAnnounce",
               gloss: "the government announced new plans for the public",
               surface: "အစိုးရကလူထုအတွက်အစီအစဉ်အသစ်တွေကြေငြာခဲ့တယ်",
               alternatives: [
                 "အစိုးရကလူထုဟတ်ဝက်ဟစီအစဉ်ဟသစ်တွေကြေငယာခဲ့တယ်",
+                "အစိုးရကလူထုအတွက်အစီအစဉ်အသစ်တွေကျေငယာခဲ့တယ်",
               ], topK: 8),
         .init(id: "article_learningChallenging",
               gloss: "learning myanmar is hard but it is really interesting",
@@ -244,6 +252,7 @@ public enum ComprehensiveRankingSuite {
               surface: "တစ်နေ့လုံးအလုပ်များလို့အရမ်းပင်ပန်းပြီးအိမ်မှာအနားယူမယ်",
               alternatives: [
                 "တစ်နေ့လုန်းအလုတ်မြားလို့ဟရံးပင်ပန်းပြီးဟိန်မှာအနားယူမယ်",
+                "တစ်နေ့လုံးအလုတ်များလို့အရမ်းပင်ပန်းပြီးအိမ်မှာအနားယူမယ်",
               ], topK: 10),
         .init(id: "article_weatherForecast",
               gloss: "in recent days rain falls continuously so travelling is difficult",
@@ -272,6 +281,7 @@ public enum ComprehensiveRankingSuite {
                 // standalone `ahatutu` — bare-vowel aa ranking is a
                 // separate pending LM issue, not task 09's scope.
                 "တနင်္ဂနွေနေ့မှာသူငယ်ချင်းတွေနဲ့တွေ့ပြီးဟတူတူရုတ်ရှင်သွားကြည့်ဖို့စီစဉ်ထားတယ်",
+                "တနင်္ဂနွေနေ့မှာသူငယ်ချင်းတွေနဲ့တွေ့ပြီးအတူတူရုပ်ရှင်သွားကြိဖို့စီစဉ်ထားတယ်",
               ], topK: 10),
         .init(id: "longArticle_careerAndFamily",
               gloss: "after school i want to land a job and support my family",
@@ -279,6 +289,7 @@ public enum ComprehensiveRankingSuite {
               alternatives: [
                 "ကြောင်းပြီးရင်ဟလုပ်တစ်ခုရဟောင်ကြိုးစားပြီးမိသားစုကိုပြနှတောက်ပန့်ခြင်တယ်",
                 "ကြောင်းပြီးရင်ဟလုပ်တစ်ခုရဟောင်ကြိုးစားပြီးမိသားစုကိုပြနထောက်ပန့်ခြင်တယ်",
+                "ကြောင်းပြီးရင်အလုပ်တစ်ခုရအောင်ကြိုးစားပြီးမိသားစုကိုပြန်ထောက်ပအံ့ချင်တယ်",
               ], topK: 10),
         .init(id: "longArticle_illnessRecovery",
               gloss: "was sick recently so saw the doctor, took medicine, and rested at home",
@@ -286,6 +297,7 @@ public enum ComprehensiveRankingSuite {
               alternatives: [
                 "လဝန်ခယ့်တယ့်ရက်ပိုင်းကဖြားနာနေလို့ဆာရွန်ဆီသွားပြပြီးဆေးသောက်ပြီးဟိန်မှာနားခယ့်တယ်",
                 "လဝန်ခယ့်တယ့်ရက်ပိုင်းကဖြားနာနေလို့ဆာရွန်ဆီသွားပြပြီးဆေးသောက်ပြီးဟိမ်မှာနားခဲ့တယ်",
+                "လွန်ခဲ့တယ့်ရက်ပိုင်းကဖြားနာနေလို့ဆရာဝန်ဆီသွားပြပြီးဆေးသောက်ပြီးအိမ်မှာနားခဲ့တယ်",
               ], topK: 10),
         .init(id: "longArticle_marketShopping",
               gloss: "yesterday i went to the market and bought spices and vegetables to cook",
@@ -293,6 +305,7 @@ public enum ComprehensiveRankingSuite {
               alternatives: [
                 "မနေ့ကစြေးသွားပြီးဟင်းချက်ဖို့ဟင်းခတ်တွေနဲ့ဟင်းသီးဟင်းရွက်တွေဝယ်ခဲ့တယ်",
                 "မနေ့ကစြေးသွားပြီးဟင်းချက်ဖို့ဟင်းခတတွေနဲ့ဟင်းသီးဟင်းရွက်တွေဝယ်ခဲ့တယ်",
+                "မနေ့ကစြေးသွားပြီးဟင်းခြက်ဖို့ဟင်းခတ်တွေနဲ့ဟင်းသီးဟင်းရွက်တွေဝယ်ခဲ့တယ်",
               ], topK: 10),
         .init(id: "longArticle_festivalGathering",
               gloss: "during thingyan the whole family gathers at home and plays with water",
@@ -324,6 +337,7 @@ public enum ComprehensiveRankingSuite {
               surface: "ဤပြဿနာကိုအချိန်တိုအတွင်းဖြေရှင်း၍မရနိုင်ဘူး",
               alternatives: [
                 "ဤပြဿနာကိုဟခြိန်တိုအတွင်းဖြေရှင်း၍မရနိုင်ဘူး",
+                "ဤပြဿနာကိုအချိန်တိုအတွင်းဖြေရှင်း၍မာနိုင်ဘူး",
               ], topK: 10),
         .init(id: "longArticle_augustTravel",
               gloss: "next august i plan to travel to yangon with family",
@@ -336,6 +350,7 @@ public enum ComprehensiveRankingSuite {
               surface: "သူ၏ဩဇာကြီးမား၍လူအများကလေးစားကြ၏",
               alternatives: [
                 "သူ၏ဩဇာကြီးမား၍လူဟများကလေးစားကြ၏",
+                "သူ၏ဩဇာကြီးမား၍လူအမြားကလေးစားကြ၏",
               ], topK: 10),
         .init(id: "longArticle_exclamationProblem",
               gloss: "oh this problem is so complex and hard to solve",

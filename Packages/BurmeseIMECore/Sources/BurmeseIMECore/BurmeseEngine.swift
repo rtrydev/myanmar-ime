@@ -36,6 +36,7 @@ public final class BurmeseEngine: @unchecked Sendable {
         let syllableCount: Int
         let rarityPenalty: Int
         var lmLogProb: Double
+        var absorbedMissingFromLM: Bool
     }
 
     private struct RankedLexiconCandidate {
@@ -52,7 +53,15 @@ public final class BurmeseEngine: @unchecked Sendable {
     /// include plausible medial/onset alternates. The parser's internal beam
     /// scales to `max(budget × 16, 64)`, so a budget of 64 keeps the beam
     /// ≈1024 — still comfortably sub-millisecond on an M-series Mac.
-    private static let grammarCandidateBudget = 24
+    private static let grammarCandidateBudget = 32
+
+    /// Expanded N-best budget for readings where `h` participates in a
+    /// high-ambiguity cluster: it may be an aspirated onset marker, a
+    /// ha-medial, or part of a following consonant run. A narrow DP beam
+    /// drops LM-favored siblings such as `than3hly2in` and `ahaakhyain`
+    /// before the ranker can compare them, while ordinary buffers should
+    /// keep the smaller hot-path budget.
+    private static let expandedGrammarCandidateBudget = 48
 
     /// Budget for the second `parseCandidates` call that
     /// `inferImplicitStackMarkers` makes when an implicit stack site is
@@ -577,11 +586,17 @@ public final class BurmeseEngine: @unchecked Sendable {
         // vowel at the boundary; `maxOnsetLen` is the safe minimum.
         let minAnchorTailLen = parser.maxOnsetLen
         let priorAnchor: PrefixAnchor? = {
+            guard normalized.count > compositionWindowSize else { return nil }
+            let normalizedCharsForAnchors = Array(normalized)
             for anchor in historySnapshot.reversed() {
                 guard !anchor.normalized.isEmpty,
                       normalized.hasPrefix(anchor.normalized),
                       normalized.count > anchor.normalized.count,
-                      anchor.normalized.count >= anchorCommitThreshold
+                      anchor.normalized.count >= anchorCommitThreshold,
+                      !Self.isUnsafeFrozenSplit(
+                          chars: normalizedCharsForAnchors,
+                          split: anchor.normalized.count
+                      )
                 else { continue }
                 let tail = String(normalized.suffix(normalized.count - anchor.normalized.count))
                 guard tail.count >= minAnchorTailLen else { continue }
@@ -642,16 +657,22 @@ public final class BurmeseEngine: @unchecked Sendable {
             // the new split is constrained to land at or after the
             // cached endpoint, so the committed portion only grows.
             let cachedLen = stableCachedPrefixLength(for: normalized)
+            let normalizedChars = Array(normalized)
+            let cachedIsUnsafe = cachedLen.map {
+                Self.isUnsafeFrozenSplit(chars: normalizedChars, split: $0)
+            } ?? false
             let split: Int
             if let cached = cachedLen,
+               !cachedIsUnsafe,
                normalized.count - cached <= Self.maxActiveTailSize {
                 split = cached
             } else {
+                let splitLowerBound = max(cachedLen ?? 0, anchorCommitThreshold)
                 split = Self.findSyllableSafeSplit(
                     in: normalized,
                     parser: parser,
                     targetTail: compositionWindowSize,
-                    lowerBound: cachedLen ?? 0
+                    lowerBound: splitLowerBound
                 )
             }
             let frozenPrefix = String(normalized.prefix(split))
@@ -677,7 +698,7 @@ public final class BurmeseEngine: @unchecked Sendable {
         var effectiveWindowed = windowed
         var grammarParses = parser.parseCandidates(
             effectiveParseInput,
-            maxResults: Self.grammarCandidateBudget,
+            maxResults: Self.grammarCandidateBudget(for: effectiveParseInput),
             isFullBuffer: !effectiveWindowed
         )
         grammarParses.removeAll { Self.hasInterleavedLatin($0.output) }
@@ -765,7 +786,7 @@ public final class BurmeseEngine: @unchecked Sendable {
             windowFallback = true
             grammarParses = parser.parseCandidates(
                 effectiveParseInput,
-                maxResults: Self.grammarCandidateBudget,
+                maxResults: Self.grammarCandidateBudget(for: effectiveParseInput),
                 isFullBuffer: !effectiveWindowed
             )
             grammarParses.removeAll { Self.hasInterleavedLatin($0.output) }
@@ -793,7 +814,8 @@ public final class BurmeseEngine: @unchecked Sendable {
                         structureCost: parse.structureCost,
                         syllableCount: parse.syllableCount,
                         rarityPenalty: parse.rarityPenalty,
-                        lmLogProb: branch.lmScore + tailLM
+                        lmLogProb: branch.lmScore + tailLM,
+                        absorbedMissingFromLM: false
                     ))
                 }
             }
@@ -812,7 +834,8 @@ public final class BurmeseEngine: @unchecked Sendable {
                     structureCost: parse.structureCost,
                     syllableCount: parse.syllableCount,
                     rarityPenalty: parse.rarityPenalty,
-                    lmLogProb: scoreSurfaceCached(parse.output, context: context, cache: &lmCache)
+                    lmLogProb: scoreSurfaceCached(parse.output, context: context, cache: &lmCache),
+                    absorbedMissingFromLM: false
                 )
             }
         }
@@ -908,6 +931,10 @@ public final class BurmeseEngine: @unchecked Sendable {
                     source: .grammar,
                     score: grammarCandidates[grammarIndex].candidate.score + lexiconCandidate.score
                 )
+                if languageModel.hasVocabulary {
+                    grammarCandidates[grammarIndex].absorbedMissingFromLM =
+                        !languageModel.containsSurface(grammarCandidates[grammarIndex].candidate.surface)
+                }
                 continue
             }
 
@@ -931,7 +958,7 @@ public final class BurmeseEngine: @unchecked Sendable {
         grammarCandidates.sort { lhs, rhs in
             grammarCandidateIsBetter(lhs, than: rhs)
         }
-        grammarCandidates = pruneByLmMargin(grammarCandidates, keyPath: \.lmLogProb)
+        grammarCandidates = pruneGrammarByLmMargin(grammarCandidates)
         grammarCandidates = promoteAliasAlternate(grammarCandidates)
         // Ya-pin typing-intent promotion: if the bare user buffer is
         // the exact digit-stripped form of a ya-pin canonical reading
@@ -985,7 +1012,8 @@ public final class BurmeseEngine: @unchecked Sendable {
                         structureCost: parse.structureCost,
                         syllableCount: parse.syllableCount,
                         rarityPenalty: parse.rarityPenalty,
-                        lmLogProb: scoreSurfaceCached(parse.output, context: context, cache: &lmCache)
+                        lmLogProb: scoreSurfaceCached(parse.output, context: context, cache: &lmCache),
+                        absorbedMissingFromLM: false
                     ))
                 }
             }
@@ -1471,6 +1499,32 @@ public final class BurmeseEngine: @unchecked Sendable {
         return filtered.isEmpty ? [candidates[0]] : filtered
     }
 
+    /// Grammar candidates that absorbed a lexicon row are attested surfaces,
+    /// so keep them in the panel even if a stale or pruned LM charges a low
+    /// OOV-like score. The comparator still decides their final order.
+    private func pruneGrammarByLmMargin(
+        _ candidates: [RankedGrammarCandidate]
+    ) -> [RankedGrammarCandidate] {
+        guard candidates.count > 1 else { return candidates }
+        var maxLm = -Double.infinity
+        for candidate in candidates {
+            if candidate.lmLogProb > maxLm { maxLm = candidate.lmLogProb }
+        }
+        guard maxLm.isFinite else { return candidates }
+        let floor = maxLm - lmPruneMargin
+        let filtered = candidates.filter {
+            $0.lmLogProb >= floor || $0.candidate.score > Double($0.parserScore)
+        }
+        return filtered.isEmpty ? [candidates[0]] : filtered
+    }
+
+    private static func grammarCandidateBudget(for normalizedInput: String) -> Int {
+        if normalizedInput.contains("khy") || normalizedInput.contains("hly") {
+            return expandedGrammarCandidateBudget
+        }
+        return grammarCandidateBudget
+    }
+
     /// Find a character index in `normalized` that is safe to use as the
     /// frozen-prefix / active-tail boundary. The split is "safe" when the
     /// prefix `normalized[..<split]` parses fully legally on its own —
@@ -1488,13 +1542,16 @@ public final class BurmeseEngine: @unchecked Sendable {
         lowerBound: Int = 0
     ) -> Int {
         let total = normalized.count
-        let target = total - targetTail
+        let target = min(total - 1, max(total - targetTail, lowerBound))
         guard target > 0 else { return 0 }
         let chars = Array(normalized)
         // Never let the split regress below `lowerBound` — that keeps a
         // previously committed prefix from shrinking when we're forced
         // to recompute because the tail outgrew its budget.
-        let scanFloor = max(1, lowerBound)
+        var scanFloor = max(1, lowerBound)
+        if Self.isUnsafeFrozenSplit(chars: chars, split: scanFloor) {
+            scanFloor = max(1, scanFloor - 1)
+        }
         // Cap the walk-back to one syllable's worth of characters. No legal
         // syllable boundary spans more than `maxOnsetLen + maxVowelLen`, so
         // if we don't find a legal prefix within that window the buffer is
@@ -1503,16 +1560,26 @@ public final class BurmeseEngine: @unchecked Sendable {
         // keep typing. Give up and return the target split unchanged.
         let maxWalkBack = parser.maxOnsetLen + parser.maxVowelLen
         let scanLimit = max(scanFloor, target - maxWalkBack)
-        var split = max(target, scanFloor)
+        var split = target
         while split >= scanLimit {
             let prefix = String(chars[0..<split])
             if let parse = parser.parseCandidates(prefix, maxResults: 1).first,
-               parse.legalityScore > 0 {
+               parse.legalityScore > 0,
+               !Self.isUnsafeFrozenSplit(chars: chars, split: split) {
                 return split
             }
             split -= 1
         }
-        return max(target, scanFloor)
+        return target
+    }
+
+    /// Avoid freezing a connector-like `a` into the prefix when the next
+    /// active-tail letter may need it as an onsetless `a...` word start
+    /// (`...phaya` + `hain...` should remain able to form `...ဖေအိမ်...`).
+    private static func isUnsafeFrozenSplit(chars: [Character], split: Int) -> Bool {
+        guard split > 0, split < chars.count else { return false }
+        guard chars[split - 1] == "a" else { return false }
+        return chars[split].isLetter
     }
 
     /// Length of a previously cached frozen prefix if it still applies to
@@ -2401,14 +2468,33 @@ public final class BurmeseEngine: @unchecked Sendable {
         let hasLegal = candidates.contains {
             !isOrphanZwnjMark($0.surface)
                 && !isOrphanCombiningMarkSurface($0.surface)
+                && !isPollutedFormatControlSurface($0.surface)
                 && !isLeadingNonMyanmarScalar($0.surface)
         }
         guard hasLegal else { return candidates }
         return candidates.filter {
             !isOrphanZwnjMark($0.surface)
                 && !isOrphanCombiningMarkSurface($0.surface)
+                && !isPollutedFormatControlSurface($0.surface)
                 && !isLeadingNonMyanmarScalar($0.surface)
         }
+    }
+
+    /// ZWSP is allowed as a lexicon word-boundary marker. ZWNJ/ZWJ are only
+    /// tolerated for the parser's leading orphan-mark fallback; elsewhere in
+    /// a lexicon surface they are corpus pollution and should not outrank a
+    /// clean candidate.
+    private static func isPollutedFormatControlSurface(_ surface: String) -> Bool {
+        let scalars = Array(surface.unicodeScalars)
+        for (index, scalar) in scalars.enumerated() {
+            guard scalar.value == 0x200C || scalar.value == 0x200D else { continue }
+            if index == 0, scalars.count >= 2 {
+                let next = scalars[1].value
+                if next >= 0x102B && next <= 0x103E { continue }
+            }
+            return true
+        }
+        return false
     }
 
     /// Structural guard for lexicon surfaces polluted by a non-Myanmar
@@ -2672,7 +2758,9 @@ public final class BurmeseEngine: @unchecked Sendable {
             return !lhsIsOOV
         }
         let lmGap = lhs.lmLogProb - rhs.lmLogProb
-        if !lhsIsOOV && !rhsIsOOV && abs(lmGap) > Self.lmDominanceThreshold {
+        if !lhs.absorbedMissingFromLM && !rhs.absorbedMissingFromLM
+            && !lhsIsOOV && !rhsIsOOV
+            && abs(lmGap) > Self.lmDominanceThreshold {
             return lmGap > 0
         }
         // Composite score combines rank_score and LM log-prob. For

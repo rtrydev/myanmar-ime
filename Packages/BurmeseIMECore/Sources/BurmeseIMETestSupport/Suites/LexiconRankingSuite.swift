@@ -247,11 +247,13 @@ public enum LexiconRankingSuite {
 
         cases.append(TestCase("realLexicon_commonGreetingSurfacesAtTop") { ctx in
             guard let path = BundledArtifacts.lexiconPath,
-                  let store = SQLiteCandidateStore(path: path) else {
+                  let store = SQLiteCandidateStore(path: path),
+                  let lmPath = BundledArtifacts.trigramLMPath,
+                  let lm = try? TrigramLanguageModel(path: lmPath) else {
                 ctx.assertTrue(true, "skipped_noBundledLexicon")
                 return
             }
-            let engine = BurmeseEngine(candidateStore: store)
+            let engine = BurmeseEngine(candidateStore: store, languageModel: lm)
             let state = engine.update(buffer: "mingalarpar", context: [])
             let top2 = Array(state.candidates.prefix(2))
             ctx.assertTrue(
@@ -719,11 +721,13 @@ public enum LexiconRankingSuite {
 
         cases.append(TestCase("task03_thanhlyin_rankedInTop5") { ctx in
             guard let path = BundledArtifacts.lexiconPath,
-                  let store = SQLiteCandidateStore(path: path) else {
-                ctx.assertTrue(true, "skipped_noBundledLexicon")
+                  let store = SQLiteCandidateStore(path: path),
+                  let lmPath = BundledArtifacts.trigramLMPath,
+                  let lm = try? TrigramLanguageModel(path: lmPath) else {
+                ctx.assertTrue(true, "skipped_noBundledArtifacts")
                 return
             }
-            let engine = BurmeseEngine(candidateStore: store)
+            let engine = BurmeseEngine(candidateStore: store, languageModel: lm)
             let state = engine.update(buffer: "thanhlyin", context: [])
             let surfaces = state.candidates.prefix(5).map(\.surface)
             ctx.assertTrue(surfaces.contains("သံလျှင်"),

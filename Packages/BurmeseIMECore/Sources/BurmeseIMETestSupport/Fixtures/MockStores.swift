@@ -48,4 +48,8 @@ public struct FixedLanguageModel: LanguageModel {
     }
 
     public var hasVocabulary: Bool { vocabulary }
+
+    public func containsSurface(_ surface: String) -> Bool {
+        scores[surface] != nil
+    }
 }

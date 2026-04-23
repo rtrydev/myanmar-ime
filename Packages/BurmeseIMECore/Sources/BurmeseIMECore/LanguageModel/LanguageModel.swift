@@ -41,6 +41,11 @@ public protocol LanguageModel: Sendable {
     /// returns `-Double.infinity` so OOV checks against this floor never
     /// fire on LMs that don't override.
     var unknownLogProb: Double { get }
+
+    /// Whether `surface` is an exact vocabulary entry. This is separate from
+    /// `scoreSurface`, which may decompose a multi-word surface into known
+    /// pieces even when the full string is not a single LM token.
+    func containsSurface(_ surface: String) -> Bool
 }
 
 extension LanguageModel {
@@ -51,6 +56,8 @@ extension LanguageModel {
     public var hasVocabulary: Bool { false }
 
     public var unknownLogProb: Double { -.infinity }
+
+    public func containsSurface(_ surface: String) -> Bool { false }
 }
 
 /// A no-op language model: returns a small constant log-prob for every

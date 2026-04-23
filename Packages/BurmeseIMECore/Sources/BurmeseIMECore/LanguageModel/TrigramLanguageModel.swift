@@ -144,6 +144,10 @@ public final class TrigramLanguageModel: LanguageModel, @unchecked Sendable {
 
     public var unknownLogProb: Double { unigramLogProb(header.idUnk) }
 
+    public func containsSurface(_ surface: String) -> Bool {
+        lookupSurface(surface) != nil
+    }
+
     /// Greedy longest-match decomposition of `surface` against the
     /// vocabulary, summing per-word contextual log-probs. When a prefix
     /// of the remaining surface is in vocab, it's scored given the

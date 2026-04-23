@@ -33,6 +33,7 @@ public enum PropertySuite {
         "kyemyarmingalarpar",
         "arpegahtwatpyar",
         "kyawnaingtharway2",
+        "lay2mingalarparshinbyar",
     ]
 
     /// Long buffers whose single-shot and sliding-window parses are
@@ -50,20 +51,12 @@ public enum PropertySuite {
     ///   position the window split lands on. Incremental parse keeps
     ///   the right segmentation because every intermediate state stays
     ///   within the full-buffer DP path.
-    /// * **`lay2mingalarparshinbyar`** — removed from the whitelist in
-    ///   an earlier commit because `ay2` routes through the parser as
-    ///   a standalone-vowel variant selector, pushing the composable
-    ///   prefix past the current window boundary. The full-buffer and
-    ///   incremental picks diverge on `လ` vs `လေ` for the leading
-    ///   syllable.
-    ///
     /// Removing an entry here should happen only when the underlying
     /// divergence is fixed (either by widening the window safely or by
     /// teaching `correctAaShape` / the DP split to see across the
     /// frozen boundary). Add the buffer to `slidingWindowWhitelist`
     /// instead.
     private static let slidingWindowKnownDivergent: [String] = [
-        "lay2mingalarparshinbyar",
         String(repeating: "mingalarpar", count: 3),
         String(repeating: "mingalarpar", count: 5),
     ]
