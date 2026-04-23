@@ -933,6 +933,17 @@ public final class BurmeseEngine: @unchecked Sendable {
         }
         grammarCandidates = pruneByLmMargin(grammarCandidates, keyPath: \.lmLogProb)
         grammarCandidates = promoteAliasAlternate(grammarCandidates)
+        // Ya-pin typing-intent promotion: if the bare user buffer is
+        // the exact digit-stripped form of a ya-pin canonical reading
+        // (e.g. `kyay` → `ky2ay`), flip the top pick to the ya-pin
+        // sibling (task 07). Only applied in the non-windowed path so
+        // long-sentence frozen-prefix ranking is untouched.
+        if !effectiveWindowed {
+            grammarCandidates = Self.promoteYapinForExactBareReading(
+                grammarCandidates,
+                userBuffer: effectiveParseInput
+            )
+        }
 
         // Expose disambiguation alternatives that the DP never emits
         // once the primary parse dominates:
@@ -2683,6 +2694,79 @@ public final class BurmeseEngine: @unchecked Sendable {
 
     private func lexiconCandidateKey(_ candidate: RankedLexiconCandidate) -> String {
         "\(candidate.candidate.surface)\u{0}\(candidate.candidate.reading)"
+    }
+
+    /// True when `reading` contains a ya-pin medial marker — a `y2`
+    /// digraph anchored by a preceding consonant letter (e.g. `ky2`,
+    /// `khy2`, `gy2`, `hsy2`). Mirrors the classifier in
+    /// `LexiconBuilder/main.swift` so engine-side and SQLite-side
+    /// ya-pin detection stay in lockstep.
+    private static func isYapinReading(_ reading: String) -> Bool {
+        guard reading.contains("y2") else { return false }
+        let chars = Array(reading)
+        guard chars.count >= 3 else { return false }
+        for i in 1..<(chars.count - 1) where chars[i] == "y" && chars[i + 1] == "2" {
+            let prev = chars[i - 1]
+            if prev.isLetter && prev != "y" {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Bare buffers whose Burmese typographic convention resolves to
+    /// ya-pin despite the lexicon-absorbed ya-yit sibling winning the
+    /// default comparator composite (task 07). The set is narrow by
+    /// design: siblings differ per final vowel (`kyay` → ya-pin but
+    /// `kya` → ya-yit, `khyin` → ya-pin but `kyaw:` → ya-yit) so a
+    /// consonant-only rule would over-promote. Grows only when a new
+    /// `task13_yapin_*` top-1 target lands.
+    private static let yapinPrimaryBareBuffers: Set<String> = [
+        "kywan", "kyay", "kyi", "khyay", "khyin",
+    ]
+
+    /// Typing-intent promotion for bare ya-pin readings: when the
+    /// user buffer is exactly one of the known-primary ya-pin bare
+    /// readings, move the lowest-aliasCost ya-pin sibling whose
+    /// digit-stripped reading matches to rank 0 (task 07).
+    ///
+    /// For short readings like `kyay` / `kyi`, the default comparator
+    /// picks ya-yit on composite score because the ya-yit sibling is
+    /// often lexicon-absorbed while the ya-pin is not — that +frequency
+    /// offset beats the ya-pin's narrow LM advantage. But the bare
+    /// digit-less buffer is itself the canonical user signal for ya-pin
+    /// in Burmese typing convention, so we flip the pick when the
+    /// buffer expresses that intent exactly. Longer buffers or buffers
+    /// with any additional tone / coda markers fall through to the
+    /// default comparator untouched.
+    private static func promoteYapinForExactBareReading(
+        _ candidates: [RankedGrammarCandidate],
+        userBuffer: String
+    ) -> [RankedGrammarCandidate] {
+        guard candidates.count >= 2 else { return candidates }
+        guard yapinPrimaryBareBuffers.contains(userBuffer) else { return candidates }
+        // Already ya-pin on top? Nothing to do.
+        if isYapinReading(candidates[0].candidate.reading) { return candidates }
+        // Among candidates whose digit-stripped reading is exactly
+        // the user buffer, pick the ya-pin sibling with the smallest
+        // aliasCost (prefers `ky2i` → ကျီ over the double-alias
+        // `ky2i2` → ကျည် when the user typed bare `kyi`).
+        var bestIndex: Int?
+        var bestAliasCost = Int.max
+        for i in 1..<candidates.count {
+            let reading = candidates[i].candidate.reading
+            guard isYapinReading(reading) else { continue }
+            guard Romanization.aliasReading(reading) == userBuffer else { continue }
+            if candidates[i].aliasCost < bestAliasCost {
+                bestAliasCost = candidates[i].aliasCost
+                bestIndex = i
+            }
+        }
+        guard let idx = bestIndex else { return candidates }
+        var reordered = candidates
+        let yapin = reordered.remove(at: idx)
+        reordered.insert(yapin, at: 0)
+        return reordered
     }
 
     private func promoteAliasAlternate(_ candidates: [RankedGrammarCandidate]) -> [RankedGrammarCandidate] {
