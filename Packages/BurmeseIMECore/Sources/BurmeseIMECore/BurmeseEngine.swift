@@ -2640,7 +2640,19 @@ public final class BurmeseEngine: @unchecked Sendable {
         // happens to be OOV in favour of a noisier alias>0 sibling
         // (e.g. `ကြီ` for `kyi`, where the alias=0 primary must stay
         // reachable in the panel even if `ကြည်` is in-vocab).
-        if lhsIsOOV != rhsIsOOV && lhs.aliasCost == rhs.aliasCost {
+        // When either side carries lexicon absorption
+        // (`candidate.score > parserScore` means a lexicon row bumped the
+        // grammar candidate's rank_score), the composite comparison
+        // below already accounts for that contribution — the OOV guard
+        // must not fire, or it would override a legitimately-promoted
+        // in-vocab orphan like `အံး` (buffer `an:`) that wins on
+        // absorption despite sitting at the OOV floor (task 09).
+        let lhsAbsorbed = lhs.candidate.score > Double(lhs.parserScore)
+        let rhsAbsorbed = rhs.candidate.score > Double(rhs.parserScore)
+        if lhsIsOOV != rhsIsOOV
+            && lhs.aliasCost == rhs.aliasCost
+            && !lhsAbsorbed
+            && !rhsAbsorbed {
             return !lhsIsOOV
         }
         let lmGap = lhs.lmLogProb - rhs.lmLogProb
