@@ -1080,6 +1080,23 @@ public final class BurmeseEngine: @unchecked Sendable {
             }
         }
 
+        // Bare-vowel override: `i` → အိ, `ee` → အီ. Grammar siblings
+        // (`ည်`, `ယ်ယ်`, long-i / short-i) remain in the panel — this
+        // only flips the top (task 08).
+        if let bareVowelSurface = Self.bareVowelOverrideSurface(for: normalized) {
+            if let existing = merged.firstIndex(where: { $0.surface == bareVowelSurface }) {
+                let keeper = merged.remove(at: existing)
+                merged.insert(keeper, at: 0)
+            } else {
+                merged.insert(Candidate(
+                    surface: bareVowelSurface,
+                    reading: normalized,
+                    source: .grammar,
+                    score: 100
+                ), at: 0)
+            }
+        }
+
         // Anchor promotion: when the top candidate drifts away from a
         // previously established prefix, promote any candidate that
         // preserves the anchor surface. Walk the anchor history from
@@ -2445,6 +2462,28 @@ public final class BurmeseEngine: @unchecked Sendable {
         case "ganda":   return "\u{1002}\u{1014}\u{1039}\u{1012}"          // ဂန္ဒ
         case "padma":   return "\u{1015}\u{1012}\u{1039}\u{1019}"          // ပဒ္မ
         case "vandana": return "\u{1017}\u{1014}\u{1039}\u{1012}\u{1014}"  // ဗန္ဒန
+        default: return nil
+        }
+    }
+
+    /// Bare onsetless vowels whose DP+LM pick lands on a coda-cluster
+    /// parse (`ည်` for `i`) or a double-asat decomposition (`ယ်ယ်` for
+    /// `ee`) instead of the independent-vowel form a typist reaches for
+    /// (task 08).
+    ///
+    /// `i`  → `အိ` (implicit-အ + short-i). The default parser rule
+    ///        `i` → `ီ` (long-i) would produce `အီ` via orphan-ZWNJ
+    ///        promotion; the short-i sibling is injected here.
+    /// `ee` → `အီ` (implicit-အ + long-i). No `ee` rule exists; the
+    ///        decomposition `e + e` yields `ယ်ယ်`.
+    ///
+    /// The surface is injected at rank 1 if missing, or promoted to
+    /// rank 1 if already present, so alternates (`ည်` / `ယ်ယ်` /
+    /// longer-vowel sibling) stay reachable in the panel.
+    private static func bareVowelOverrideSurface(for normalized: String) -> String? {
+        switch normalized {
+        case "i":  return "\u{1021}\u{102D}"  // အိ
+        case "ee": return "\u{1021}\u{102E}"  // အီ
         default: return nil
         }
     }
