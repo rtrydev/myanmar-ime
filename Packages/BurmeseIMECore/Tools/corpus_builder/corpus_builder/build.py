@@ -25,7 +25,7 @@ from typing import Iterator
 from tqdm import tqdm
 
 from . import ingest, lexicon, lm, packer, segmenter, vocab
-from .segmenter import _is_combining_mark_only
+from .segmenter import _has_non_myanmar_leading_scalar, _is_combining_mark_only
 
 
 def _default_parser() -> argparse.ArgumentParser:
@@ -224,6 +224,7 @@ def cmd_normalize(args: argparse.Namespace) -> None:
     counts: Counter[str] = Counter()
     stripped_tokens = 0
     dropped_orphan_marks = 0
+    dropped_non_myanmar_leading = 0
     kept_tokens = 0
     sent_count = 0
     with tokens_path.open("r", encoding="utf-8") as fi, tmp_path.open(
@@ -243,6 +244,9 @@ def cmd_normalize(args: argparse.Namespace) -> None:
                 if _is_combining_mark_only(t):
                     dropped_orphan_marks += 1
                     continue
+                if _has_non_myanmar_leading_scalar(t):
+                    dropped_non_myanmar_leading += 1
+                    continue
                 out_tokens.append(t)
                 kept_tokens += 1
             if out_tokens:
@@ -257,6 +261,7 @@ def cmd_normalize(args: argparse.Namespace) -> None:
         "types": len(counts),
         "zwsp_tokens_stripped": stripped_tokens,
         "orphan_combining_marks_dropped": dropped_orphan_marks,
+        "non_myanmar_leading_dropped": dropped_non_myanmar_leading,
         "tokens_kept": kept_tokens,
     }
     (args.work_dir / "normalize_meta.json").write_text(json.dumps(meta, indent=2))

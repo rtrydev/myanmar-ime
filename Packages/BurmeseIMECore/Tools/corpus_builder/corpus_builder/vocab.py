@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Iterable
 
 from .ingest import normalize_text
+from .segmenter import _has_non_myanmar_leading_scalar, _is_combining_mark_only
 
 
 BOS = "<s>"
@@ -55,6 +56,17 @@ class CuratedEntry:
     override_reading: str | None
 
 
+def _is_polluted_surface(surface: str) -> bool:
+    """Reject surfaces that must not enter the vocabulary.
+
+    Polluted rows baked into a prior TSV round-trip (ellipsis-prefixed,
+    digit+mark orphans, BOM-bearing) would otherwise be carried forward
+    indefinitely because `build_vocab` unions curated surfaces into the
+    vocab regardless of corpus counts (task 05).
+    """
+    return _is_combining_mark_only(surface) or _has_non_myanmar_leading_scalar(surface)
+
+
 def read_curated_tsv(path: Path) -> list[CuratedEntry]:
     """Read the current `BurmeseLexiconSource.tsv` for hand-curated overrides.
 
@@ -74,6 +86,8 @@ def read_curated_tsv(path: Path) -> list[CuratedEntry]:
                 continue
             surface = normalize_text(fields[0].strip())
             if not surface:
+                continue
+            if _is_polluted_surface(surface):
                 continue
             override = fields[2].strip() if len(fields) >= 3 and fields[2].strip() else None
             out.append(CuratedEntry(surface=surface, override_reading=override))
@@ -96,9 +110,13 @@ def build_vocab(
     vocab = Vocab()
 
     for entry in curated:
+        if _is_polluted_surface(entry.surface):
+            continue
         vocab.add(entry.surface)
 
     for surface, _ in corpus_counts.most_common(max_corpus_words):
+        if _is_polluted_surface(surface):
+            continue
         vocab.add(surface)
 
     vocab.id_bos = vocab.add(BOS)

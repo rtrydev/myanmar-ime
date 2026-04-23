@@ -44,17 +44,17 @@ class CuratedSmoothingTests(unittest.TestCase):
     def test_absent_curated_surface_with_peers_gets_kappa_times_peer_avg(self) -> None:
         """The scenario the task's acceptance criterion spells out.
 
-        Curated surface A is absent from corpus (count=0). Peers B and C
-        share the digit-stripped reading and have corpus counts averaging
-        10 000. At κ=0.1, A's floor should be ≈ 1 000.
+        Curated surface `က` is absent from corpus (count=0). Peers `ခ`
+        and `ဂ` share the digit-stripped reading and have corpus counts
+        averaging 10 000. At κ=0.1, `က`'s floor should be ≈ 1 000.
         """
-        surfaces = ["A", "B", "C"]
+        surfaces = ["က", "ခ", "ဂ"]
         curated = [
-            CuratedEntry(surface="A", override_reading="r2"),
-            CuratedEntry(surface="B", override_reading="r"),
-            CuratedEntry(surface="C", override_reading="r"),
+            CuratedEntry(surface="က", override_reading="r2"),
+            CuratedEntry(surface="ခ", override_reading="r"),
+            CuratedEntry(surface="ဂ", override_reading="r"),
         ]
-        counts = Counter({"B": 10_000, "C": 10_000})  # A absent
+        counts = Counter({"ခ": 10_000, "ဂ": 10_000})  # က absent
         lexicon.write_tsv(
             self.path,
             _vocab(surfaces),
@@ -63,17 +63,17 @@ class CuratedSmoothingTests(unittest.TestCase):
             curated_smoothing=0.1,
         )
         rows = self._read_rows()
-        freq_a, _ = rows["A"]
-        self.assertAlmostEqual(freq_a, 1_000.0, delta=1.0)
+        freq, _ = rows["က"]
+        self.assertAlmostEqual(freq, 1_000.0, delta=1.0)
 
     def test_natural_rows_unaffected(self) -> None:
         """Rows without override_reading keep the max(count, min_frequency) floor."""
-        surfaces = ["N1", "N2"]
+        surfaces = ["က", "ခ"]
         curated = [
-            CuratedEntry(surface="N1", override_reading=None),
-            CuratedEntry(surface="N2", override_reading=None),
+            CuratedEntry(surface="က", override_reading=None),
+            CuratedEntry(surface="ခ", override_reading=None),
         ]
-        counts = Counter({"N1": 500, "N2": 0})
+        counts = Counter({"က": 500, "ခ": 0})
         lexicon.write_tsv(
             self.path,
             _vocab(surfaces),
@@ -82,14 +82,14 @@ class CuratedSmoothingTests(unittest.TestCase):
             curated_smoothing=0.5,
         )
         rows = self._read_rows()
-        self.assertEqual(rows["N1"][0], 500.0)
-        self.assertEqual(rows["N2"][0], 1.0)  # min_frequency floor
+        self.assertEqual(rows["က"][0], 500.0)
+        self.assertEqual(rows["ခ"][0], 1.0)  # min_frequency floor
 
     def test_singleton_peer_group_falls_back_to_min_frequency(self) -> None:
         """A curated row whose peer group has no other members gets the standard floor."""
-        surfaces = ["Solo"]
-        curated = [CuratedEntry(surface="Solo", override_reading="alone")]
-        counts = Counter()  # Solo absent
+        surfaces = ["က"]
+        curated = [CuratedEntry(surface="က", override_reading="alone")]
+        counts = Counter()  # က absent
         lexicon.write_tsv(
             self.path,
             _vocab(surfaces),
@@ -98,16 +98,16 @@ class CuratedSmoothingTests(unittest.TestCase):
             curated_smoothing=0.1,
         )
         rows = self._read_rows()
-        self.assertEqual(rows["Solo"][0], 1.0)
+        self.assertEqual(rows["က"][0], 1.0)
 
     def test_kappa_zero_is_identity(self) -> None:
         """κ=0 reproduces the pre-smoothing behaviour exactly."""
-        surfaces = ["A", "B"]
+        surfaces = ["က", "ခ"]
         curated = [
-            CuratedEntry(surface="A", override_reading="r"),
-            CuratedEntry(surface="B", override_reading="r"),
+            CuratedEntry(surface="က", override_reading="r"),
+            CuratedEntry(surface="ခ", override_reading="r"),
         ]
-        counts = Counter({"A": 100, "B": 200})
+        counts = Counter({"က": 100, "ခ": 200})
         lexicon.write_tsv(
             self.path,
             _vocab(surfaces),
@@ -116,17 +116,17 @@ class CuratedSmoothingTests(unittest.TestCase):
             curated_smoothing=0.0,
         )
         rows = self._read_rows()
-        self.assertEqual(rows["A"][0], 100.0)
-        self.assertEqual(rows["B"][0], 200.0)
+        self.assertEqual(rows["က"][0], 100.0)
+        self.assertEqual(rows["ခ"][0], 200.0)
 
     def test_peer_key_strips_digit_variants(self) -> None:
         """`r` and `r2` share a peer group (digit-stripped reading)."""
-        surfaces = ["A", "B"]
+        surfaces = ["က", "ခ"]
         curated = [
-            CuratedEntry(surface="A", override_reading="r2"),
-            CuratedEntry(surface="B", override_reading="r"),
+            CuratedEntry(surface="က", override_reading="r2"),
+            CuratedEntry(surface="ခ", override_reading="r"),
         ]
-        counts = Counter({"A": 0, "B": 1_000})
+        counts = Counter({"က": 0, "ခ": 1_000})
         lexicon.write_tsv(
             self.path,
             _vocab(surfaces),
@@ -135,8 +135,8 @@ class CuratedSmoothingTests(unittest.TestCase):
             curated_smoothing=0.2,
         )
         rows = self._read_rows()
-        # A's avg_peer (excl self) = B's count = 1000 → 0 + 0.2*1000 = 200
-        self.assertAlmostEqual(rows["A"][0], 200.0, delta=1.0)
+        # က's avg_peer (excl self) = ခ's count = 1000 → 0 + 0.2*1000 = 200
+        self.assertAlmostEqual(rows["က"][0], 200.0, delta=1.0)
 
 
 if __name__ == "__main__":

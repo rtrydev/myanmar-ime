@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from pathlib import Path
 
+from .segmenter import _has_non_myanmar_leading_scalar, _is_combining_mark_only
 from .vocab import CuratedEntry, SPECIALS, Vocab
 
 
@@ -97,6 +98,16 @@ def write_tsv(
         for word_id, surface in enumerate(vocab.surfaces):
             if surface in SPECIALS:
                 continue
+            # Defensive assertion: if a polluted surface makes it this
+            # far, the segmenter / vocab guards upstream have a hole.
+            # Fail loud rather than bake noise into the next round-trip
+            # (task 05).
+            if _is_combining_mark_only(surface) or _has_non_myanmar_leading_scalar(surface):
+                raise ValueError(
+                    f"lexicon.write_tsv: refusing to write polluted "
+                    f"surface {surface!r} (non-Myanmar leading scalar, "
+                    f"BOM-bearing, digit+mark orphan, or combining-mark-only)"
+                )
             count = corpus_counts.get(surface, 0)
             override = overrides.get(surface)
             freq: float

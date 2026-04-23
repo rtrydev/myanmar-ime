@@ -47,6 +47,44 @@ def _is_combining_mark_only(token: str) -> bool:
     return True
 
 
+def _has_non_myanmar_leading_scalar(token: str) -> bool:
+    """True if `token` is polluted by a non-Myanmar leading scalar or BOM.
+
+    Three sibling patterns leak surfaces into the lexicon that anchor
+    bogus top-1 candidates (task 05):
+
+    - Ellipsis prefix (U+2026) and any other scalar outside the Myanmar
+      block (U+1000–U+109F) at the head — myWord's Viterbi treats
+      multi-dot ellipsis runs as valid tokens, so sentences that open
+      with `…` attached to a word emit `…<word>` compounds.
+    - Myanmar / Shan digit (U+1040–U+1049, U+1090–U+1099) followed by
+      a combining mark — these are orphans like `႐ု`, never real words.
+      A leading digit followed by a consonant (e.g. `၀တ်စုံ`, a stylistic
+      substitution of `၀` for `ဝ`) is left alone.
+    - Byte-order mark (U+FEFF) anywhere — a zero-width artefact from
+      upstream text cleaning.
+
+    ZWNJ / ZWJ (U+200C / U+200D) are explicitly allowed as leading
+    scalars since some legitimate orthographic clusters start with them.
+    """
+    if not token:
+        return True
+    for ch in token:
+        if ord(ch) == 0xFEFF:
+            return True
+    cp = ord(token[0])
+    if cp in (0x200C, 0x200D):
+        return False
+    if cp < 0x1000 or cp > 0x109F:
+        return True
+    is_digit = (0x1040 <= cp <= 0x1049) or (0x1090 <= cp <= 0x1099)
+    if is_digit and len(token) >= 2:
+        cp2 = ord(token[1])
+        if 0x102B <= cp2 <= 0x103E:
+            return True
+    return False
+
+
 def _locate_mydict() -> Path | None:
     """Find myWord's dict directory.
 
@@ -260,7 +298,12 @@ class Segmenter:
                 self._curated_prefixes,
                 self._curated_max_chars,
             )
-        return [p for p in pieces if not _is_combining_mark_only(p)]
+        return [
+            p
+            for p in pieces
+            if not _is_combining_mark_only(p)
+            and not _has_non_myanmar_leading_scalar(p)
+        ]
 
     @staticmethod
     def _syllable_fallback(text: str) -> list[str]:

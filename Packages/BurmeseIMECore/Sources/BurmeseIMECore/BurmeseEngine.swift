@@ -2371,12 +2371,56 @@ public final class BurmeseEngine: @unchecked Sendable {
 
     private static func sanitizeOrphanZwnj(_ candidates: [Candidate]) -> [Candidate] {
         let hasLegal = candidates.contains {
-            !isOrphanZwnjMark($0.surface) && !isOrphanCombiningMarkSurface($0.surface)
+            !isOrphanZwnjMark($0.surface)
+                && !isOrphanCombiningMarkSurface($0.surface)
+                && !isLeadingNonMyanmarScalar($0.surface)
         }
         guard hasLegal else { return candidates }
         return candidates.filter {
-            !isOrphanZwnjMark($0.surface) && !isOrphanCombiningMarkSurface($0.surface)
+            !isOrphanZwnjMark($0.surface)
+                && !isOrphanCombiningMarkSurface($0.surface)
+                && !isLeadingNonMyanmarScalar($0.surface)
         }
+    }
+
+    /// Structural guard for lexicon surfaces polluted by a non-Myanmar
+    /// leading scalar. A polluted row (ellipsis-prefixed
+    /// `…ကျွန်တော်`, BOM-bearing `ကျွန်﻿တော်`, Shan/Myanmar digit +
+    /// combining mark like `႐ု`) rides forward from a stale SQLite
+    /// even after the corpus_builder filter lands, so we drop it at
+    /// the engine too. ZWNJ / ZWJ are allowed as leading scalars since
+    /// some legitimate orthographic clusters start with them.
+    ///
+    /// The filter requires at least one Myanmar-block scalar elsewhere
+    /// in the surface so pure-ASCII test fixtures (used to exercise
+    /// ranking behaviour with symbolic placeholder surfaces like
+    /// `HIGH` / `LOW`) are not mistaken for pollution
+    /// (task 05 belt-and-suspenders).
+    private static func isLeadingNonMyanmarScalar(_ surface: String) -> Bool {
+        let scalars = Array(surface.unicodeScalars)
+        guard let first = scalars.first else { return false }
+        let hasMyanmar = scalars.contains {
+            $0.value >= 0x1000 && $0.value <= 0x109F
+        }
+        guard hasMyanmar else { return false }
+        for scalar in scalars where scalar.value == 0xFEFF {
+            return true
+        }
+        if first.value == 0x200C || first.value == 0x200D {
+            return false
+        }
+        if first.value < 0x1000 || first.value > 0x109F {
+            return true
+        }
+        let isDigit = (first.value >= 0x1040 && first.value <= 0x1049)
+            || (first.value >= 0x1090 && first.value <= 0x1099)
+        if isDigit, scalars.count >= 2 {
+            let second = scalars[1].value
+            if second >= 0x102B && second <= 0x103E {
+                return true
+            }
+        }
+        return false
     }
 
     /// Pali loanwords whose canonical orthography is a virama-stacked
