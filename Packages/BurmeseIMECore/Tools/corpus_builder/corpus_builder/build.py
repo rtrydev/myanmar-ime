@@ -25,6 +25,7 @@ from typing import Iterator
 from tqdm import tqdm
 
 from . import ingest, lexicon, lm, packer, segmenter, vocab
+from .overrides import CURATED_OVERRIDE_READINGS
 from .segmenter import _has_non_myanmar_leading_scalar, _is_combining_mark_only
 
 
@@ -300,10 +301,27 @@ def _load_vocab(work_dir: Path) -> vocab.Vocab:
     return pickle.loads(p.read_bytes())
 
 
+def _apply_curated_overrides(curated: list[vocab.CuratedEntry]) -> list[vocab.CuratedEntry]:
+    """Stamp the in-tree curated override-reading map onto the loaded
+    curated list (task 06). The map wins over any prior TSV override so
+    the in-tree source is authoritative, and surfaces not yet in the
+    curated list are appended so `lexicon.write_tsv` still emits the
+    override column for them.
+    """
+    if not CURATED_OVERRIDE_READINGS:
+        return curated
+    by_surface = {e.surface: e for e in curated}
+    for surface, reading in CURATED_OVERRIDE_READINGS.items():
+        by_surface[surface] = vocab.CuratedEntry(
+            surface=surface, override_reading=reading
+        )
+    return list(by_surface.values())
+
+
 def cmd_lexicon(args: argparse.Namespace) -> None:
     v = _load_vocab(args.work_dir)
     counts = _load_counts(args.work_dir)
-    curated = vocab.read_curated_tsv(args.curated_tsv)
+    curated = _apply_curated_overrides(vocab.read_curated_tsv(args.curated_tsv))
     rows = lexicon.write_tsv(
         args.tsv_out,
         v,
