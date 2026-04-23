@@ -2605,6 +2605,22 @@ public final class BurmeseEngine: @unchecked Sendable {
         if lhs.legalityScore != rhs.legalityScore {
             return lhs.legalityScore > rhs.legalityScore
         }
+        // Coda-only tiebreaker (task 10): when two surfaces differ by a
+        // single scalar in the coda set {U+103A asat, U+1036 anusvara,
+        // U+100A nnya, U+1037 dot-below, U+1009 nya}, the choice is a
+        // frequency call — the LM log-prob decides directly even if the
+        // composite score below would flip on lexicon absorption. Guards
+        // the `စဉ်` vs `စည်` / `န်း` vs `မ်း` / `ဖတ်` vs `ဖတ` picks
+        // where the DP / absorption and the LM disagree by a narrow
+        // margin.
+        if Self.isCodaOnlySingleScalarDifference(
+            lhs.candidate.surface,
+            rhs.candidate.surface
+        ) {
+            if lhs.lmLogProb != rhs.lmLogProb {
+                return lhs.lmLogProb > rhs.lmLogProb
+            }
+        }
         // LM dominance: when BOTH candidates have real (non-OOV) LM
         // scores AND the log-prob gap exceeds `lmDominanceThreshold`,
         // trust LM and skip the composite score check. This prevents a
@@ -2745,6 +2761,56 @@ public final class BurmeseEngine: @unchecked Sendable {
 
     private func lexiconCandidateKey(_ candidate: RankedLexiconCandidate) -> String {
         "\(candidate.candidate.surface)\u{0}\(candidate.candidate.reading)"
+    }
+
+    /// True when `lhs` and `rhs` differ by exactly one scalar from the
+    /// coda-mark set {U+103A asat, U+1036 anusvara, U+100A nnya,
+    /// U+1037 dot-below, U+1009 nya}, with everything else equal —
+    /// including same length, or off-by-one with the differing position
+    /// being a coda-mark insertion. Used by `grammarCandidateIsBetter`
+    /// as a targeted LM tiebreaker for `စဉ်` vs `စည်` / `န်း` vs `မ်း`
+    /// / `ဖတ်` vs `ဖတ` style pairs (task 10).
+    private static let codaMarkScalars: Set<UInt32> = [
+        0x103A, 0x1036, 0x100A, 0x1037, 0x1009,
+    ]
+
+    private static func isCodaOnlySingleScalarDifference(_ lhs: String, _ rhs: String) -> Bool {
+        let a = Array(lhs.unicodeScalars)
+        let b = Array(rhs.unicodeScalars)
+        if abs(a.count - b.count) > 1 { return false }
+        if a.count == b.count {
+            // Substitution: exactly one differing index, and at least
+            // one of the two differing scalars is a coda mark.
+            var diffIdx = -1
+            for i in 0..<a.count where a[i] != b[i] {
+                if diffIdx >= 0 { return false }
+                diffIdx = i
+            }
+            guard diffIdx >= 0 else { return false }
+            let va = a[diffIdx].value, vb = b[diffIdx].value
+            return codaMarkScalars.contains(va) || codaMarkScalars.contains(vb)
+        }
+        // Insertion / deletion: one side has one extra scalar that is a
+        // coda mark, and the rest aligns.
+        let longer = a.count > b.count ? a : b
+        let shorter = a.count > b.count ? b : a
+        var i = 0, j = 0, extra = 0
+        while i < longer.count && j < shorter.count {
+            if longer[i] == shorter[j] {
+                i += 1; j += 1
+            } else {
+                if extra > 0 { return false }
+                if !codaMarkScalars.contains(longer[i].value) { return false }
+                i += 1
+                extra += 1
+            }
+        }
+        if i < longer.count {
+            // Trailing extra — must be a coda mark and the only extra.
+            return extra == 0 && i == longer.count - 1
+                && codaMarkScalars.contains(longer[i].value)
+        }
+        return true
     }
 
     /// True when `reading` contains a ya-pin medial marker — a `y2`
