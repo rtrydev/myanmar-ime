@@ -97,4 +97,8 @@ final class FuzzXCTests: XCTestCase {
 final class ComprehensiveRankingXCTests: XCTestCase {
     func testAll() { runSuite(ComprehensiveRankingSuite.suite, xctest: self) }
 }
+
+final class LexiconLMDriftXCTests: XCTestCase {
+    func testAll() { runSuite(LexiconLMDriftSuite.suite, xctest: self) }
+}
 #endif

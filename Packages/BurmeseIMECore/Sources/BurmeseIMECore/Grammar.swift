@@ -5,6 +5,33 @@
 ///
 /// This module encodes which combinations are legal, replacing the
 /// permissive flat rule table of the legacy web engine.
+///
+/// ## Orphan ZWNJ handling (parser-level rule)
+///
+/// The parser emits `U+200C` (ZWNJ) as an invisible base when a
+/// bare-vowel or bare-mark input has no onset consonant to anchor the
+/// combining mark (e.g. `u` → ZWNJ + `ူ`, `ay` → ZWNJ + `ေ`). ZWNJ + a
+/// dependent vowel / medial is **not valid Burmese orthography**; real
+/// Burmese text never contains this sequence. The correct surface for
+/// a bare vowel is always an independent vowel (ဦ, ဧ, ဩ, …).
+///
+/// Two helpers in `BurmeseEngine` handle this at parser level (not
+/// ranker level — neither depends on LM or lexicon signals):
+///
+/// - **`promoteOrphanZwnjToImplicitA`** generates a legal sibling parse
+///   by replacing the ZWNJ with U+1021 (အ), producing a structurally
+///   valid independent-vowel syllable. The DP couldn't discover this
+///   without retraining over an extended alphabet, so it lives in code.
+/// - **`sanitizeOrphanZwnj`** filters the orphan form from the final
+///   candidate panel whenever a legal sibling exists. When no legal
+///   sibling exists (rare — essentially only pedagogical bare-mark
+///   inputs) the orphan is kept as a last-resort fallback so the user
+///   can still commit something.
+///
+/// Both helpers are orthographic truth, not empirical preference — they
+/// are the only switch/case-like carve-outs that remain in the engine
+/// after migration plan tasks 14–17 deleted the LM-compensating
+/// overrides.
 public enum Grammar {
 
     // MARK: - Medial Legality

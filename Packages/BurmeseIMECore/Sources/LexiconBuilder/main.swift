@@ -15,15 +15,52 @@ import SQLite3
 ///   reading_alias_index(alias_reading, canonical_reading, entry_id, rank_score, alias_penalty)
 ///   reading_compose_index(compose_reading, canonical_reading, entry_id, rank_score, alias_penalty, separator_penalty)
 
-guard CommandLine.arguments.count >= 3 else {
-    fputs("Usage: LexiconBuilder <input.tsv> <output.sqlite>\n", stderr)
+// CLI: LexiconBuilder <input.tsv> <output.sqlite> [--lm <path>]
+// `--lm` enables LM↔SQLite vocab drift checking. When provided (or when a
+// default-located `BurmeseLM.bin` is found next to the sqlite output), the
+// builder loads the LM after parsing the TSV and fails non-zero if any
+// lexicon surface is absent from LM vocab. Missing LM file is a warning,
+// not an error, so probe scripts that don't care about drift still work.
+var positionalArgs: [String] = []
+var lmArg: String? = nil
+var argi = 1
+while argi < CommandLine.arguments.count {
+    let a = CommandLine.arguments[argi]
+    if a == "--lm" {
+        guard argi + 1 < CommandLine.arguments.count else {
+            fputs("Error: --lm requires a path argument\n", stderr)
+            exit(1)
+        }
+        lmArg = CommandLine.arguments[argi + 1]
+        argi += 2
+    } else {
+        positionalArgs.append(a)
+        argi += 1
+    }
+}
+
+guard positionalArgs.count >= 2 else {
+    fputs("Usage: LexiconBuilder <input.tsv> <output.sqlite> [--lm <BurmeseLM.bin>]\n", stderr)
     fputs("\nReads a Burmese lexicon TSV and emits a SQLite database.\n", stderr)
     fputs("TSV format: surface<TAB>frequency[<TAB>override_reading]\n", stderr)
+    fputs("--lm enables LM↔SQLite drift assertion; default location is\n", stderr)
+    fputs("     `BurmeseLM.bin` next to the output sqlite.\n", stderr)
     exit(1)
 }
 
-let inputPath = CommandLine.arguments[1]
-let outputPath = CommandLine.arguments[2]
+let inputPath = positionalArgs[0]
+let outputPath = positionalArgs[1]
+
+// Resolve the LM path for drift checking. Explicit `--lm` wins; otherwise
+// try the sibling `BurmeseLM.bin` of the sqlite output. Nil means "no LM
+// found — drift check skipped".
+let resolvedLMPath: String? = {
+    if let explicit = lmArg { return explicit }
+    let sqliteURL = URL(fileURLWithPath: outputPath)
+    let sibling = sqliteURL.deletingLastPathComponent()
+        .appendingPathComponent("BurmeseLM.bin").path
+    return FileManager.default.fileExists(atPath: sibling) ? sibling : nil
+}()
 
 // Read input TSV
 guard let data = FileManager.default.contents(atPath: inputPath),
@@ -36,6 +73,24 @@ struct LexiconEntry {
     let surface: String
     let frequency: Double
     let overrideReading: String?
+}
+
+/// Detect ya-pin canonical readings (e.g. `ky2aung:`, `khy2at*`,
+/// `gy2ay`) — any consonant cluster ending in `y2` before a vowel.
+/// Used to emit a zero-penalty alias row alongside the digit-bearing
+/// canonical so lookup's penalty-ordered LIMIT does not hide ya-pin
+/// surfaces under alias_penalty=0 ya-yit siblings.
+func isYapinReading(_ reading: String) -> Bool {
+    guard reading.contains("y2") else { return false }
+    let chars = Array(reading)
+    for i in 0..<chars.count - 1 where chars[i] == "y" && chars[i + 1] == "2" {
+        guard i >= 1 else { continue }
+        let prev = chars[i - 1]
+        if prev.isLetter && prev != "y" {
+            return true
+        }
+    }
+    return false
 }
 
 // Parse TSV lines
@@ -160,6 +215,7 @@ sqlite3_prepare_v2(
 
 var reverseFailCount = 0
 var insertCount = 0
+var writtenSurfaces: [String] = []
 
 for entry in entries {
     // Get canonical reading: override or reverse-romanize
@@ -219,6 +275,26 @@ for entry in entries {
     }
     sqlite3_reset(insertAliasStmt)
 
+    // Task 03: ya-pin entries (canonical readings whose `2` digit
+    // marks the ya-pin medial — `ky2`, `khy2`, `gy2`, `hsy2`, …)
+    // also need a zero-penalty alias row so the lookup's
+    // `ORDER BY alias_penalty ASC, rank_score DESC … LIMIT 20`
+    // does not bury them under the alias_penalty=0 ya-yit siblings.
+    // The penalised row above stays so other rankers still see the
+    // canonical→variant cost; this extra row only changes lookup
+    // reachability.
+    if isYapinReading(reading) {
+        sqlite3_bind_text(insertAliasStmt, 1, aliasReading, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        sqlite3_bind_text(insertAliasStmt, 2, readingCStr, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        sqlite3_bind_int64(insertAliasStmt, 3, entryId)
+        sqlite3_bind_double(insertAliasStmt, 4, score)
+        sqlite3_bind_int(insertAliasStmt, 5, 0)
+        if sqlite3_step(insertAliasStmt) != SQLITE_DONE {
+            fputs("Warning: failed to insert ya-pin zero-penalty alias for \(entry.surface)\n", stderr)
+        }
+        sqlite3_reset(insertAliasStmt)
+    }
+
     let composeReading = Romanization.composeLookupKey(reading)
     let separatorPenalty = Romanization.composeSeparatorPenaltyCount(for: reading)
     sqlite3_bind_text(insertComposeStmt, 1, composeReading, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
@@ -235,6 +311,7 @@ for entry in entries {
     sqlite3_reset(insertComposeStmt)
 
     insertCount += 1
+    writtenSurfaces.append(entry.surface)
 }
 
 sqlite3_finalize(insertEntryStmt)
@@ -255,4 +332,39 @@ sqlite3_close(db)
 fputs("Done: \(insertCount) entries written to \(outputPath)\n", stderr)
 if reverseFailCount > 0 {
     fputs("Warning: \(reverseFailCount) entries failed reverse romanization\n", stderr)
+}
+
+// MARK: - LM ↔ SQLite drift assertion
+//
+// Any lexicon surface absent from the LM vocab is a ranker hazard: at
+// runtime the missing surface gets charged the LM's `<unk>` log-prob and
+// loses to any rare-but-known fallback. See tasks/audit.md §1d for the
+// incident that motivated this check.
+if let lmPath = resolvedLMPath {
+    do {
+        let lm = try TrigramLanguageModel(path: lmPath)
+        var missing: [String] = []
+        let maxToList = 10
+        for surface in writtenSurfaces where lm.wordId(for: surface) == nil {
+            missing.append(surface)
+        }
+        if missing.isEmpty {
+            fputs("Drift check: \(insertCount) surfaces all present in LM vocab (\(lmPath))\n", stderr)
+        } else {
+            fputs("Drift check FAILED: \(missing.count) lexicon surfaces missing from LM vocab.\n", stderr)
+            fputs("  LM: \(lmPath)\n", stderr)
+            for surface in missing.prefix(maxToList) {
+                fputs("    - \(surface)\n", stderr)
+            }
+            if missing.count > maxToList {
+                fputs("    ... and \(missing.count - maxToList) more.\n", stderr)
+            }
+            fputs("Fix: re-run `corpus-build lm` against the current TSV so the LM vocab matches.\n", stderr)
+            exit(1)
+        }
+    } catch {
+        fputs("Warning: could not load LM at \(lmPath) for drift check: \(error). Skipping.\n", stderr)
+    }
+} else {
+    fputs("Drift check skipped: no LM found (pass --lm <path> or place BurmeseLM.bin next to the sqlite output).\n", stderr)
 }

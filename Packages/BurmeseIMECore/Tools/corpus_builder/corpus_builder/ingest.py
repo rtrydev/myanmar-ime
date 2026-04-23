@@ -7,7 +7,27 @@ runs on a laptop without keeping the full corpus on disk.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterator
+
+
+# U+200B (ZERO WIDTH SPACE) is a soft-break hint with no graphical effect
+# in Myanmar and no orthographic meaning. It must be stripped before
+# segmentation because:
+#   - It splits counts of real words across ghost variants
+#     ("ကောင်း" vs "ကောင်း​" as two distinct vocab ids).
+#   - Swift's `CharacterSet.whitespaces` DOES include U+200B (contrary to
+#     its docs), so `LexiconBuilder` trims leading ZWSP from TSV lines
+#     but preserves trailing ZWSP before the tab, producing surfaces
+#     that disagree with the LM vocab — a guaranteed drift failure.
+# U+200C (ZWNJ) and U+200D (ZWJ) are legitimate in Myanmar (they control
+# cluster formation) and must NOT be stripped.
+_ZWSP = "​"
+
+
+def normalize_text(text: str) -> str:
+    """Strip U+200B from a string; leave ZWNJ / ZWJ / other chars intact."""
+    return text.replace(_ZWSP, "") if _ZWSP in text else text
 
 
 @dataclass(frozen=True)
@@ -17,6 +37,8 @@ class IngestConfig:
     text_field: str = "text"
     zawgyi_threshold: float = 0.05
     max_docs: int | None = None
+    curated_tsv: Path | None = None
+    merge_curated_compounds: bool = True
 
 
 def iter_documents(cfg: IngestConfig) -> Iterator[str]:
@@ -50,7 +72,7 @@ def iter_documents(cfg: IngestConfig) -> Iterator[str]:
             continue
         if detector.get_zawgyi_probability(text) > cfg.zawgyi_threshold:
             continue
-        yield text
+        yield normalize_text(text)
         emitted += 1
         if cfg.max_docs is not None and emitted >= cfg.max_docs:
             return

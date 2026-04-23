@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
 
+from .ingest import normalize_text
+
 
 BOS = "<s>"
 EOS = "</s>"
@@ -70,7 +72,7 @@ def read_curated_tsv(path: Path) -> list[CuratedEntry]:
             fields = line.split("\t")
             if len(fields) < 2:
                 continue
-            surface = fields[0].strip()
+            surface = normalize_text(fields[0].strip())
             if not surface:
                 continue
             override = fields[2].strip() if len(fields) >= 3 and fields[2].strip() else None

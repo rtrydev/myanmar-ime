@@ -21,5 +21,6 @@ public enum BurmeseTestSuites {
         PropertySuite.suite,
         FuzzSuite.suite,
         ComprehensiveRankingSuite.suite,
+        LexiconLMDriftSuite.suite,
     ]
 }

@@ -28,6 +28,25 @@ _MYANMAR_SYLLABLE_RE = re.compile(
 )
 
 
+def _is_combining_mark_only(token: str) -> bool:
+    """True if `token` consists exclusively of Myanmar combining marks.
+
+    Myanmar dependent vowels, medials, virama/asat, and tone marks
+    (U+102B–U+103E) attach to a consonant base; a token made up solely
+    of these scalars is an orphan that has no meaningful frequency — it
+    is a segmenter artefact, not a word. Without this filter the
+    standalone marks leak into the lexicon at high unigram scores and
+    beat the independent-vowel forms (ဥ, ဧ, အိ…) for bare-vowel inputs.
+    """
+    if not token:
+        return True
+    for ch in token:
+        cp = ord(ch)
+        if cp < 0x102B or cp > 0x103E:
+            return False
+    return True
+
+
 def _locate_mydict() -> Path | None:
     """Find myWord's dict directory.
 
@@ -79,10 +98,122 @@ def _load_mydict() -> tuple[dict[str, float], dict[tuple[str, str], float]] | No
     return uni_logp, bi_logp
 
 
+# Curated entries longer than this are dropped from the merge set. The
+# tail (≥99.8% of the TSV is ≤ this threshold) is mostly noise / super-
+# long compounds that myWord rarely splits anyway, and keeping them
+# inflates the prefix set without buying additional merges.
+_CURATED_MAX_LEN = 50
+
+
+def _load_curated_compounds(
+    tsv_path: Path | None = None,
+    *,
+    min_pieces: int = 2,
+    max_chars_cap: int = _CURATED_MAX_LEN,
+) -> tuple[frozenset[str], frozenset[str], int]:
+    """Load curated surfaces eligible to trigger the compound merge pass.
+
+    Returns ``(compounds, prefixes, max_chars)``:
+
+    - ``compounds`` — full surfaces, the set the merger probes for hits.
+    - ``prefixes`` — every non-empty proper prefix of every compound.
+      Used by the merger to bail early once the accumulator can no
+      longer be extended into any compound (constant-time set lookup).
+    - ``max_chars`` — the longest compound's char length, capped to
+      ``max_chars_cap`` so the inner accumulator loop stays bounded.
+
+    Source of truth is `BurmeseLexiconSource.tsv`. We keep only surfaces
+    whose naive syllable split has ≥ `min_pieces` pieces — single-syllable
+    surfaces can never benefit from re-merging a segmentation that was
+    never split in the first place. Empty values when the TSV is missing
+    or `tsv_path` is `None` and no env var is set.
+    """
+    if tsv_path is None:
+        env = os.environ.get("CURATED_TSV")
+        if not env:
+            return frozenset(), frozenset(), 0
+        tsv_path = Path(env)
+    if not tsv_path.exists():
+        return frozenset(), frozenset(), 0
+    compounds: set[str] = set()
+    prefixes: set[str] = set()
+    max_chars = 0
+    with tsv_path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.rstrip("\n")
+            if not line or line.lstrip().startswith("#"):
+                continue
+            surface = line.split("\t", 1)[0].strip()
+            if not surface:
+                continue
+            if len(surface) > max_chars_cap:
+                continue
+            if len(_MYANMAR_SYLLABLE_RE.findall(surface)) >= min_pieces:
+                compounds.add(surface)
+                if len(surface) > max_chars:
+                    max_chars = len(surface)
+                # Record proper prefixes so the merger can fail-fast.
+                for k in range(1, len(surface)):
+                    prefixes.add(surface[:k])
+    return frozenset(compounds), frozenset(prefixes), max_chars
+
+
+def _merge_curated(
+    pieces: list[str],
+    curated: frozenset[str],
+    prefixes: frozenset[str],
+    max_chars: int,
+) -> list[str]:
+    """Greedy longest-match re-merge.
+
+    For each position, accumulate the joined string left-to-right and
+    record the longest prefix that lands in ``curated``. Two cuts keep
+    the inner loop O(1) on average:
+
+    - Bounded by ``max_chars`` so it never extends past the longest
+      possible compound.
+    - Stops as soon as the accumulator is no longer a prefix of any
+      curated entry (``accum not in prefixes``) — this is the dominant
+      speedup on real corpora where most positions don't start a
+      compound.
+    """
+    if not curated or max_chars <= 0:
+        return pieces
+    out: list[str] = []
+    n = len(pieces)
+    i = 0
+    while i < n:
+        best_j = i + 1
+        accum = pieces[i]
+        if len(accum) <= max_chars and accum in prefixes:
+            j = i + 2
+            while j <= n:
+                accum = accum + pieces[j - 1]
+                if len(accum) > max_chars:
+                    break
+                if accum in curated:
+                    best_j = j
+                if accum not in prefixes:
+                    break
+                j += 1
+        if best_j == i + 1:
+            out.append(pieces[i])
+        else:
+            out.append("".join(pieces[i:best_j]))
+        i = best_j
+    return out
+
+
 class Segmenter:
     """Word-level segmenter. Use `segment(text)` to get a list of words."""
 
-    def __init__(self, *, allow_fallback: bool | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        allow_fallback: bool | None = None,
+        merge_curated: bool | None = None,
+        curated: frozenset[str] | None = None,
+    ) -> None:
         self._mydict = _load_mydict()
         if self._mydict is None:
             if allow_fallback is None:
@@ -95,11 +226,41 @@ class Segmenter:
                     "ALLOW_SYLLABLE_FALLBACK=1 to accept syllable-level "
                     "segmentation (produces a bad lexicon — dev use only)."
                 )
+        if merge_curated is None:
+            merge_curated = os.environ.get("MERGE_CURATED", "1") != "0"
+        if merge_curated:
+            if curated is not None:
+                self._curated = curated
+                self._curated_max_chars = max((len(s) for s in curated), default=0)
+                # Build prefix set on the fly when curated is supplied
+                # explicitly (test path); production loads it from disk.
+                self._curated_prefixes = frozenset(
+                    s[:k] for s in curated for k in range(1, len(s))
+                )
+            else:
+                (
+                    self._curated,
+                    self._curated_prefixes,
+                    self._curated_max_chars,
+                ) = _load_curated_compounds()
+        else:
+            self._curated = frozenset()
+            self._curated_prefixes = frozenset()
+            self._curated_max_chars = 0
 
     def segment(self, text: str) -> list[str]:
         if self._mydict is None:
-            return self._syllable_fallback(text)
-        return self._viterbi(text, *self._mydict)
+            pieces = self._syllable_fallback(text)
+        else:
+            pieces = self._viterbi(text, *self._mydict)
+        if self._curated and len(pieces) > 1:
+            pieces = _merge_curated(
+                pieces,
+                self._curated,
+                self._curated_prefixes,
+                self._curated_max_chars,
+            )
+        return [p for p in pieces if not _is_combining_mark_only(p)]
 
     @staticmethod
     def _syllable_fallback(text: str) -> list[str]:

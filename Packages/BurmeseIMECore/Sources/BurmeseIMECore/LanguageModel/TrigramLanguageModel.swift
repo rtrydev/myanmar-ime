@@ -142,6 +142,8 @@ public final class TrigramLanguageModel: LanguageModel, @unchecked Sendable {
 
     public var hasVocabulary: Bool { true }
 
+    public var unknownLogProb: Double { unigramLogProb(header.idUnk) }
+
     /// Greedy longest-match decomposition of `surface` against the
     /// vocabulary, summing per-word contextual log-probs. When a prefix
     /// of the remaining surface is in vocab, it's scored given the

@@ -31,6 +31,16 @@ public protocol LanguageModel: Sendable {
     /// false; the real trigram LM returns true. Callers that want to
     /// detect "no real LM loaded" can branch on this.
     var hasVocabulary: Bool { get }
+
+    /// The unigram log-prob the LM assigns to a completely-unseen
+    /// surface (routes through `<unk>`). Callers comparing candidate LM
+    /// scores can use this to detect surfaces whose score equals the
+    /// `<unk>` floor — a signal that the surface is effectively OOV even
+    /// when `wordId` returns a valid vocab id (Kneser-Ney smoothing may
+    /// assign tail words the same unigram prob as `<unk>`). Default
+    /// returns `-Double.infinity` so OOV checks against this floor never
+    /// fire on LMs that don't override.
+    var unknownLogProb: Double { get }
 }
 
 extension LanguageModel {
@@ -39,6 +49,8 @@ extension LanguageModel {
     }
 
     public var hasVocabulary: Bool { false }
+
+    public var unknownLogProb: Double { -.infinity }
 }
 
 /// A no-op language model: returns a small constant log-prob for every

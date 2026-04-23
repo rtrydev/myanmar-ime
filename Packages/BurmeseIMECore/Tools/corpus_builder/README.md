@@ -57,7 +57,7 @@ python -m corpus_builder.build all \
     --tsv-out ../../Data/BurmeseLexiconSource.tsv \
     --lm-out  ../../../../native/macos/Data/BurmeseLM.bin \
     --vocab-size 80000 \
-    --prune 0 0 1
+    --prune 0 10 20
 ```
 
 Subcommands:
@@ -70,6 +70,26 @@ Subcommands:
 
 Each stage writes an intermediate under `--work-dir` (default `./build/`)
 so a re-run only redoes what the CLI flags actually invalidate.
+
+### Sizing the LM
+
+`--prune` accepts three integers `[unigram_min, bigram_min, trigram_min]`
+and drops n-grams whose counts fall at or below the threshold. On the
+Myanmar-C4 corpus (34M sentences, 557M tokens) the cutoffs scale
+roughly as:
+
+| `--prune`  | Trigrams kept | LM size    |
+|------------|--------------:|-----------:|
+| `0 0 1`    | ~40M          | ~750 MB    |
+| `0 2 3`    | ~17.5M        | ~340 MB    |
+| `0 5 10`   | ~4–6M         | 100–140 MB |
+| `0 10 20`  | ~1.5–2.5M     | 50–70 MB (shipping default) |
+| `0 20 40`  | ~600k–900k    | 25–40 MB   |
+
+The IME ranker only consults trigrams whose context actually surfaces
+during typing, so the long tail mostly acts as dead weight at inference.
+Start at `0 10 20`; loosen to `0 5 10` or `0 2 3` only if sentence-level
+regression tests fall out of top-k for want of broader context.
 
 ## Layout
 
