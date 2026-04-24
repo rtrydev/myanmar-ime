@@ -202,7 +202,7 @@ public final class BurmeseEngine: @unchecked Sendable {
     private var anchorCommitThreshold: Int {
         settings?.anchorCommitThreshold ?? Self.anchorCommitThresholdDefault
     }
-    private var burmesePunctuationEnabled: Bool {
+    internal var burmesePunctuationEnabled: Bool {
         settings?.burmesePunctuationEnabled ?? false
     }
 
@@ -272,6 +272,32 @@ public final class BurmeseEngine: @unchecked Sendable {
                 cleaned: midCleanedBuffer,
                 insertions: midInsertions
             )
+            return state
+        }
+        // Composing punctuation (`.`, `:`, `*`, `'`) can appear inside
+        // the roman run even when it cannot be consumed by a vowel or
+        // connector rule. Split those literal runs before the parser can
+        // skip them and silently erase what the user typed.
+        if let split = splitAtLastEmbeddedComposingPunct(displayBuffer) {
+            var state = update(buffer: split.activeBuffer, context: context)
+            state.rawBuffer = displayBuffer
+            if state.candidates.isEmpty {
+                state.candidates = [Candidate(
+                    surface: split.renderedPrefix + split.activeBuffer,
+                    reading: displayBuffer,
+                    source: .grammar,
+                    score: 0
+                )]
+            } else {
+                state.candidates = state.candidates.map { cand in
+                    Candidate(
+                        surface: split.renderedPrefix + cand.surface,
+                        reading: cand.reading,
+                        source: cand.source,
+                        score: cand.score
+                    )
+                }
+            }
             return state
         }
         // If punct mapping is on and the buffer contains a mapped-punct

@@ -16,6 +16,7 @@ public enum BurmeseTestSuites {
         RankingSuite.suite,
         LanguageModelSuite.suite,
         PunctuationSuite.suite,
+        MidBufferPunctuationSuite.suite,
         NumberMeasureWordsSuite.suite,
         UserHistorySuite.suite,
         IMESettingsSuite.suite,

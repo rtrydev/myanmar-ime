@@ -33,8 +33,87 @@ extension BurmeseEngine {
         }
     }()
 
+    internal static let vowelSuffixesWithTrailingColon: [String] = {
+        Romanization.vowels.compactMap { entry in
+            entry.roman.hasSuffix(":") ? entry.roman : nil
+        }
+    }()
+
     internal static func dotActsAsVowelModifier(prefixEndingAtDot prefix: Substring) -> Bool {
         vowelSuffixesWithTrailingDot.contains(where: { prefix.hasSuffix($0) })
+    }
+
+    internal static func colonActsAsVowelModifier(prefixEndingAtColon prefix: Substring) -> Bool {
+        vowelSuffixesWithTrailingColon.contains(where: { prefix.hasSuffix($0) })
+    }
+
+    internal static let midBufferComposingPunctuation: Set<Character> = [".", ":", "*", "'"]
+
+    internal func splitAtLastEmbeddedComposingPunct(_ buffer: String) -> EmbeddedPunctSplit? {
+        var split: EmbeddedPunctSplit? = nil
+        for idx in buffer.indices {
+            guard shouldSplitEmbeddedComposingPunct(in: buffer, at: idx) else { continue }
+            let after = buffer.index(after: idx)
+            guard after != buffer.endIndex else { continue }
+            guard buffer[after...].contains(where: { !Self.isFrozenPunctuationLiteral($0) }) else {
+                continue
+            }
+            let renderedPrefix = renderFrozenPunctSegments(String(buffer[..<after]))
+            guard !Self.hasAsciiLetters(renderedPrefix) else { continue }
+            split = EmbeddedPunctSplit(
+                renderedPrefix: renderedPrefix,
+                activeBuffer: String(buffer[after...])
+            )
+        }
+        return split
+    }
+
+    private func shouldSplitEmbeddedComposingPunct(
+        in buffer: String,
+        at idx: String.Index
+    ) -> Bool {
+        let c = buffer[idx]
+        guard Self.midBufferComposingPunctuation.contains(c) else { return false }
+        if c == ".",
+           Self.dotActsAsVowelModifier(prefixEndingAtDot: buffer[...idx]) {
+            return false
+        }
+        if c == ":",
+           Self.colonActsAsVowelModifier(prefixEndingAtColon: buffer[...idx]) {
+            return false
+        }
+        if c == "." || c == ":" {
+            return true
+        }
+        return Self.hasAdjacentComposingPunctuation(in: buffer, at: idx)
+    }
+
+    private static func isFrozenPunctuationLiteral(_ c: Character) -> Bool {
+        midBufferComposingPunctuation.contains(c) || PunctuationMapper.isMappable(c)
+    }
+
+    private static func hasAsciiLetters(_ s: String) -> Bool {
+        s.unicodeScalars.contains { scalar in
+            (0x41...0x5A).contains(scalar.value) || (0x61...0x7A).contains(scalar.value)
+        }
+    }
+
+    private static func hasAdjacentComposingPunctuation(
+        in buffer: String,
+        at idx: String.Index
+    ) -> Bool {
+        if idx > buffer.startIndex {
+            let prev = buffer.index(before: idx)
+            if midBufferComposingPunctuation.contains(buffer[prev]) {
+                return true
+            }
+        }
+        let next = buffer.index(after: idx)
+        if next < buffer.endIndex,
+           midBufferComposingPunctuation.contains(buffer[next]) {
+            return true
+        }
+        return false
     }
 
     /// Locate the last mapped-punct character that is followed by more
@@ -79,20 +158,30 @@ extension BurmeseEngine {
         var out = ""
         var current = ""
         for c in s {
-            if let mapped = PunctuationMapper.mapped(c) {
-                // When `.` closes a creaky-tone vowel suffix (`u.`, `i.`,
-                // `an.`, …) it stays attached to the current composable
-                // run instead of flushing as a Myanmar full stop.
-                if c == ".",
-                   Self.dotActsAsVowelModifier(prefixEndingAtDot: Substring(current + ".")) {
-                    current.append(".")
-                    continue
-                }
+            // When `.` closes a creaky-tone vowel suffix (`u.`, `i.`,
+            // `an.`, …) it stays attached to the current composable
+            // run instead of flushing as punctuation.
+            if c == ".",
+               Self.dotActsAsVowelModifier(prefixEndingAtDot: Substring(current + ".")) {
+                current.append(".")
+                continue
+            }
+            if c == ":",
+               Self.colonActsAsVowelModifier(prefixEndingAtColon: Substring(current + ":")) {
+                current.append(":")
+                continue
+            }
+            if PunctuationMapper.isMappable(c) || Self.midBufferComposingPunctuation.contains(c) {
                 if !current.isEmpty {
                     out += renderFrozenSegment(current)
                     current = ""
                 }
-                out += mapped
+                if burmesePunctuationEnabled,
+                   let mapped = PunctuationMapper.mapped(c) {
+                    out += mapped
+                } else {
+                    out.append(c)
+                }
             } else {
                 current.append(c)
             }

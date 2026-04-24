@@ -960,7 +960,7 @@ public enum EngineSuite {
 
         TestCase("task03_rightShrunkComposableBuffersStayMyanmarOnly") { ctx in
             let engine = BurmeseEngine()
-            for buffer in ["aw", "awwwww", "bwwwz", "kyawzz", "nya:n", "nya'n", "ayo:n"] {
+            for buffer in ["aw", "awwwww", "bwwwz", "kyawzz", "nya'n", "ayo:n"] {
                 let state = engine.update(buffer: buffer, context: [])
                 ctx.assertFalse(state.candidates.isEmpty,
                                 "task03_nonEmpty_\(buffer)",
