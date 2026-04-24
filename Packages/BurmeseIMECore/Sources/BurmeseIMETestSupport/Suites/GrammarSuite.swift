@@ -26,6 +26,22 @@ fileprivate func assertKinziIllegal(
     )
 }
 
+fileprivate func assertRejectedLegalityScore(
+    _ ctx: TestContext,
+    _ score: Int,
+    _ label: String,
+    file: StaticString = #file,
+    line: UInt = #line
+) {
+    ctx.assertTrue(
+        score <= 0,
+        label,
+        detail: "expected rejected legality score <= 0, got \(score)",
+        file: file,
+        line: line
+    )
+}
+
 public enum GrammarSuite {
     public static let suite = TestSuite(name: "Grammar", cases: [
 
@@ -72,24 +88,22 @@ public enum GrammarSuite {
             ctx.assertTrue(score < 100, detail: "Expected score < 100, got \(score)")
         },
 
-        TestCase("validateSyllable_medialHaPlusLongI_rareButLegal") { ctx in
+        TestCase("validateSyllable_medialHaPlusLongI_rejected") { ctx in
             let score = Grammar.validateSyllable(
                 onset: Myanmar.ka,
                 medials: [Myanmar.medialHa],
                 vowelRoman: "i:"
             )
-            ctx.assertGreaterThan(score, 0)
-            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+            assertRejectedLegalityScore(ctx, score, "medialHaPlusLongI")
         },
 
-        TestCase("validateSyllable_medialHaPlusLongU_rareButLegal") { ctx in
+        TestCase("validateSyllable_medialHaPlusLongU_rejected") { ctx in
             let score = Grammar.validateSyllable(
                 onset: Myanmar.ka,
                 medials: [Myanmar.medialHa],
                 vowelRoman: "u:"
             )
-            ctx.assertGreaterThan(score, 0)
-            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+            assertRejectedLegalityScore(ctx, score, "medialHaPlusLongU")
         },
 
         TestCase("validateSyllable_medialHaPlusShortI_legal") { ctx in
@@ -101,128 +115,114 @@ public enum GrammarSuite {
             ctx.assertGreaterThan(score, 0)
         },
 
-        TestCase("validateSyllable_tripleMedialWithInherentVowel_legal") { ctx in
-            let score = Grammar.validateSyllable(
-                onset: Myanmar.ka,
-                medials: [Myanmar.medialYa, Myanmar.medialWa, Myanmar.medialHa],
-                vowelRoman: "a"
-            )
-            ctx.assertGreaterThan(score, 0)
+        TestCase("validateSyllable_tripleMedialWithPermittedVowels_legal") { ctx in
+            for vowel in ["a", "ar", "ar:", "ar2", "ar2:"] {
+                let score = Grammar.validateSyllable(
+                    onset: Myanmar.ka,
+                    medials: [Myanmar.medialYa, Myanmar.medialWa, Myanmar.medialHa],
+                    vowelRoman: vowel
+                )
+                ctx.assertGreaterThan(score, 0, "tripleMedial_\(vowel)")
+            }
         },
 
-        TestCase("validateSyllable_tripleMedialWithComplexVowel_rareButLegal") { ctx in
+        TestCase("validateSyllable_tripleMedialWithComplexVowel_rejected") { ctx in
             let score = Grammar.validateSyllable(
                 onset: Myanmar.ka,
                 medials: [Myanmar.medialYa, Myanmar.medialWa, Myanmar.medialHa],
                 vowelRoman: "aung"
             )
-            ctx.assertGreaterThan(score, 0)
-            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+            assertRejectedLegalityScore(ctx, score, "tripleMedialWithComplexVowel")
         },
 
-        TestCase("validateSyllable_palaRetroflexWithDiphthong_rareButLegal") { ctx in
+        TestCase("validateSyllable_palaRetroflexWithDiphthong_rejected") { ctx in
             let score = Grammar.validateSyllable(
                 onset: Myanmar.tta, medials: [], vowelRoman: "ote")
-            ctx.assertGreaterThan(score, 0)
-            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+            assertRejectedLegalityScore(ctx, score, "palaRetroflexWithDiphthong")
         },
 
-        TestCase("validateSyllable_jhaWithDiphthong_rareButLegal") { ctx in
+        TestCase("validateSyllable_jhaWithDiphthong_rejected") { ctx in
             let score = Grammar.validateSyllable(
                 onset: Myanmar.jha, medials: [], vowelRoman: "own")
-            ctx.assertGreaterThan(score, 0)
-            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+            assertRejectedLegalityScore(ctx, score, "jhaWithDiphthong")
         },
 
-        TestCase("validateSyllable_palaRetroflexWithOte2_rareButLegal") { ctx in
+        TestCase("validateSyllable_palaRetroflexWithOte2_rejected") { ctx in
             let score = Grammar.validateSyllable(
                 onset: Myanmar.nna, medials: [], vowelRoman: "ote2")
-            ctx.assertGreaterThan(score, 0)
-            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+            assertRejectedLegalityScore(ctx, score, "palaRetroflexWithOte2")
         },
 
-        TestCase("validateSyllable_palaRetroflexWithAte2_rareButLegal") { ctx in
+        TestCase("validateSyllable_palaRetroflexWithAte2_rejected") { ctx in
             let score = Grammar.validateSyllable(
                 onset: Myanmar.tta, medials: [], vowelRoman: "ate2")
-            ctx.assertGreaterThan(score, 0)
-            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+            assertRejectedLegalityScore(ctx, score, "palaRetroflexWithAte2")
         },
 
-        TestCase("validateSyllable_palaRetroflexWithOwn2_rareButLegal") { ctx in
+        TestCase("validateSyllable_palaRetroflexWithOwn2_rejected") { ctx in
             let score = Grammar.validateSyllable(
                 onset: Myanmar.nna, medials: [], vowelRoman: "own2")
-            ctx.assertGreaterThan(score, 0)
-            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+            assertRejectedLegalityScore(ctx, score, "palaRetroflexWithOwn2")
         },
 
-        TestCase("validateSyllable_palaRetroflexWithOwnHeavy_rareButLegal") { ctx in
+        TestCase("validateSyllable_palaRetroflexWithOwnHeavy_rejected") { ctx in
             let score = Grammar.validateSyllable(
                 onset: Myanmar.nna, medials: [], vowelRoman: "own:")
-            ctx.assertGreaterThan(score, 0)
-            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+            assertRejectedLegalityScore(ctx, score, "palaRetroflexWithOwnHeavy")
         },
 
-        TestCase("validateSyllable_palaRetroflexWithOwn2Heavy_rareButLegal") { ctx in
+        TestCase("validateSyllable_palaRetroflexWithOwn2Heavy_rejected") { ctx in
             let score = Grammar.validateSyllable(
                 onset: Myanmar.nna, medials: [], vowelRoman: "own2:")
-            ctx.assertGreaterThan(score, 0)
-            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+            assertRejectedLegalityScore(ctx, score, "palaRetroflexWithOwn2Heavy")
         },
 
-        TestCase("validateSyllable_palaRetroflexWithOwn2Creaky_rareButLegal") { ctx in
+        TestCase("validateSyllable_palaRetroflexWithOwn2Creaky_rejected") { ctx in
             let score = Grammar.validateSyllable(
                 onset: Myanmar.nna, medials: [], vowelRoman: "own2.")
-            ctx.assertGreaterThan(score, 0)
-            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+            assertRejectedLegalityScore(ctx, score, "palaRetroflexWithOwn2Creaky")
         },
 
-        TestCase("validateSyllable_palaRetroflexWithAinHeavy_rareButLegal") { ctx in
+        TestCase("validateSyllable_palaRetroflexWithAinHeavy_rejected") { ctx in
             let score = Grammar.validateSyllable(
                 onset: Myanmar.tta, medials: [], vowelRoman: "ain:")
-            ctx.assertGreaterThan(score, 0)
-            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+            assertRejectedLegalityScore(ctx, score, "palaRetroflexWithAinHeavy")
         },
 
-        TestCase("validateSyllable_palaRetroflexWithAinCreaky_rareButLegal") { ctx in
+        TestCase("validateSyllable_palaRetroflexWithAinCreaky_rejected") { ctx in
             let score = Grammar.validateSyllable(
                 onset: Myanmar.tta, medials: [], vowelRoman: "ain.")
-            ctx.assertGreaterThan(score, 0)
-            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+            assertRejectedLegalityScore(ctx, score, "palaRetroflexWithAinCreaky")
         },
 
-        TestCase("validateSyllable_palaRetroflexWithAin2_rareButLegal") { ctx in
+        TestCase("validateSyllable_palaRetroflexWithAin2_rejected") { ctx in
             let score = Grammar.validateSyllable(
                 onset: Myanmar.tta, medials: [], vowelRoman: "ain2")
-            ctx.assertGreaterThan(score, 0)
-            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+            assertRejectedLegalityScore(ctx, score, "palaRetroflexWithAin2")
         },
 
-        TestCase("validateSyllable_palaRetroflexWithAin2Heavy_rareButLegal") { ctx in
+        TestCase("validateSyllable_palaRetroflexWithAin2Heavy_rejected") { ctx in
             let score = Grammar.validateSyllable(
                 onset: Myanmar.tta, medials: [], vowelRoman: "ain2:")
-            ctx.assertGreaterThan(score, 0)
-            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+            assertRejectedLegalityScore(ctx, score, "palaRetroflexWithAin2Heavy")
         },
 
-        TestCase("validateSyllable_palaRetroflexWithAin2Creaky_rareButLegal") { ctx in
+        TestCase("validateSyllable_palaRetroflexWithAin2Creaky_rejected") { ctx in
             let score = Grammar.validateSyllable(
                 onset: Myanmar.tta, medials: [], vowelRoman: "ain2.")
-            ctx.assertGreaterThan(score, 0)
-            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+            assertRejectedLegalityScore(ctx, score, "palaRetroflexWithAin2Creaky")
         },
 
-        TestCase("validateSyllable_palaRetroflexWithAiHeavy_rareButLegal") { ctx in
+        TestCase("validateSyllable_palaRetroflexWithAiHeavy_rejected") { ctx in
             let score = Grammar.validateSyllable(
                 onset: Myanmar.nna, medials: [], vowelRoman: "ai:")
-            ctx.assertGreaterThan(score, 0)
-            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+            assertRejectedLegalityScore(ctx, score, "palaRetroflexWithAiHeavy")
         },
 
-        TestCase("validateSyllable_palaRetroflexWithAiCreaky_rareButLegal") { ctx in
+        TestCase("validateSyllable_palaRetroflexWithAiCreaky_rejected") { ctx in
             let score = Grammar.validateSyllable(
                 onset: Myanmar.nna, medials: [], vowelRoman: "ai.")
-            ctx.assertGreaterThan(score, 0)
-            ctx.assertTrue(score < 100, detail: "rare; expected < 100, got \(score)")
+            assertRejectedLegalityScore(ctx, score, "palaRetroflexWithAiCreaky")
         },
 
         TestCase("validateSyllable_palaRetroflexWithAnusvara_legal") { ctx in

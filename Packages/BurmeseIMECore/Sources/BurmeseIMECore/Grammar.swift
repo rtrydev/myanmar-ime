@@ -310,23 +310,21 @@ public enum Grammar {
         // aa sign to match the onset's descender requirement during
         // candidate post-processing, so the parser can emit either shape.
 
-        // Rare combinations — not standard in modern orthography but
-        // legitimate in archaic text, loanwords, or personal names. Stay
-        // legal so the user can still pick them; low score drops them
-        // below canonical alternatives in the candidate panel.
-        var rarityPenalty = 0
+        // Orthographic compatibility hard filters. These combinations are
+        // not merely uncommon: they form unattested shapes that should not
+        // survive as legal parses when the user types through a dead end.
         if medials.contains(Myanmar.medialHa) && forbiddenVowelsWithMedialHa.contains(vowelRoman) {
-            rarityPenalty += 80
+            return 0
         }
         if medials.count >= 3 && !tripleMedialPermittedVowels.contains(vowelRoman) {
-            rarityPenalty += 80
+            return 0
         }
         if palaRestrictedOnsets.contains(onset) && forbiddenVowelsOnPalaOnsets.contains(vowelRoman) {
-            rarityPenalty += 80
+            return 0
         }
 
         // Base score: legal
-        var score = 100 - rarityPenalty
+        var score = 100
 
         // Bonus for common/canonical forms
         if medials.isEmpty {

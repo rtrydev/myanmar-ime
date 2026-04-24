@@ -1185,8 +1185,14 @@ public final class BurmeseEngine: @unchecked Sendable {
             primaryGrammarStart = 0
         }
 
-        for grammarCandidate in primaryGrammar.dropFirst(primaryGrammarStart) where merged.count < candidatePageSize {
-            merged.append(grammarCandidate.candidate)
+        if primaryGrammarStart == 0 {
+            for grammarCandidate in primaryGrammar where merged.count < candidatePageSize {
+                merged.append(grammarCandidate.candidate)
+            }
+        } else {
+            for grammarCandidate in primaryGrammar.dropFirst(primaryGrammarStart) where merged.count < candidatePageSize {
+                merged.append(grammarCandidate.candidate)
+            }
         }
 
         for lexiconCandidate in trailingLexicon where merged.count < candidatePageSize {

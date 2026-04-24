@@ -409,16 +409,14 @@ extension BurmeseEngine {
     }
 
     internal static func isYapinPromotionBuffer(_ userBuffer: String) -> Bool {
-        // Current ya-pin promotion roots are all k-onsets; most buffers can
-        // bypass the set lookup and tone stripping entirely.
-        guard userBuffer.utf8.first == 107 else { return false }
-        if isYapinPrimaryBareBuffer(userBuffer) {
+        switch userBuffer {
+        case "kywan", "kyay", "kyi", "khyay", "khyin",
+             "kywan:", "kyay:", "kyi:", "khyay:", "khyin:",
+             "kywan.", "kyay.", "kyi.", "khyay.", "khyin.":
             return true
-        }
-        guard let last = userBuffer.last, last == ":" || last == "." else {
+        default:
             return false
         }
-        return isYapinPrimaryBareBuffer(strippingTrailingToneMarkers(from: userBuffer))
     }
 
     internal static func yapinPromotionPreservedSurface(

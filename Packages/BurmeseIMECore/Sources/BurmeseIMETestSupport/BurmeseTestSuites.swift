@@ -13,6 +13,8 @@ public enum BurmeseTestSuites {
         AnchorStabilitySuite.suite,
         LoanwordRomanizationSuite.suite,
         ToneVariantMedialConsistencySuite.suite,
+        TripleMedialLegalitySuite.suite,
+        MedialHaForbiddenVowelsSuite.suite,
         EngineSuite.suite,
         LexiconRankingSuite.suite,
         RankingSuite.suite,
