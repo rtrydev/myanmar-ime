@@ -1260,6 +1260,20 @@ public final class BurmeseEngine: @unchecked Sendable {
                           anchor.normalized.count >= anchorCommitThreshold
                     else { continue }
                     let anchorStripped = Self.stripZWSP(anchor.surface)
+                    if Self.viramaInsensitiveHasPrefix(topStripped, anchorStripped)
+                        && !Self.scalarHasPrefix(topStripped, anchorStripped) {
+                        let variant = Self.substituteViramaAnchor(
+                            in: merged[0].surface,
+                            matching: anchorStripped
+                        )
+                        merged.insert(Candidate(
+                            surface: variant,
+                            reading: merged[0].reading,
+                            source: merged[0].source,
+                            score: merged[0].score
+                        ), at: 0)
+                        break
+                    }
                     // Check if the surfaces match after normalizing
                     // ya-pin (U+103B) ↔ ya-yit (U+103C) medials.
                     let topNorm = Self.normalizeYaPinYaYit(topStripped)

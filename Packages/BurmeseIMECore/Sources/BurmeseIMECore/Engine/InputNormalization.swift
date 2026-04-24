@@ -609,6 +609,41 @@ extension BurmeseEngine {
         s.unicodeScalars.starts(with: prefix.unicodeScalars)
     }
 
+    internal static func viramaInsensitiveHasPrefix(_ s: String, _ prefix: String) -> Bool {
+        stripViramas(s).unicodeScalars.starts(with: stripViramas(prefix).unicodeScalars)
+    }
+
+    private static func stripViramas(_ s: String) -> String {
+        if s.unicodeScalars.contains(where: { $0.value == 0x1039 }) {
+            return String(s.unicodeScalars.filter { $0.value != 0x1039 })
+        }
+        return s
+    }
+
+    internal static func substituteViramaAnchor(in surface: String, matching anchor: String) -> String {
+        let surfaceScalars = Array(surface.unicodeScalars)
+        let anchorScalars = Array(anchor.unicodeScalars)
+        var surfaceIndex = 0
+        for anchorScalar in anchorScalars where anchorScalar.value != 0x1039 {
+            while surfaceIndex < surfaceScalars.count,
+                  surfaceScalars[surfaceIndex].value == 0x1039 {
+                surfaceIndex += 1
+            }
+            guard surfaceIndex < surfaceScalars.count,
+                  surfaceScalars[surfaceIndex].value == anchorScalar.value
+            else {
+                return surface
+            }
+            surfaceIndex += 1
+        }
+        while surfaceIndex < surfaceScalars.count,
+              surfaceScalars[surfaceIndex].value == 0x1039 {
+            surfaceIndex += 1
+        }
+        let suffix = String(String.UnicodeScalarView(surfaceScalars[surfaceIndex...]))
+        return anchor + suffix
+    }
+
     /// True if the scalar is one that attaches to a preceding consonant
     /// (medial, dependent vowel, e-kar, asat, diacritics). Used to detect
     /// when an anchor's last bare consonant has been absorbed into a
