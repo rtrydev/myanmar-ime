@@ -377,14 +377,14 @@ extension BurmeseEngine {
     /// `kya` → ya-yit, `khyin` → ya-pin but `kyaw:` → ya-yit) so a
     /// consonant-only rule would over-promote. Grows only when a new
     /// `task13_yapin_*` top-1 target lands.
-    internal static let yapinPrimaryBareBuffers: Set<String> = [
+    package static let yapinPrimaryBareBuffers: Set<String> = [
         "kywan", "kyay", "kyi", "khyay", "khyin",
     ]
 
-    /// Typing-intent promotion for bare ya-pin readings: when the
-    /// user buffer is exactly one of the known-primary ya-pin bare
-    /// readings, move the lowest-aliasCost ya-pin sibling whose
-    /// digit-stripped reading matches to rank 0 (task 07).
+    /// Typing-intent promotion for ya-pin readings: when the user buffer
+    /// is one of the known-primary ya-pin bare readings, optionally with
+    /// a trailing tone marker, move the lowest-aliasCost ya-pin sibling
+    /// whose digit-stripped reading matches to rank 0 (task 07, task 05).
     ///
     /// For short readings like `kyay` / `kyi`, the default comparator
     /// picks ya-yit on composite score because the ya-yit sibling is
@@ -392,37 +392,99 @@ extension BurmeseEngine {
     /// offset beats the ya-pin's narrow LM advantage. But the bare
     /// digit-less buffer is itself the canonical user signal for ya-pin
     /// in Burmese typing convention, so we flip the pick when the
-    /// buffer expresses that intent exactly. Longer buffers or buffers
-    /// with any additional tone / coda markers fall through to the
-    /// default comparator untouched.
+    /// buffer expresses that intent. Tone-only variants of the same root
+    /// keep the same medial choice; longer buffers or other coda markers
+    /// fall through to the default comparator untouched.
     internal static func promoteYapinForExactBareReading(
         _ candidates: [RankedGrammarCandidate],
         userBuffer: String
     ) -> [RankedGrammarCandidate] {
-        guard candidates.count >= 2 else { return candidates }
-        guard yapinPrimaryBareBuffers.contains(userBuffer) else { return candidates }
+        guard let idx = yapinPromotionIndex(in: candidates, userBuffer: userBuffer) else {
+            return candidates
+        }
+        var reordered = candidates
+        let yapin = reordered.remove(at: idx)
+        reordered.insert(yapin, at: 0)
+        return reordered
+    }
+
+    internal static func isYapinPromotionBuffer(_ userBuffer: String) -> Bool {
+        // Current ya-pin promotion roots are all k-onsets; most buffers can
+        // bypass the set lookup and tone stripping entirely.
+        guard userBuffer.utf8.first == 107 else { return false }
+        if isYapinPrimaryBareBuffer(userBuffer) {
+            return true
+        }
+        guard let last = userBuffer.last, last == ":" || last == "." else {
+            return false
+        }
+        return isYapinPrimaryBareBuffer(strippingTrailingToneMarkers(from: userBuffer))
+    }
+
+    internal static func yapinPromotionPreservedSurface(
+        in candidates: [RankedGrammarCandidate],
+        userBuffer: String
+    ) -> String? {
+        guard let idx = yapinPromotionIndex(in: candidates, userBuffer: userBuffer) else {
+            return nil
+        }
+        return candidates[idx].candidate.surface
+    }
+
+    private static func yapinPromotionIndex(
+        in candidates: [RankedGrammarCandidate],
+        userBuffer: String
+    ) -> Int? {
+        guard candidates.count >= 2 else { return nil }
+        let bareRoot = strippingTrailingToneMarkers(from: userBuffer)
+        guard isYapinPrimaryBareBuffer(bareRoot) else { return nil }
         // Already ya-pin on top? Nothing to do.
-        if isYapinReading(candidates[0].candidate.reading) { return candidates }
+        if isYapinReading(candidates[0].candidate.reading) { return nil }
         // Among candidates whose digit-stripped reading is exactly
-        // the user buffer, pick the ya-pin sibling with the smallest
-        // aliasCost (prefers `ky2i` → ကျီ over the double-alias
-        // `ky2i2` → ကျည် when the user typed bare `kyi`).
+        // the user buffer (or the same root with tone stripped), pick
+        // the ya-pin sibling with the smallest aliasCost (prefers
+        // `ky2i` → ကျီ over the double-alias `ky2i2` → ကျည် when the
+        // user typed bare `kyi`).
+        let bareRootMatchKey = promotionMatchKey(bareRoot)
         var bestIndex: Int?
         var bestAliasCost = Int.max
         for i in 1..<candidates.count {
             let reading = candidates[i].candidate.reading
             guard isYapinReading(reading) else { continue }
-            guard Romanization.aliasReading(reading) == userBuffer else { continue }
+            let aliasReading = Romanization.aliasReading(reading)
+            let aliasRoot = strippingTrailingToneMarkers(from: aliasReading)
+            guard aliasReading == userBuffer
+                    || aliasRoot == bareRoot
+                    || promotionMatchKey(aliasRoot) == bareRootMatchKey
+            else { continue }
             if candidates[i].aliasCost < bestAliasCost {
                 bestAliasCost = candidates[i].aliasCost
                 bestIndex = i
             }
         }
-        guard let idx = bestIndex else { return candidates }
-        var reordered = candidates
-        let yapin = reordered.remove(at: idx)
-        reordered.insert(yapin, at: 0)
-        return reordered
+        return bestIndex
+    }
+
+    private static func strippingTrailingToneMarkers(from buffer: String) -> String {
+        var stripped = buffer
+        while let last = stripped.last, last == ":" || last == "." {
+            stripped.removeLast()
+        }
+        return stripped
+    }
+
+    private static func isYapinPrimaryBareBuffer(_ buffer: String) -> Bool {
+        switch buffer {
+        case "kywan", "kyay", "kyi", "khyay", "khyin":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func promotionMatchKey(_ buffer: String) -> String {
+        strippingTrailingToneMarkers(from: buffer)
+            .replacingOccurrences(of: "yw", with: "wy")
     }
 
     internal func promoteAliasAlternate(_ candidates: [RankedGrammarCandidate]) -> [RankedGrammarCandidate] {

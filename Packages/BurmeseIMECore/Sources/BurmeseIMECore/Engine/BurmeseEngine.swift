@@ -1052,17 +1052,33 @@ public final class BurmeseEngine: @unchecked Sendable {
         grammarCandidates.sort { lhs, rhs in
             grammarCandidateIsBetter(lhs, than: rhs)
         }
-        grammarCandidates = pruneGrammarByLmMargin(
-            grammarCandidates,
-            preservingSurfaces: strictInferredStackOutputs
-        )
+        let appliesYapinPromotion = !effectiveWindowed
+            && Self.isYapinPromotionBuffer(effectiveParseInput)
+
+        if appliesYapinPromotion,
+           let yapinSurface = Self.yapinPromotionPreservedSurface(
+                in: grammarCandidates,
+                userBuffer: effectiveParseInput
+           ) {
+            var preservingGrammarSurfaces = strictInferredStackOutputs
+            preservingGrammarSurfaces.insert(yapinSurface)
+            grammarCandidates = pruneGrammarByLmMargin(
+                grammarCandidates,
+                preservingSurfaces: preservingGrammarSurfaces
+            )
+        } else {
+            grammarCandidates = pruneGrammarByLmMargin(
+                grammarCandidates,
+                preservingSurfaces: strictInferredStackOutputs
+            )
+        }
         grammarCandidates = promoteAliasAlternate(grammarCandidates)
         // Ya-pin typing-intent promotion: if the bare user buffer is
         // the exact digit-stripped form of a ya-pin canonical reading
         // (e.g. `kyay` → `ky2ay`), flip the top pick to the ya-pin
         // sibling (task 07). Only applied in the non-windowed path so
         // long-sentence frozen-prefix ranking is untouched.
-        if !effectiveWindowed {
+        if appliesYapinPromotion {
             grammarCandidates = Self.promoteYapinForExactBareReading(
                 grammarCandidates,
                 userBuffer: effectiveParseInput
@@ -1150,9 +1166,26 @@ public final class BurmeseEngine: @unchecked Sendable {
         let prioritizedKeys = Set(prioritizedLexicon.map(lexiconCandidateKey))
         let trailingLexicon = uniqueLexiconCandidates.filter { !prioritizedKeys.contains(lexiconCandidateKey($0)) }
 
-        var merged: [Candidate] = prioritizedLexicon.map(\.candidate)
+        let promotedYapinGrammarFirst = appliesYapinPromotion
+            && primaryGrammar.first.map { Self.isYapinReading($0.candidate.reading) } == true
 
-        for grammarCandidate in primaryGrammar where merged.count < candidatePageSize {
+        var merged: [Candidate]
+        let primaryGrammarStart: Int
+        if promotedYapinGrammarFirst, let firstGrammar = primaryGrammar.first {
+            merged = []
+            merged.append(firstGrammar.candidate)
+            primaryGrammarStart = 1
+            for lexiconCandidate in prioritizedLexicon where merged.count < candidatePageSize {
+                if !merged.contains(where: { $0.surface == lexiconCandidate.candidate.surface }) {
+                    merged.append(lexiconCandidate.candidate)
+                }
+            }
+        } else {
+            merged = prioritizedLexicon.map(\.candidate)
+            primaryGrammarStart = 0
+        }
+
+        for grammarCandidate in primaryGrammar.dropFirst(primaryGrammarStart) where merged.count < candidatePageSize {
             merged.append(grammarCandidate.candidate)
         }
 
