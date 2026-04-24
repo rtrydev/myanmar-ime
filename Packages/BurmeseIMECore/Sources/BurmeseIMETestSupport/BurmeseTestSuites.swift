@@ -11,6 +11,7 @@ public enum BurmeseTestSuites {
         ClusterAliasSuite.suite,
         KinziInferenceSuite.suite,
         AnchorStabilitySuite.suite,
+        LoanwordRomanizationSuite.suite,
         EngineSuite.suite,
         LexiconRankingSuite.suite,
         RankingSuite.suite,

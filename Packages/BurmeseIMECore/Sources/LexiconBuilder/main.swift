@@ -217,7 +217,7 @@ var reverseFailCount = 0
 var insertCount = 0
 var writtenSurfaces: [String] = []
 
-for entry in entries {
+entryLoop: for entry in entries {
     // Get canonical reading: override or reverse-romanize
     let reading: String
     if let override = entry.overrideReading {
@@ -262,18 +262,19 @@ for entry in entries {
     sqlite3_reset(insertReadingStmt)
 
     let aliasReading = Romanization.aliasReading(reading)
-    let aliasPenalty = Romanization.aliasPenaltyCount(for: reading)
-    sqlite3_bind_text(insertAliasStmt, 1, aliasReading, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-    sqlite3_bind_text(insertAliasStmt, 2, readingCStr, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-    sqlite3_bind_int64(insertAliasStmt, 3, entryId)
-    sqlite3_bind_double(insertAliasStmt, 4, score)
-    sqlite3_bind_int(insertAliasStmt, 5, Int32(aliasPenalty))
+    for variant in Romanization.indexedAliasReadings(for: reading) {
+        sqlite3_bind_text(insertAliasStmt, 1, variant.aliasReading, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        sqlite3_bind_text(insertAliasStmt, 2, readingCStr, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        sqlite3_bind_int64(insertAliasStmt, 3, entryId)
+        sqlite3_bind_double(insertAliasStmt, 4, score)
+        sqlite3_bind_int(insertAliasStmt, 5, Int32(variant.aliasPenalty))
 
-    guard sqlite3_step(insertAliasStmt) == SQLITE_DONE else {
+        guard sqlite3_step(insertAliasStmt) == SQLITE_DONE else {
+            sqlite3_reset(insertAliasStmt)
+            continue entryLoop
+        }
         sqlite3_reset(insertAliasStmt)
-        continue
     }
-    sqlite3_reset(insertAliasStmt)
 
     // Task 03: ya-pin entries (canonical readings whose `2` digit
     // marks the ya-pin medial — `ky2`, `khy2`, `gy2`, `hsy2`, …)
@@ -295,20 +296,20 @@ for entry in entries {
         sqlite3_reset(insertAliasStmt)
     }
 
-    let composeReading = Romanization.composeLookupKey(reading)
-    let separatorPenalty = Romanization.composeSeparatorPenaltyCount(for: reading)
-    sqlite3_bind_text(insertComposeStmt, 1, composeReading, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-    sqlite3_bind_text(insertComposeStmt, 2, readingCStr, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-    sqlite3_bind_int64(insertComposeStmt, 3, entryId)
-    sqlite3_bind_double(insertComposeStmt, 4, score)
-    sqlite3_bind_int(insertComposeStmt, 5, Int32(aliasPenalty))
-    sqlite3_bind_int(insertComposeStmt, 6, Int32(separatorPenalty))
+    for variant in Romanization.indexedComposeReadings(for: reading) {
+        sqlite3_bind_text(insertComposeStmt, 1, variant.composeReading, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        sqlite3_bind_text(insertComposeStmt, 2, readingCStr, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        sqlite3_bind_int64(insertComposeStmt, 3, entryId)
+        sqlite3_bind_double(insertComposeStmt, 4, score)
+        sqlite3_bind_int(insertComposeStmt, 5, Int32(variant.aliasPenalty))
+        sqlite3_bind_int(insertComposeStmt, 6, Int32(variant.separatorPenalty))
 
-    guard sqlite3_step(insertComposeStmt) == SQLITE_DONE else {
+        guard sqlite3_step(insertComposeStmt) == SQLITE_DONE else {
+            sqlite3_reset(insertComposeStmt)
+            continue entryLoop
+        }
         sqlite3_reset(insertComposeStmt)
-        continue
     }
-    sqlite3_reset(insertComposeStmt)
 
     insertCount += 1
     writtenSurfaces.append(entry.surface)

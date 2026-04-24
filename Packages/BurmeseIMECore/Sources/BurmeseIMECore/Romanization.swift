@@ -142,6 +142,24 @@ public enum Romanization {
         .init(roman: "gyw", consonant: Myanmar.ga,  medials: [Myanmar.medialYa, Myanmar.medialWa]),
         .init(roman: "sh",  consonant: Myanmar.ra,  medials: [Myanmar.medialHa], aliasCost: 0),
         .init(roman: "shw", consonant: Myanmar.ra,  medials: [Myanmar.medialWa, Myanmar.medialHa], aliasCost: 0),
+        // Pali/Sanskrit transliteration aliases: users often type `Cr`
+        // where Burmese orthography writes C + ya-yit (ြ). Keep these
+        // as moderate-cost aliases so structural `Cy` remains canonical
+        // while loanword spellings like `brahma` / `pray` are reachable.
+        .init(roman: "kr",  consonant: Myanmar.ka,  medials: [Myanmar.medialRa], aliasCost: 10),
+        .init(roman: "gr",  consonant: Myanmar.ga,  medials: [Myanmar.medialRa], aliasCost: 10),
+        .init(roman: "sr",  consonant: Myanmar.ca,  medials: [Myanmar.medialRa], aliasCost: 10),
+        .init(roman: "tr",  consonant: Myanmar.ta,  medials: [Myanmar.medialRa], aliasCost: 10),
+        .init(roman: "dr",  consonant: Myanmar.da,  medials: [Myanmar.medialRa], aliasCost: 10),
+        .init(roman: "pr",  consonant: Myanmar.pa,  medials: [Myanmar.medialRa], aliasCost: 10),
+        .init(roman: "br",  consonant: Myanmar.ba,  medials: [Myanmar.medialRa], aliasCost: 10),
+        .init(roman: "vr",  consonant: Myanmar.ba,  medials: [Myanmar.medialRa], aliasCost: 10),
+        .init(roman: "khr", consonant: Myanmar.kha, medials: [Myanmar.medialRa], aliasCost: 10),
+        .init(roman: "ghr", consonant: Myanmar.gha, medials: [Myanmar.medialRa], aliasCost: 10),
+        .init(roman: "thr", consonant: Myanmar.tha, medials: [Myanmar.medialRa], aliasCost: 10),
+        .init(roman: "dhr", consonant: Myanmar.dha, medials: [Myanmar.medialRa], aliasCost: 10),
+        .init(roman: "phr", consonant: Myanmar.pha, medials: [Myanmar.medialRa], aliasCost: 10),
+        .init(roman: "bhr", consonant: Myanmar.bha, medials: [Myanmar.medialRa], aliasCost: 10),
         // Doubled consonant shortcut: `ll` surfaces ဠ (retroflex la) as
         // an alternative to the rank-1 `la la` literal pair. Users who
         // type `lla` expecting a single retroflex consonant then pick
@@ -401,6 +419,87 @@ public enum Romanization {
                 penalty += 1
             }
         }
+    }
+
+    package struct IndexedAliasReading: Sendable, Equatable {
+        package let aliasReading: String
+        package let aliasPenalty: Int
+    }
+
+    package struct IndexedComposeReading: Sendable, Equatable {
+        package let composeReading: String
+        package let aliasPenalty: Int
+        package let separatorPenalty: Int
+    }
+
+    package static func indexedAliasReadings(for canonical: String) -> [IndexedAliasReading] {
+        let base = IndexedAliasReading(
+            aliasReading: aliasReading(canonical),
+            aliasPenalty: aliasPenaltyCount(for: canonical)
+        )
+        return loanwordClusterAliasVariants(for: base)
+    }
+
+    package static func indexedComposeReadings(for canonical: String) -> [IndexedComposeReading] {
+        indexedAliasReadings(for: canonical).map { variant in
+            IndexedComposeReading(
+                composeReading: composeLookupKey(variant.aliasReading),
+                aliasPenalty: variant.aliasPenalty,
+                separatorPenalty: composeSeparatorPenaltyCount(for: variant.aliasReading)
+            )
+        }
+    }
+
+    private struct LoanwordClusterAliasRule: Sendable {
+        let canonical: String
+        let aliases: [String]
+    }
+
+    private static let loanwordClusterAliasPenalty = 10
+
+    private static let loanwordClusterAliasRules: [LoanwordClusterAliasRule] = [
+        // Longest canonical onsets first so `khy` becomes `khr` before
+        // the shorter `ky` rule can see it.
+        .init(canonical: "khy", aliases: ["khr"]),
+        .init(canonical: "ghy", aliases: ["ghr"]),
+        .init(canonical: "hty", aliases: ["thr"]),
+        .init(canonical: "dhy", aliases: ["dhr"]),
+        .init(canonical: "phy", aliases: ["phr"]),
+        .init(canonical: "by", aliases: ["bhr"]),
+        .init(canonical: "ky", aliases: ["kr"]),
+        .init(canonical: "gy", aliases: ["gr"]),
+        .init(canonical: "sy", aliases: ["sr"]),
+        .init(canonical: "ty", aliases: ["tr"]),
+        .init(canonical: "dy", aliases: ["dr"]),
+        .init(canonical: "py", aliases: ["pr"]),
+        .init(canonical: "vy", aliases: ["br", "vr"]),
+    ]
+
+    private static func loanwordClusterAliasVariants(
+        for base: IndexedAliasReading
+    ) -> [IndexedAliasReading] {
+        var variants = [base]
+        var seen: Set<String> = [base.aliasReading]
+
+        for rule in loanwordClusterAliasRules {
+            let snapshot = variants
+            for variant in snapshot where variant.aliasReading.contains(rule.canonical) {
+                for alias in rule.aliases {
+                    let rewritten = variant.aliasReading.replacingOccurrences(
+                        of: rule.canonical,
+                        with: alias
+                    )
+                    guard rewritten != variant.aliasReading,
+                          seen.insert(rewritten).inserted else { continue }
+                    variants.append(IndexedAliasReading(
+                        aliasReading: rewritten,
+                        aliasPenalty: variant.aliasPenalty + loanwordClusterAliasPenalty
+                    ))
+                }
+            }
+        }
+
+        return variants
     }
 
     static func aliasVariants(for canonical: String, baseAliasCost: Int = 0) -> [(key: String, aliasCost: Int)] {

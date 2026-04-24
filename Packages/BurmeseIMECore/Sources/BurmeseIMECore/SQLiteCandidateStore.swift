@@ -584,38 +584,38 @@ public final class SQLiteCandidateStore: CandidateStore, @unchecked Sendable {
             let entryID = sqlite3_column_int64(selectStmt, 0)
             let reading = String(cString: readingText)
             let rankScore = sqlite3_column_double(selectStmt, 2)
-            let aliasPenalty = Romanization.aliasPenaltyCount(for: reading)
 
             if createAliasIndex, let insertAliasStmt {
-                let aliasReading = Romanization.aliasReading(reading)
-                sqlite3_bind_text(insertAliasStmt, 1, aliasReading, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-                sqlite3_bind_text(insertAliasStmt, 2, reading, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-                sqlite3_bind_int64(insertAliasStmt, 3, entryID)
-                sqlite3_bind_double(insertAliasStmt, 4, rankScore)
-                sqlite3_bind_int(insertAliasStmt, 5, Int32(aliasPenalty))
+                for variant in Romanization.indexedAliasReadings(for: reading) {
+                    sqlite3_bind_text(insertAliasStmt, 1, variant.aliasReading, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+                    sqlite3_bind_text(insertAliasStmt, 2, reading, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+                    sqlite3_bind_int64(insertAliasStmt, 3, entryID)
+                    sqlite3_bind_double(insertAliasStmt, 4, rankScore)
+                    sqlite3_bind_int(insertAliasStmt, 5, Int32(variant.aliasPenalty))
 
-                guard sqlite3_step(insertAliasStmt) == SQLITE_DONE else {
-                    return false
+                    guard sqlite3_step(insertAliasStmt) == SQLITE_DONE else {
+                        return false
+                    }
+                    sqlite3_reset(insertAliasStmt)
+                    sqlite3_clear_bindings(insertAliasStmt)
                 }
-                sqlite3_reset(insertAliasStmt)
-                sqlite3_clear_bindings(insertAliasStmt)
             }
 
             if createComposeIndex, let insertComposeStmt {
-                let composeReading = Romanization.composeLookupKey(reading)
-                let separatorPenalty = Romanization.composeSeparatorPenaltyCount(for: reading)
-                sqlite3_bind_text(insertComposeStmt, 1, composeReading, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-                sqlite3_bind_text(insertComposeStmt, 2, reading, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-                sqlite3_bind_int64(insertComposeStmt, 3, entryID)
-                sqlite3_bind_double(insertComposeStmt, 4, rankScore)
-                sqlite3_bind_int(insertComposeStmt, 5, Int32(aliasPenalty))
-                sqlite3_bind_int(insertComposeStmt, 6, Int32(separatorPenalty))
+                for variant in Romanization.indexedComposeReadings(for: reading) {
+                    sqlite3_bind_text(insertComposeStmt, 1, variant.composeReading, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+                    sqlite3_bind_text(insertComposeStmt, 2, reading, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+                    sqlite3_bind_int64(insertComposeStmt, 3, entryID)
+                    sqlite3_bind_double(insertComposeStmt, 4, rankScore)
+                    sqlite3_bind_int(insertComposeStmt, 5, Int32(variant.aliasPenalty))
+                    sqlite3_bind_int(insertComposeStmt, 6, Int32(variant.separatorPenalty))
 
-                guard sqlite3_step(insertComposeStmt) == SQLITE_DONE else {
-                    return false
+                    guard sqlite3_step(insertComposeStmt) == SQLITE_DONE else {
+                        return false
+                    }
+                    sqlite3_reset(insertComposeStmt)
+                    sqlite3_clear_bindings(insertComposeStmt)
                 }
-                sqlite3_reset(insertComposeStmt)
-                sqlite3_clear_bindings(insertComposeStmt)
             }
         }
 
