@@ -328,6 +328,13 @@ exec("CREATE INDEX idx_reading_alias ON reading_alias_index (alias_reading)")
 exec("CREATE INDEX idx_reading_compose ON reading_compose_index (compose_reading)")
 exec("CREATE INDEX idx_entry_reading ON entries (canonical_reading)")
 
+// WAL was used to speed up bulk inserts. The shipped DB is read-only at
+// runtime, so checkpoint and switch to DELETE so SQLite doesn't keep the
+// `-shm`/`-wal` sidecars alive — read-only opens still rewrite `-shm`
+// under WAL, which churns git diffs on the bundled artifact.
+exec("PRAGMA wal_checkpoint(TRUNCATE)")
+exec("PRAGMA journal_mode = DELETE")
+
 sqlite3_close(db)
 
 fputs("Done: \(insertCount) entries written to \(outputPath)\n", stderr)

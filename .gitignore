@@ -17,4 +17,9 @@ venv
 # Large data files (compiled into SQLite at build time)
 *.tsv
 
+# SQLite transient sidecars — WAL/coordination state, never source
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite-journal
+
 tasks
