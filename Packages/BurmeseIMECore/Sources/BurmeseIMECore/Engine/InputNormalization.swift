@@ -110,7 +110,12 @@ extension BurmeseEngine {
     internal static func hasOnlyCleanViramaStacks(_ parse: SyllableParse) -> Bool {
         guard parse.reading.contains("+") else { return false }
         guard SyllableParser.scanOutputLegality(parse.output) else { return false }
-        let scalars = parse.output.unicodeScalars.map(\.value)
+        return surfaceHasOnlyNativeViramaStacks(parse.output)
+    }
+
+    internal static func surfaceHasOnlyNativeViramaStacks(_ output: String) -> Bool {
+        guard SyllableParser.scanOutputLegality(output) else { return false }
+        let scalars = output.unicodeScalars.map(\.value)
         var sawVirama = false
         for i in 0..<scalars.count where scalars[i] == 0x1039 {
             sawVirama = true
@@ -220,7 +225,7 @@ extension BurmeseEngine {
     /// syllable break — so over-insertion is safe, the unstacked
     /// reading is preserved via the existing no-`+` parse that also
     /// runs for the same buffer.
-    internal static func inferImplicitStackMarkers(
+    @_spi(Testing) public static func inferImplicitStackMarkers(
         _ input: String
     ) -> (input: String, insertions: Int, liberalInsertions: Int)? {
         guard !input.contains("+") else { return nil }
@@ -230,52 +235,32 @@ extension BurmeseEngine {
         guard input.unicodeScalars.contains(where: { isPaliStackCodaScalar($0.value) }) else {
             return nil
         }
-        // Second fast-exit: confirm the buffer has *any* candidate stack
-        // site (`<V> <coda> <C>` where `<C>` starts the next syllable) before
-        // paying the per-site `Array(input)` / `lastIndex(of: "+")` /
-        // medial-onset scan. Walk scalars once; bail out the moment we
-        // either find a site or prove none exists.
-        let scalars = input.unicodeScalars
-        var sawCandidateSite = false
-        var prev: UInt32 = 0
-        var cur: UInt32 = 0
-        for scalar in scalars {
-            let value = scalar.value
-            if isPaliStackCodaScalar(cur),
-               isPaliStackVowelScalar(prev) {
-                let coda = Unicode.Scalar(cur).map(Character.init)
-                let lower = Unicode.Scalar(value).map(Character.init)
-                if isAsciiLetterScalar(value),
-                   !isPaliStackVowelScalar(value),
-                   let coda,
-                   let lower,
-                   inferredPaliStackIsLiberal(coda: coda, lowerStart: lower) != nil {
-                    sawCandidateSite = true
-                    break
-                }
-            }
-            prev = cur
-            cur = value
-        }
-        guard sawCandidateSite else { return nil }
         let chars = Array(input)
         guard chars.count >= 3 else { return nil }
         let medialLetters: Set<Character> = ["y", "r", "w"]
         var insertAt: [Int] = []
         var liberalInsertions = 0
-        for i in 1..<(chars.count - 1) where isPaliStackCodaLetter(chars[i]) {
-            let prev = chars[i - 1]
-            let next = chars[i + 1]
-            guard isPaliStackVowelLetter(prev) else { continue }
-            guard next.isLetter,
-                  !isPaliStackVowelLetter(next)
+        for lowerIndex in 1..<chars.count {
+            let lowerStart = chars[lowerIndex]
+            guard lowerStart.isLetter,
+                  !isPaliStackVowelLetter(lowerStart)
             else { continue }
-            guard let isLiberal = inferredPaliStackIsLiberal(coda: chars[i], lowerStart: next) else {
+            let previous = chars[lowerIndex - 1]
+            guard isPaliStackCodaLetter(previous)
+                    || stackVowelUpperRuleLastLetters.contains(previous)
+            else { continue }
+            guard !isContinuationOfStackLowerConsonant(chars: chars, at: lowerIndex) else {
+                continue
+            }
+            guard let inferred = inferredPaliStackIsLiberal(
+                chars: chars,
+                insertIndex: lowerIndex
+            ) else {
                 continue
             }
             // Reject medial-heavy onsets. The preceding syllable starts
             // at buffer head or the most recent `+`; any `y`/`r`/`w`
-            // between positions 1 and `i-1` means the onset has at
+            // between positions 1 and the matched vowel means the onset has at
             // least one medial. `h` is ambiguous (onset digraph `th`
             // vs medial `hm`) so it is excluded from the medial set.
             //
@@ -284,18 +269,20 @@ extension BurmeseEngine {
             // (ဗြဟ္မ), so the medial onset does not disqualify the site.
             // Native words with medial onsets do not use `h` as a coda,
             // so this narrowing is safe.
-            let onsetStart = chars[..<i].lastIndex(of: "+").map { $0 + 1 } ?? 0
+            let onsetStart = chars[..<lowerIndex].lastIndex(of: "+").map { $0 + 1 } ?? 0
             let hasSimpleOnset = Self.hasSimplePaliStackOnset(
                 chars: chars,
                 onsetStart: onsetStart,
-                vowelIndex: i - 1
+                vowelIndex: inferred.vowelStart
             )
             guard hasSimpleOnset else { continue }
-            let onsetHasMedial = onsetStart + 1 < i - 1
-                && (onsetStart + 1..<i - 1).contains(where: { medialLetters.contains(chars[$0]) })
-            guard !onsetHasMedial || chars[i] == "h" else { continue }
-            insertAt.append(i + 1)
-            if isLiberal { liberalInsertions += 1 }
+            let onsetHasMedial = onsetStart + 1 < inferred.vowelStart
+                && (onsetStart + 1..<inferred.vowelStart)
+                    .contains(where: { medialLetters.contains(chars[$0]) })
+            let precedingCoda = lowerIndex >= 1 ? chars[lowerIndex - 1] : "\0"
+            guard !onsetHasMedial || precedingCoda == "h" else { continue }
+            insertAt.append(lowerIndex)
+            if inferred.isLiberal { liberalInsertions += 1 }
         }
         guard !insertAt.isEmpty else { return nil }
         var result = input
@@ -320,14 +307,186 @@ extension BurmeseEngine {
     }
 
     private static func inferredPaliStackIsLiberal(
-        coda: Character,
-        lowerStart: Character
-    ) -> Bool? {
-        guard let upper = Romanization.romanToConsonant[String(coda)],
-              let lower = Romanization.romanToConsonant[String(lowerStart)],
-              Grammar.isValidStackLiberal(upper: upper, lower: lower)
+        chars: [Character],
+        insertIndex: Int
+    ) -> (isLiberal: Bool, vowelStart: Int)? {
+        guard insertIndex > 0,
+              insertIndex < chars.count
         else { return nil }
-        return !Grammar.isValidStack(upper: upper, lower: lower)
+        let lowers = stackLowerConsonantsStarting(chars: chars, at: insertIndex)
+        guard !lowers.isEmpty else { return nil }
+        guard let upperMatch = stackUpperConsonantsEndingBeforeLower(
+            chars: chars,
+            insertIndex: insertIndex
+        ) else {
+            return nil
+        }
+        var sawLiberal = false
+        for upper in upperMatch.uppers {
+            for lower in lowers {
+                guard Grammar.isValidStackLiberal(upper: upper, lower: lower) else {
+                    continue
+                }
+                if Grammar.isValidStack(upper: upper, lower: lower) {
+                    return (false, upperMatch.vowelStart)
+                }
+                sawLiberal = true
+            }
+        }
+        return sawLiberal ? (true, upperMatch.vowelStart) : nil
+    }
+
+    private static let stackLowerRomanKeys: [String] = {
+        var seen: Set<String> = []
+        var keys: [String] = []
+        for key in Romanization.consonants.map(\.roman) + Romanization.clusterAliases.map(\.roman)
+        where key.count > 1 && seen.insert(key).inserted {
+            keys.append(key)
+        }
+        return keys
+    }()
+
+    private static let maxStackLowerRomanKeyLength: Int = {
+        stackLowerRomanKeys.lazy.map(\.count).max() ?? 1
+    }()
+
+    private static let stackVowelUpperRuleLastLetters: Set<Character> = {
+        Set(stackVowelUpperRules.compactMap(\.key.last))
+    }()
+
+    private static func isContinuationOfStackLowerConsonant(
+        chars: [Character],
+        at index: Int
+    ) -> Bool {
+        guard index > 0 else { return false }
+        let startFloor = max(0, index - maxStackLowerRomanKeyLength + 1)
+        for start in startFloor..<index {
+            let offset = index - start
+            for key in stackLowerRomanKeys
+            where key.count > offset
+                && matchesRomanKey(key, chars: chars, at: start)
+                && inferredPaliStackIsLiberal(chars: chars, insertIndex: start) != nil {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func stackLowerConsonantsStarting(
+        chars: [Character],
+        at index: Int
+    ) -> [Character] {
+        var lowers: [Character] = []
+        func append(_ consonant: Character) {
+            if !lowers.contains(consonant) {
+                lowers.append(consonant)
+            }
+        }
+        for entry in Romanization.consonants
+        where matchesRomanKey(entry.roman, chars: chars, at: index) {
+            append(entry.myanmar)
+        }
+        for alias in Romanization.clusterAliases
+        where matchesRomanKey(alias.roman, chars: chars, at: index) {
+            append(alias.consonant)
+        }
+        return lowers
+    }
+
+    private static func stackUpperConsonantsEndingBeforeLower(
+        chars: [Character],
+        insertIndex: Int
+    ) -> (uppers: [Character], vowelStart: Int)? {
+        let matchedVowels = vowelRuleUpperConsonants(chars: chars, insertIndex: insertIndex)
+        if let matchedVowels {
+            return matchedVowels
+        }
+        let codaIndex = insertIndex - 1
+        guard codaIndex > 0,
+              isPaliStackCodaLetter(chars[codaIndex]),
+              isPaliStackVowelLetter(chars[codaIndex - 1]),
+              let upper = Romanization.romanToConsonant[String(chars[codaIndex])]
+        else {
+            return nil
+        }
+        return ([upper], codaIndex - 1)
+    }
+
+    private struct StackVowelUpperRule: Sendable {
+        let key: [Character]
+        let uppers: [Character]
+    }
+
+    private static let stackVowelUpperRules: [StackVowelUpperRule] = {
+        var grouped: [String: [Character]] = [:]
+        for entry in Romanization.vowels {
+            let key = Romanization.aliasReading(entry.roman)
+            guard key.count > 1,
+                  let upper = stackUpperConsonant(fromVowelOutput: entry.myanmar)
+            else { continue }
+            if grouped[key]?.contains(upper) == true {
+                continue
+            }
+            grouped[key, default: []].append(upper)
+        }
+        return grouped
+            .map { StackVowelUpperRule(key: Array($0.key), uppers: $0.value) }
+            .sorted { lhs, rhs in lhs.key.count > rhs.key.count }
+    }()
+
+    private static func vowelRuleUpperConsonants(
+        chars: [Character],
+        insertIndex: Int
+    ) -> (uppers: [Character], vowelStart: Int)? {
+        for rule in stackVowelUpperRules {
+            let length = rule.key.count
+            guard length <= insertIndex else { continue }
+            let start = insertIndex - length
+            var matches = true
+            for offset in 0..<length where chars[start + offset] != rule.key[offset] {
+                matches = false
+                break
+            }
+            if matches {
+                return (rule.uppers, start)
+            }
+        }
+        return nil
+    }
+
+    private static func stackUpperConsonant(fromVowelOutput output: String) -> Character? {
+        let scalars = Array(output.unicodeScalars)
+        guard !scalars.isEmpty else { return nil }
+        for i in stride(from: scalars.count - 1, through: 0, by: -1)
+        where scalars[i].value == 0x103A {
+            var j = i - 1
+            while j >= 0 {
+                let scalar = scalars[j]
+                if Myanmar.isConsonant(scalar) {
+                    return Character(scalar)
+                }
+                if Self.isMedialOrMarker(scalar) {
+                    j -= 1
+                    continue
+                }
+                break
+            }
+        }
+        return nil
+    }
+
+    private static func matchesRomanKey(
+        _ key: String,
+        chars: [Character],
+        at index: Int
+    ) -> Bool {
+        guard key.count <= chars.count - index else { return false }
+        var offset = index
+        for ch in key {
+            if chars[offset] != ch { return false }
+            offset += 1
+        }
+        return true
     }
 
     @inline(__always)

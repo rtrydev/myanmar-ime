@@ -45,7 +45,8 @@ extension BurmeseEngine {
     /// so keep them in the panel even if a stale or pruned LM charges a low
     /// OOV-like score. The comparator still decides their final order.
     internal func pruneGrammarByLmMargin(
-        _ candidates: [RankedGrammarCandidate]
+        _ candidates: [RankedGrammarCandidate],
+        preservingSurfaces: Set<String> = []
     ) -> [RankedGrammarCandidate] {
         guard candidates.count > 1 else { return candidates }
         var maxLm = -Double.infinity
@@ -55,7 +56,9 @@ extension BurmeseEngine {
         guard maxLm.isFinite else { return candidates }
         let floor = maxLm - lmPruneMargin
         let filtered = candidates.filter {
-            $0.lmLogProb >= floor || $0.candidate.score > Double($0.parserScore)
+            $0.lmLogProb >= floor
+                || $0.candidate.score > Double($0.parserScore)
+                || preservingSurfaces.contains($0.candidate.surface)
         }
         return filtered.isEmpty ? [candidates[0]] : filtered
     }

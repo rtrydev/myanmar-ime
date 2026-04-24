@@ -65,7 +65,37 @@ extension BurmeseEngine {
         }
         cacheLock.unlock()
 
-        let parses = parser.parseCandidates(prefix, maxResults: Self.frozenPrefixCandidatePool)
+        var parses = parser.parseCandidates(prefix, maxResults: Self.frozenPrefixCandidatePool)
+        var strictInferredStackOutputs: Set<String> = []
+        if let inferred = Self.inferImplicitStackMarkers(prefix) {
+            let existingOutputs = Set(parses.map(\.output))
+            let inferredParses = stackInferenceParses(inferred.input, isFullBuffer: true)
+            for parse in inferredParses where !Self.hasInterleavedLatin(parse.output) {
+                let adjustedCount = max(1, parse.syllableCount - inferred.insertions)
+                let adjustedLegality = parse.legalityScore > 0
+                    ? max(1, parse.legalityScore - 100 * inferred.insertions)
+                    : parse.legalityScore
+                let liberalPenalty = inferred.liberalInsertions
+                let adjusted = SyllableParse(
+                    output: parse.output,
+                    reading: parse.reading,
+                    aliasCost: parse.aliasCost + 10 * liberalPenalty,
+                    legalityScore: adjustedLegality,
+                    score: parse.score,
+                    structureCost: parse.structureCost + liberalPenalty,
+                    syllableCount: adjustedCount,
+                    rarityPenalty: parse.rarityPenalty
+                )
+                if liberalPenalty == 0,
+                   Self.surfaceHasOnlyNativeViramaStacks(adjusted.output) {
+                    strictInferredStackOutputs.insert(adjusted.output)
+                    strictInferredStackOutputs.insert(Self.correctAaShape(adjusted.output))
+                }
+                if !existingOutputs.contains(adjusted.output) {
+                    parses.append(adjusted)
+                }
+            }
+        }
         let branches: [FrozenPrefixBranch]
         if parses.isEmpty {
             branches = [FrozenPrefixBranch(
@@ -78,7 +108,7 @@ extension BurmeseEngine {
             // Dedup parses by output (different parses can render identically),
             // score each via the LM, sort high-to-low, keep top K.
             var seen: Set<String> = []
-            var scored: [(branch: FrozenPrefixBranch, isOOV: Bool)] = []
+            var scored: [(branch: FrozenPrefixBranch, isOOV: Bool, isStrictInferredStack: Bool)] = []
             let unkFloor = languageModel.unknownLogProb
             let oovEpsilon = 0.01
             for parse in parses where seen.insert(parse.output).inserted {
@@ -89,7 +119,7 @@ extension BurmeseEngine {
                     reading: parse.reading,
                     lmScore: lm,
                     contextWords: baseContext + [parse.output]
-                ), isOOV))
+                ), isOOV, strictInferredStackOutputs.contains(parse.output)))
             }
             // OOV-aware ordering (task 04): an in-vocab parse always beats an
             // OOV parse regardless of raw LM score. The LM `<unk>` floor is
@@ -103,6 +133,9 @@ extension BurmeseEngine {
             // shared floor.
             scored.sort { lhs, rhs in
                 if lhs.isOOV != rhs.isOOV { return !lhs.isOOV }
+                if lhs.isStrictInferredStack != rhs.isStrictInferredStack {
+                    return lhs.isStrictInferredStack
+                }
                 return lhs.branch.lmScore > rhs.branch.lmScore
             }
             // Drop branches whose LM score is far below the leader before

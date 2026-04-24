@@ -9,6 +9,7 @@ public enum BurmeseTestSuites {
         GrammarSuite.suite,
         ReverseRomanizerSuite.suite,
         ClusterAliasSuite.suite,
+        KinziInferenceSuite.suite,
         EngineSuite.suite,
         LexiconRankingSuite.suite,
         RankingSuite.suite,

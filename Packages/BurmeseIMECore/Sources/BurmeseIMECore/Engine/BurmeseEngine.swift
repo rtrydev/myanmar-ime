@@ -652,8 +652,8 @@ public final class BurmeseEngine: @unchecked Sendable {
         // lexicon source when the merge dedupes by surface. The
         // lexicon result is strictly better than anything inference
         // could add here, so bow out.
+        var strictInferredStackOutputs: Set<String> = []
         if !hasExactLexiconMatch,
-           !Self.hasStackedSurface(grammarParses),
            let inferred = Self.inferImplicitStackMarkers(effectiveParseInput) {
             let inferredParses = stackInferenceParses(
                 inferred.input,
@@ -661,8 +661,7 @@ public final class BurmeseEngine: @unchecked Sendable {
             )
             let existingOutputs = Set(grammarParses.map(\.output))
             for parse in inferredParses
-            where !Self.hasInterleavedLatin(parse.output)
-                && !existingOutputs.contains(parse.output) {
+            where !Self.hasInterleavedLatin(parse.output) {
                 // Neutralise the bookkeeping bump each injected `+` adds:
                 // the parser treats a soft-boundary transition as a new
                 // vowel slot, so it contributes +1 `syllableCount` and a
@@ -677,7 +676,7 @@ public final class BurmeseEngine: @unchecked Sendable {
                     ? max(1, parse.legalityScore - 100 * inferred.insertions)
                     : parse.legalityScore
                 let liberalPenalty = inferred.liberalInsertions
-                grammarParses.append(SyllableParse(
+                let adjusted = SyllableParse(
                     output: parse.output,
                     reading: parse.reading,
                     aliasCost: parse.aliasCost + 10 * liberalPenalty,
@@ -686,7 +685,15 @@ public final class BurmeseEngine: @unchecked Sendable {
                     structureCost: parse.structureCost + liberalPenalty,
                     syllableCount: adjustedCount,
                     rarityPenalty: parse.rarityPenalty
-                ))
+                )
+                if liberalPenalty == 0,
+                   Self.surfaceHasOnlyNativeViramaStacks(adjusted.output) {
+                    strictInferredStackOutputs.insert(adjusted.output)
+                    strictInferredStackOutputs.insert(Self.correctAaShape(adjusted.output))
+                }
+                if !existingOutputs.contains(adjusted.output) {
+                    grammarParses.append(adjusted)
+                }
             }
         }
         // `windowFallback` is set when the tail-only parse failed so we
@@ -1019,7 +1026,10 @@ public final class BurmeseEngine: @unchecked Sendable {
         grammarCandidates.sort { lhs, rhs in
             grammarCandidateIsBetter(lhs, than: rhs)
         }
-        grammarCandidates = pruneGrammarByLmMargin(grammarCandidates)
+        grammarCandidates = pruneGrammarByLmMargin(
+            grammarCandidates,
+            preservingSurfaces: strictInferredStackOutputs
+        )
         grammarCandidates = promoteAliasAlternate(grammarCandidates)
         // Ya-pin typing-intent promotion: if the bare user buffer is
         // the exact digit-stripped form of a ya-pin canonical reading
@@ -1146,6 +1156,17 @@ public final class BurmeseEngine: @unchecked Sendable {
         merged = Self.expandAaVariants(merged)
         merged = Self.sanitizeOrphanZwnj(merged)
         merged = Self.sanitizeMalformedMyanmarMarks(merged)
+
+        if !effectiveParseInput.contains("+"),
+           !effectiveWindowed,
+           !strictInferredStackOutputs.isEmpty,
+           let idx = Self.bestStrictInferredStackIndex(
+               in: merged,
+               strictInferredStackOutputs: strictInferredStackOutputs
+           ) {
+            let keeper = merged.remove(at: idx)
+            merged.insert(keeper, at: 0)
+        }
 
         // Pali loanword fallback: cross-class virama stacks like
         // ပဒ္မ / ဗန္ဒန / ဂန္ဒ are not produced by Grammar.isValidStack
@@ -1402,7 +1423,7 @@ public final class BurmeseEngine: @unchecked Sendable {
         )
     }
 
-    private func stackInferenceParses(
+    internal func stackInferenceParses(
         _ input: String,
         isFullBuffer: Bool
     ) -> [SyllableParse] {
@@ -1437,6 +1458,40 @@ public final class BurmeseEngine: @unchecked Sendable {
         }
         cacheLock.unlock()
         return parses
+    }
+
+    private static func bestStrictInferredStackIndex(
+        in candidates: [Candidate],
+        strictInferredStackOutputs: Set<String>
+    ) -> Int? {
+        var bestIndex: Int?
+        for (idx, candidate) in candidates.enumerated()
+        where strictInferredStackOutputs.contains(candidate.surface) {
+            guard let current = bestIndex else {
+                bestIndex = idx
+                continue
+            }
+            let currentCandidate = candidates[current]
+            let candidateHasKinzi = surfaceContainsKinzi(candidate.surface)
+            let currentHasKinzi = surfaceContainsKinzi(currentCandidate.surface)
+            if candidate.score > currentCandidate.score
+                || (candidate.score == currentCandidate.score && candidateHasKinzi && !currentHasKinzi) {
+                bestIndex = idx
+            }
+        }
+        return bestIndex
+    }
+
+    private static func surfaceContainsKinzi(_ surface: String) -> Bool {
+        let scalars = surface.unicodeScalars.map(\.value)
+        guard scalars.count >= 3 else { return false }
+        for idx in 0...(scalars.count - 3)
+        where scalars[idx] == 0x1004
+            && scalars[idx + 1] == 0x103A
+            && scalars[idx + 2] == 0x1039 {
+            return true
+        }
+        return false
     }
 
     /// Commit the currently selected candidate.
