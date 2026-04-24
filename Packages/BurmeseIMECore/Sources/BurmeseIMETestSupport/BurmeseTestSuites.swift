@@ -10,6 +10,7 @@ public enum BurmeseTestSuites {
         ReverseRomanizerSuite.suite,
         ClusterAliasSuite.suite,
         KinziInferenceSuite.suite,
+        MidBufferStackInferenceSuite.suite,
         AnchorStabilitySuite.suite,
         LoanwordRomanizationSuite.suite,
         ToneVariantMedialConsistencySuite.suite,

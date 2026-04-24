@@ -269,7 +269,27 @@ extension BurmeseEngine {
             // (ဗြဟ္မ), so the medial onset does not disqualify the site.
             // Native words with medial onsets do not use `h` as a coda,
             // so this narrowing is safe.
-            let onsetStart = chars[..<lowerIndex].lastIndex(of: "+").map { $0 + 1 } ?? 0
+            //
+            // Locating the *current* onset's start matters here: when
+            // there is no `+` in the buffer, falling back to the buffer
+            // head causes the medial scan to walk through every prior
+            // syllable and reject the site whenever any earlier vowel
+            // contained a `y`/`r`/`w` letter (`ar`, `aw`, `ay`, …) —
+            // which kills mid-buffer kinzi for almost every natural
+            // sentence. For strict-valid (same-class) sites use the
+            // current syllable's onset only; for liberal-only
+            // (cross-class) sites stay with the conservative
+            // whole-prefix scan so this fix doesn't accidentally
+            // over-generate cross-class stacks (task 04 owns that).
+            let onsetStart: Int
+            if inferred.isLiberal {
+                onsetStart = chars[..<lowerIndex].lastIndex(of: "+").map { $0 + 1 } ?? 0
+            } else {
+                onsetStart = currentOnsetStart(
+                    chars: chars,
+                    vowelStart: inferred.vowelStart
+                )
+            }
             let hasSimpleOnset = Self.hasSimplePaliStackOnset(
                 chars: chars,
                 onsetStart: onsetStart,
@@ -291,6 +311,37 @@ extension BurmeseEngine {
             result.insert("+", at: si)
         }
         return (result, insertAt.count, liberalInsertions)
+    }
+
+    /// Locate the start of the current syllable's onset for inference's
+    /// medial-heaviness check. The onset begins right after either an
+    /// explicit `+` separator or the end of the most recently completed
+    /// vowel reading. The vowel ends at its true vowel letter (`a`, `e`,
+    /// `i`, `o`, `u`); trailing vowel-extender letters (`r`, `w`, `y`,
+    /// `n`, `g`) that happen to be part of `ar`/`aw`/`ay`/`an`/`ang`
+    /// readings are absorbed too so they do not get mis-classified as
+    /// the next onset's leading consonant.
+    private static func currentOnsetStart(
+        chars: [Character],
+        vowelStart: Int
+    ) -> Int {
+        if let plusIdx = chars[..<vowelStart].lastIndex(of: "+") {
+            return plusIdx + 1
+        }
+        let trueVowelLetters: Set<Character> = ["a", "e", "i", "o", "u"]
+        let vowelExtenders: Set<Character> = ["r", "w", "y", "n", "g"]
+        guard let lastVowel = chars[..<vowelStart].lastIndex(where: {
+            trueVowelLetters.contains($0)
+        }) else {
+            return 0
+        }
+        var vowelEnd = lastVowel
+        var i = lastVowel + 1
+        while i < vowelStart, vowelExtenders.contains(chars[i]) {
+            vowelEnd = i
+            i += 1
+        }
+        return vowelEnd + 1
     }
 
     private static func hasSimplePaliStackOnset(

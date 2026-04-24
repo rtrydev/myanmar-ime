@@ -101,4 +101,8 @@ final class ComprehensiveRankingXCTests: XCTestCase {
 final class LexiconLMDriftXCTests: XCTestCase {
     func testAll() { runSuite(LexiconLMDriftSuite.suite, xctest: self) }
 }
+
+final class MidBufferStackInferenceXCTests: XCTestCase {
+    func testAll() { runSuite(MidBufferStackInferenceSuite.suite, xctest: self) }
+}
 #endif
