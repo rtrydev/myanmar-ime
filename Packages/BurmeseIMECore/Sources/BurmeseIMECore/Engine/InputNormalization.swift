@@ -198,16 +198,17 @@ extension BurmeseEngine {
     /// detectable site.
     ///
     /// A site is
-    /// `<simple-onset> <vowel-letter> <coda-letter> <consonant-letter>`:
-    /// the coda can be a Pali stack upper (`n`, `m`, `t`, `d`, `p`, `b`,
-    /// `k`, `g`, `s`, `r`, `l`), and the following consonant can become
-    /// the lower. A candidate site is inserted only when both letters map
-    /// to stackable Myanmar consonants. Inference is gated on the
-    /// preceding onset being "simple" — no `y` / `r` / `w` medial letters
-    /// between the first consonant and the vowel. Modern polysyllable
-    /// words with medial-heavy onsets (e.g. `kwyantaw` → ကျွန်တော်)
-    /// conventionally spell the nasal coda with asat, not a stack, so
-    /// inferring one there would pick the wrong form.
+    /// `<simple-onset> <vowel-letter> <coda-letter> <consonant-letter>`,
+    /// or the initial-`a` variant used by onsetless Pali words like
+    /// `atta`: the coda can be a Pali stack upper (`n`, `m`, `t`, `d`,
+    /// `p`, `b`, `k`, `g`, `s`, `r`, `l`), and the following consonant
+    /// can become the lower. A candidate site is inserted only when both
+    /// letters map to stackable Myanmar consonants. Inference is gated on
+    /// the preceding onset being "simple" — no `y` / `r` / `w` medial
+    /// letters between the first consonant and the vowel. Modern
+    /// polysyllable words with medial-heavy onsets (e.g. `kwyantaw` →
+    /// ကျွန်တော်) conventionally spell the nasal coda with asat, not a
+    /// stack, so inferring one there would pick the wrong form.
     ///
     /// The inserted `+` is then resolved by the parser's
     /// `softBoundaryContext` gate: same-class stacks materialise as
@@ -274,6 +275,12 @@ extension BurmeseEngine {
             // least one medial. `h` is ambiguous (onset digraph `th`
             // vs medial `hm`) so it is excluded from the medial set.
             let onsetStart = chars[..<i].lastIndex(of: "+").map { $0 + 1 } ?? 0
+            let hasSimpleOnset = Self.hasSimplePaliStackOnset(
+                chars: chars,
+                onsetStart: onsetStart,
+                vowelIndex: i - 1
+            )
+            guard hasSimpleOnset else { continue }
             let onsetHasMedial = onsetStart + 1 < i - 1
                 && (onsetStart + 1..<i - 1).contains(where: { medialLetters.contains(chars[$0]) })
             guard !onsetHasMedial else { continue }
@@ -287,6 +294,19 @@ extension BurmeseEngine {
             result.insert("+", at: si)
         }
         return (result, insertAt.count, liberalInsertions)
+    }
+
+    private static func hasSimplePaliStackOnset(
+        chars: [Character],
+        onsetStart: Int,
+        vowelIndex: Int
+    ) -> Bool {
+        if onsetStart == vowelIndex {
+            return chars[vowelIndex] == "a"
+        }
+        return chars[onsetStart..<vowelIndex].contains { ch in
+            ch.isLetter && !isPaliStackVowelLetter(ch)
+        }
     }
 
     private static func inferredPaliStackIsLiberal(

@@ -67,8 +67,9 @@ public final class BurmeseEngine: @unchecked Sendable {
     /// top pick plus a small set of medial alternates. A narrower beam
     /// here is the single biggest lever on the `long` / `incremental`
     /// regression that task 09 introduced — the second parse is what
-    /// ~doubled per-keystroke cost on kinzi-bearing buffers.
-    private static let stackInferenceBudget = 20
+    /// ~doubled per-keystroke cost on kinzi-bearing buffers. The merge
+    /// only needs the top stacked pick plus its nearest alternate.
+    private static let stackInferenceBudget = 2
 
     /// Maximum natural-log-probability gap a candidate may trail the best
     /// LM-ranked candidate before being dropped. 8 ≈ factor ~3000×; well
@@ -119,6 +120,15 @@ public final class BurmeseEngine: @unchecked Sendable {
     /// at this size is cheaper than dictionary overhead.
     internal var prefixCache: [FrozenPrefixCache] = []
     internal let cacheLock = NSLock()
+
+    private struct StackInferenceParseCache {
+        let input: String
+        let isFullBuffer: Bool
+        let parses: [SyllableParse]
+    }
+
+    private var stackInferenceParseCache: [StackInferenceParseCache] = []
+    private static let maxStackInferenceParseCache = 16
 
     /// History of anchors (checkpoints) ordered by `normalized.count`.
     /// When the latest/deepest anchor's tail can't parse standalone
@@ -224,7 +234,7 @@ public final class BurmeseEngine: @unchecked Sendable {
         // of the earlier "garbage variants past the threshold" bug — the
         // split now snaps back to the nearest position where the prefix
         // parses fully legally on its own, so it never cuts mid-syllable.
-        self.compositionWindowSize = 20
+        self.compositionWindowSize = 18
     }
 
     private static func grammarCandidateBudget(for normalizedInput: String) -> Int {
@@ -240,6 +250,7 @@ public final class BurmeseEngine: @unchecked Sendable {
         guard !buffer.isEmpty else {
             cacheLock.lock()
             anchorHistory.removeAll()
+            stackInferenceParseCache.removeAll()
             lastHistoryKey = ""
             cacheLock.unlock()
             return CompositionState(committedContext: context)
@@ -631,11 +642,9 @@ public final class BurmeseEngine: @unchecked Sendable {
         if !hasExactLexiconMatch,
            !Self.hasStackedSurface(grammarParses),
            let inferred = Self.inferImplicitStackMarkers(effectiveParseInput) {
-            let inferredParses = parser.parseCandidates(
+            let inferredParses = stackInferenceParses(
                 inferred.input,
-                maxResults: Self.stackInferenceBudget,
-                isFullBuffer: !effectiveWindowed,
-                allowLiberalStacks: true
+                isFullBuffer: !effectiveWindowed
             )
             let existingOutputs = Set(grammarParses.map(\.output))
             for parse in inferredParses
@@ -1378,6 +1387,43 @@ public final class BurmeseEngine: @unchecked Sendable {
             candidates: finalCandidates,
             committedContext: context
         )
+    }
+
+    private func stackInferenceParses(
+        _ input: String,
+        isFullBuffer: Bool
+    ) -> [SyllableParse] {
+        cacheLock.lock()
+        if let idx = stackInferenceParseCache.firstIndex(where: {
+            $0.input == input && $0.isFullBuffer == isFullBuffer
+        }) {
+            let entry = stackInferenceParseCache.remove(at: idx)
+            stackInferenceParseCache.insert(entry, at: 0)
+            cacheLock.unlock()
+            return entry.parses
+        }
+        cacheLock.unlock()
+
+        let parses = parser.parseCandidates(
+            input,
+            maxResults: Self.stackInferenceBudget,
+            isFullBuffer: isFullBuffer,
+            allowLiberalStacks: true
+        )
+
+        cacheLock.lock()
+        stackInferenceParseCache.insert(StackInferenceParseCache(
+            input: input,
+            isFullBuffer: isFullBuffer,
+            parses: parses
+        ), at: 0)
+        if stackInferenceParseCache.count > Self.maxStackInferenceParseCache {
+            stackInferenceParseCache.removeLast(
+                stackInferenceParseCache.count - Self.maxStackInferenceParseCache
+            )
+        }
+        cacheLock.unlock()
+        return parses
     }
 
     /// Commit the currently selected candidate.

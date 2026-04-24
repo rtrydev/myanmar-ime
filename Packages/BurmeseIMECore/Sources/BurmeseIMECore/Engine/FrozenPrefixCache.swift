@@ -193,12 +193,31 @@ extension BurmeseEngine {
     /// own, but if the full buffer has `...min<C>`, cutting before the `n`
     /// forces the prefix to render `မီ` and the tail to render a fresh `င`,
     /// corrupting repeated words like `mingalarpar`.
+    ///
+    /// Finally, reject boundaries inside roman onset digraphs / cluster
+    /// aliases. `...s` parses legally as စ, but when followed by `h` the
+    /// intended tail onset may be `sh` → ရှ; freezing after `s` would make
+    /// that cluster unreachable.
     internal static func isUnsafeFrozenSplit(chars: [Character], split: Int) -> Bool {
         guard split > 0, split < chars.count else { return false }
         if chars[split - 1] == "a", chars[split].isLetter {
             return true
         }
+        if isOnsetDigraphSplit(chars: chars, split: split) {
+            return true
+        }
         return isImplicitNCodaSplit(chars: chars, split: split)
+    }
+
+    private static func isOnsetDigraphSplit(chars: [Character], split: Int) -> Bool {
+        switch (chars[split - 1], chars[split]) {
+        case ("c", "h"), ("d", "h"), ("g", "h"), ("g", "y"),
+             ("k", "h"), ("l", "l"), ("p", "h"), ("s", "h"),
+             ("t", "h"):
+            return true
+        default:
+            return false
+        }
     }
 
     private static func isImplicitNCodaSplit(chars: [Character], split: Int) -> Bool {

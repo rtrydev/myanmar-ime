@@ -815,6 +815,17 @@ public enum RankingSuite {
                 )
             })
         }
+        cases.append(TestCase("task09_noStack_onsetlessNonA_idsvlye") { ctx in
+            let top = BurmeseEngine().update(buffer: "idsvlye", context: [])
+                .candidates
+                .first?
+                .surface ?? ""
+            ctx.assertFalse(
+                top.unicodeScalars.contains { $0.value == 0x1039 },
+                "task09_noStack_onsetlessNonA_idsvlye",
+                detail: "initial non-a vowel must not trigger implicit Pali stack; got \(top)"
+            )
+        })
 
         // Explicit `+` disambiguator must continue to produce the same
         // stacked top candidate as before. Regression guard for the fix.
@@ -1086,6 +1097,7 @@ public enum RankingSuite {
             })
         }
         for (buffer, expectedSurface) in [
+            ("atta",     "\u{1021}\u{1010}\u{1039}\u{1010}"),                      // အတ္တ
             ("padmaya",  "\u{1015}\u{1012}\u{1039}\u{1019}\u{101A}"),              // ပဒ္မယ
             ("vandanar", "\u{1017}\u{1014}\u{1039}\u{1012}\u{1014}\u{102C}"),      // ဗန္ဒနာ
             ("dhamma",   "\u{1013}\u{1019}\u{1039}\u{1019}"),                      // ဓမ္မ

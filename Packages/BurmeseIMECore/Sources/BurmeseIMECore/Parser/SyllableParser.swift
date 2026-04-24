@@ -655,10 +655,11 @@ public final class SyllableParser: Sendable {
         guard !normalized.isEmpty, maxResults > 0 else { return (0, []) }
 
         let chars = Array(normalized)
-        let finalizationLimit = chars.count > 20
-            ? max(maxResults, 32)
-            : max(maxResults, 4)
-        let beamWidth = max(finalizationLimit * 16, 128)
+        let longInput = chars.count > 20
+        let finalizationLimit = max(maxResults, 4)
+        let beamWidth = longInput
+            ? max(finalizationLimit * 4, 32)
+            : max(finalizationLimit * 16, 128)
         let onsetMatchesByStart = precomputeOnsetMatches(chars)
         let vowelMatchesByStart = precomputeVowelMatches(chars)
         var (arena, dp) = runDP(
