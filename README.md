@@ -261,8 +261,19 @@ myanmar-ime/
 ├── Packages/BurmeseIMECore/              # Swift Package (core library)
 │   ├── Sources/
 │   │   ├── BurmeseIMECore/
-│   │   │   ├── BurmeseEngine.swift            # Orchestration: update(buffer:) → CompositionState
-│   │   │   ├── SyllableParser.swift           # N-best Viterbi DP parser
+│   │   │   ├── Engine/                        # BurmeseEngine, split by topic:
+│   │   │   │   ├── BurmeseEngine.swift             #   class decl + update()/commit()/recordSelection()/cancel()
+│   │   │   │   ├── CandidateRanking.swift          #   comparators, composite score, alias/ya-pin promotion, LM pruning
+│   │   │   │   ├── FrozenPrefixCache.swift         #   prefix cache, anchor/LM-score cache, syllable-safe split finder
+│   │   │   │   ├── PunctuationHandling.swift       #   mapped-punct splits, creaky-tone, leading-literal extraction
+│   │   │   │   ├── MidBufferDigits.swift           #   digit extraction/splice, tail letter-run composition
+│   │   │   │   ├── InputNormalization.swift        #   parser input prep, stack inference, acceptable-parse checks
+│   │   │   │   └── SurfaceSanitizers.swift         #   aa-shape correction, orphan ZWNJ, Pali/bare-vowel overrides
+│   │   │   ├── Parser/                        # SyllableParser, split by topic:
+│   │   │   │   ├── SyllableParser.swift            #   class decl + init + public API + nested DP types
+│   │   │   │   ├── NBestDP.swift                   #   runDP hot loop, virama/soft-boundary context, DP scoring
+│   │   │   │   ├── Matching.swift                  #   onset/vowel trie walks + medial-order canonicalizer
+│   │   │   │   └── Finalization.swift              #   materialize, output post-processing, top-K ranking
 │   │   │   ├── Grammar.swift                  # Orthographic legality tables
 │   │   │   ├── Romanization.swift             # Consonant/medial/vowel mappings + cluster aliases
 │   │   │   ├── ReverseRomanizer.swift         # Myanmar → romanization (tests + lexicon building)

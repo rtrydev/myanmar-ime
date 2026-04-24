@@ -7,7 +7,8 @@ for user-facing documentation.
 
 ```
 Packages/BurmeseIMECore/   Swift Package — pure conversion engine, no UI
-  Sources/BurmeseIMECore/        Engine source
+  Sources/BurmeseIMECore/        Engine source (see Engine/ for the main
+                                 orchestrator split across topic files)
   Sources/BurmeseIMETestSupport/ Shared test framework + suites (single source)
   Sources/LexiconBuilder/        TSV → SQLite lexicon compiler
   Sources/BurmeseBench/          Perf benchmark + regression check
@@ -261,7 +262,9 @@ this:
 - **Literal tail (intra-run):** `splitComposablePrefix` peels
   non-composable trailing chars (digits, punctuation, symbols) off the
   buffer. The composable prefix converts to Myanmar; the literal tail is
-  re-appended verbatim to each candidate surface (see [`BurmeseEngine.swift:986`](Packages/BurmeseIMECore/Sources/BurmeseIMECore/BurmeseEngine.swift#L986)).
+  re-appended verbatim to each candidate surface (see the `hasAffixes`
+  branch at the end of `update(buffer:context:)` in
+  [`Engine/BurmeseEngine.swift`](Packages/BurmeseIMECore/Sources/BurmeseIMECore/Engine/BurmeseEngine.swift)).
   So `thar.` commits as `သာ.` without breaking composition.
 - **Raw passthrough (inter-run):** when the composable prefix has no
   legal Burmese parse, the engine emits the raw buffer verbatim. The IMK
@@ -313,11 +316,14 @@ that their output will only surface when nothing else does.
 
 - **`BurmeseEngine`** — orchestrates composition. Stateful only for its
   frozen-prefix cache (see *Performance* below). Ranking order: grammar
-  legality → alias cost → parser score → lexicon frequency.
+  legality → alias cost → parser score → lexicon frequency. The class
+  is split across `Engine/BurmeseEngine.swift` plus six topic-focused
+  extension files under `Engine/` (see *Engine file layout* below).
 - **`SyllableParser`** — pure, `Sendable`. N-best Viterbi DP. Each DP
   transition matches a precomputed *onset* (consonant + optional medials)
   optionally followed by a *vowel*. Beam width defaults to
-  `max(maxResults * 16, 64)`.
+  `max(maxResults * 16, 64)`. The class is split across four files under
+  `Parser/` (see *Parser file layout* below).
 - **`Grammar`** — static orthographic legality tables
   (`canConsonantTakeMedial`, `validateSyllable`, `requiresTallAa`).
   Illegal syllables get a huge score penalty instead of hard rejection,
@@ -328,6 +334,81 @@ that their output will only surface when nothing else does.
   `EmptyCandidateStore` is the default for tests. Returns
   frequency-ranked lexicon candidates for a reading prefix.
 - **`ReverseRomanizer`** — Myanmar → Roman for tests/debugging.
+
+### Engine file layout
+
+`BurmeseEngine` is defined in `Engine/BurmeseEngine.swift` (class decl,
+stored properties, the `update(buffer:context:)` pipeline, and the
+`commit` / `recordSelection` / `cancel` entry points). All other
+behaviour lives in topic-focused files in the same folder — each one
+declares an `extension BurmeseEngine` that adds methods and (when
+applicable) nested helper types to the same class:
+
+- `CandidateRanking.swift` — `RankedGrammarCandidate` /
+  `RankedLexiconCandidate`, the two comparators, composite-score
+  helper, `promoteAliasAlternate`, `promoteYapinForExactBareReading`,
+  `pruneByLmMargin` / `pruneGrammarByLmMargin`,
+  `isCodaOnlySingleScalarDifference`, `approximateSyllableCount`.
+- `FrozenPrefixCache.swift` — `FrozenPrefixBranch` / `FrozenPrefixCache`
+  / `PrefixAnchor` / `LMScoreKey`, `renderFrozenPrefixBranches`,
+  `scoreSurfaceCached`, `stableCachedPrefixLength`,
+  `findSyllableSafeSplit`, `isUnsafeFrozenSplit`.
+- `PunctuationHandling.swift` — `EmbeddedPunctSplit`, mapped-
+  punctuation handling (`mapPunctuation`, `splitAtLastEmbeddedMappedPunct`,
+  `renderFrozenPunctSegments`, `renderFrozenSegment`), trailing-punct
+  stripping, creaky-tone detection, leading-literal split.
+- `MidBufferDigits.swift` — mid-buffer digit extraction and splicing,
+  tail letter-run composition (`composeLetterRunsInTail`,
+  `composedLetterRunSurface`, `tailFallbackOutputIsClean`), Arabic↔
+  Myanmar digit conversion, leading-digit splitting.
+- `InputNormalization.swift` — `normalizeForParser`,
+  `collapseConnectorRuns`, `splitComposablePrefix`, clean-virama / stack
+  inference (`hasOnlyCleanViramaStacks`, `hasStackedSurface`,
+  `hasTripleViramaStack`, `inferImplicitStackMarkers`, `dropKinziPlus`),
+  `isAcceptableParse`, ZWSP / scalar prefix helpers, ya-pin/ya-yit
+  normalization.
+- `SurfaceSanitizers.swift` — aa-shape correction (`expandAaVariants`,
+  `correctAaShape`), orphan-ZWNJ filter (`sanitizeOrphanZwnj`,
+  `promoteOrphanZwnjToImplicitA`), polluted-surface guards, Pali-stack
+  / bare-vowel overrides.
+
+Private members referenced from other files in the folder are declared
+`internal` so the split compiles without changing visibility toward
+external callers — test targets only see the unchanged `public`
+surface.
+
+### Parser file layout
+
+`SyllableParser` follows the same pattern under `Parser/`:
+
+- `SyllableParser.swift` — class declaration, nested DP types
+  (`MatchRef`, `ParseState`, `OnsetEntry`, `VowelMatchEntry`,
+  `AsciiTrieTable`), stored properties, `init` (rule-table construction,
+  trie flattening, legality precompute), the `buildTrie` generic helper,
+  and the public API surface (`normalizeForParser`, `parse`,
+  `parseCandidates`, `syllableArcs`, `parseLongestAcceptablePrefix`).
+- `NBestDP.swift` — `DPBucket`, `packPair`, `nBestParse`, the big
+  `runDP` DP loop, `ViramaContext` / `SoftBoundaryContext` enums and
+  their context-derivation helpers, DP-internal scoring
+  (`scoreMatch`, `insertState`, `pruneBucket`, `isBetterDP`). This is
+  the hot path.
+- `Matching.swift` — onset/vowel trie walks (`matchOnsets`,
+  `matchVowels`), medial-order canonicalizer
+  (`canonicalizeOnsetProbes`), per-position precompute
+  (`precomputeOnsetMatches`, `precomputeVowelMatches`), plus the
+  canonicalizer's static lookup tables.
+- `Finalization.swift` — `MaterializedState`, `finalizeStates`,
+  scalar-level output post-processing
+  (`stripSpuriousAsatBeforeVirama`, `canonicalizeMedialOrder`,
+  `adjustLeadingVowel`, `remapEmptyToInherent`, `scanOutputLegality`),
+  rarity penalty, numeric-marker placement map, the `materialize`
+  backward walk, and the two materialized-state ranking comparators
+  used for top-K selection.
+
+Same access-level rule as `Engine/`: cross-file members are `internal`,
+everything else stays `private`. The `@inline(__always)` attributes on
+`packPair` and `isBetterDP` are preserved — compiler inlining does not
+depend on file location within a module.
 
 ### Performance: sliding window
 
@@ -406,7 +487,7 @@ The numeric suffixes appear only inside:
 - SQLite `reading_alias_index.alias_reading` rows compiled from
   reverse-romanized readings
 
-Enforcement: [`BurmeseEngine.splitComposablePrefix`](Packages/BurmeseIMECore/Sources/BurmeseIMECore/BurmeseEngine.swift)
+Enforcement: [`BurmeseEngine.splitComposablePrefix`](Packages/BurmeseIMECore/Sources/BurmeseIMECore/Engine/InputNormalization.swift)
 breaks the composable run on any ASCII digit, and `normalizeForParser`
 filters digits before they can reach the parser. The user→parser path
 never interprets a digit as a variant selector.
