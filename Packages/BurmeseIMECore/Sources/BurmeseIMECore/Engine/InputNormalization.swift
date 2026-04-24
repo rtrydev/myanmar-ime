@@ -321,6 +321,12 @@ extension BurmeseEngine {
         return false
     }
 
+    internal static func containsAsciiSurfaceScalar(_ output: String) -> Bool {
+        output.unicodeScalars.contains {
+            $0.value >= 0x21 && $0.value <= 0x7E
+        }
+    }
+
     internal static func isAcceptableParse(_ parse: SyllableParse) -> Bool {
         guard parse.legalityScore > 0 || hasOnlyCleanViramaStacks(parse) else { return false }
         guard !hasInterleavedLatin(parse.output) else { return false }

@@ -40,6 +40,20 @@ public enum EngineSuite {
         SyllableParser().parse(input).first?.output ?? ""
     }
 
+    private static func hasAsciiSurfaceScalar(_ surface: String) -> Bool {
+        surface.unicodeScalars.contains { scalar in
+            scalar.value >= 0x21 && scalar.value <= 0x7E
+        }
+    }
+
+    private static func hasOnlyMyanmarOrZeroWidthScalars(_ surface: String) -> Bool {
+        !surface.isEmpty && surface.unicodeScalars.allSatisfy { scalar in
+            (scalar.value >= 0x1000 && scalar.value <= 0x109F)
+                || scalar.value == 0x200B
+                || scalar.value == 0x200C
+        }
+    }
+
     public static let suite = TestSuite(name: "Engine", cases: [
 
         // MARK: - Basic update/commit cycle
@@ -940,6 +954,58 @@ public enum EngineSuite {
             }
             ctx.assertFalse(leaked, detail: "min+galarpar top must remain ASCII-free; got '\(top)'")
             ctx.assertFalse(top.isEmpty, detail: "min+galarpar must still produce a candidate")
+        },
+
+        // MARK: - Right-shrunk pure-letter tails (task 03)
+
+        TestCase("task03_rightShrunkComposableBuffersStayMyanmarOnly") { ctx in
+            let engine = BurmeseEngine()
+            for buffer in ["aw", "awwwww", "bwwwz", "kyawzz", "nya:n", "nya'n", "ayo:n"] {
+                let state = engine.update(buffer: buffer, context: [])
+                ctx.assertFalse(state.candidates.isEmpty,
+                                "task03_nonEmpty_\(buffer)",
+                                detail: "fully composable buffer produced no candidates")
+                for candidate in state.candidates {
+                    ctx.assertTrue(
+                        hasOnlyMyanmarOrZeroWidthScalars(candidate.surface),
+                        "task03_myanmarOnly_\(buffer)",
+                        detail: "\(buffer) leaked surface '\(candidate.surface)' from \(state.candidates.map(\.surface))"
+                    )
+                }
+            }
+        },
+
+        TestCase("task03_literalTailsStayLiteral") { ctx in
+            let engine = BurmeseEngine()
+            for (buffer, suffix) in [
+                ("thar english", " english"),
+                ("thar.", "."),
+                ("thar123", "၁၂၃"),
+            ] {
+                let top = engine.update(buffer: buffer, context: []).candidates.first?.surface ?? ""
+                ctx.assertTrue(
+                    top.hasSuffix(suffix),
+                    "task03_literalTail_\(buffer)",
+                    detail: "\(buffer) expected suffix '\(suffix)', got '\(top)'"
+                )
+            }
+        },
+
+        TestCase("task03_cleanComposedTailsUnchanged") { ctx in
+            let engine = BurmeseEngine()
+            for (buffer, expected) in [
+                ("thark", "\u{101E}\u{102C}\u{1000}"),
+                ("khmr", "\u{1001}\u{1019}\u{101B}"),
+                ("pzzzz", "\u{1015}\u{1008}\u{1008}"),
+            ] {
+                let top = engine.update(buffer: buffer, context: []).candidates.first?.surface ?? ""
+                ctx.assertEqual(top, expected, "task03_cleanTail_\(buffer)")
+                ctx.assertFalse(
+                    hasAsciiSurfaceScalar(top),
+                    "task03_cleanTailNoAscii_\(buffer)",
+                    detail: "\(buffer) leaked '\(top)'"
+                )
+            }
         },
 
         // MARK: - Disambiguation UX (task 07)

@@ -214,7 +214,12 @@ extension BurmeseEngine {
         // patterns — otherwise we'd silently splice broken Myanmar in
         // place of the original ASCII run.
         for parse in parses {
+            if let promoted = Self.promoteOrphanZwnjToImplicitA(parse) {
+                let s = Self.correctAaShape(promoted.output)
+                if Self.tailFallbackOutputIsClean(s) { return s }
+            }
             let s = Self.correctAaShape(parse.output)
+            if Self.isOrphanZwnjMark(s) { continue }
             if Self.tailFallbackOutputIsClean(s) { return s }
         }
         return ""

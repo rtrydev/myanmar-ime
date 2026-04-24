@@ -442,24 +442,25 @@ public final class BurmeseEngine: @unchecked Sendable {
         let mappedEffectiveTail = burmesePunctuationEnabled
             ? Self.mapPunctuation(rawEffectiveTail)
             : rawEffectiveTail
-        // When the tail begins with an ASCII digit, digits act as transparent
-        // literal separators: letter runs between them still compose. Other
-        // non-composing chars (punctuation) remain hard boundaries that keep
-        // following letters literal.
-        //
-        // When the right-shrink probe couldn't legalise the buffer's
-        // composable suffix (`droppedTail` non-empty) *and* the user typed
-        // an explicit separator (`+` or `.`), re-compose any letter runs
-        // in the tail as a best-effort fallback so the surface doesn't
-        // expose raw ASCII for letters the user expected to see converted.
-        // Pure letter tails without explicit separators pass through raw:
-        // the user hasn't signalled a boundary, and composing every growth
-        // step would reinterpret earlier letters and break anchor
-        // stability as the buffer grows.
+        // When the right-shrink probe drops composing characters, re-run
+        // the tail through the single-best fallback composer before it is
+        // concatenated onto every surface. Literal tails that started after
+        // a non-composing boundary still pass through unchanged.
         let effectiveTail: String
-        let tailHasSeparator = rawEffectiveTail.contains("+") || rawEffectiveTail.contains(".")
+        let droppedTailHasComposingChars = droppedTail.contains {
+            Romanization.composingCharacters.contains($0)
+        }
+        let droppedTailHasComposingPunctuation = droppedTail.contains {
+            $0 == "+" || $0 == "*" || $0 == "'" || $0 == ":" || $0 == "."
+        }
+        let droppedTailHasAsciiLetters = droppedTail.unicodeScalars.contains {
+            $0.value >= 0x61 && $0.value <= 0x7A
+        }
+        let shouldComposeDroppedTail = !droppedTail.isEmpty
+            && droppedTailHasComposingChars
+            && (droppedTail.count <= 6 || droppedTailHasComposingPunctuation)
         if tailStartsWithDigit(literalTail, dropped: droppedTail)
-            || (!droppedTail.isEmpty && tailHasSeparator) {
+            || shouldComposeDroppedTail {
             effectiveTail = composeLetterRunsInTail(mappedEffectiveTail)
         } else {
             effectiveTail = mappedEffectiveTail
@@ -1369,10 +1370,24 @@ public final class BurmeseEngine: @unchecked Sendable {
             mergedWithAffixes = expanded
         }
 
+        let sanitizedWithAffixes = Self.sanitizeMalformedMyanmarMarks(mergedWithAffixes)
+        let finalCandidates: [Candidate]
+        if leadingLiteral.isEmpty,
+           digitPrefix.isEmpty,
+           literalTail.isEmpty,
+           droppedTailHasAsciiLetters {
+            finalCandidates = sanitizedWithAffixes.filter {
+                !Self.containsAsciiSurfaceScalar($0.surface)
+                    && SyllableParser.scanOutputLegality($0.surface)
+            }
+        } else {
+            finalCandidates = sanitizedWithAffixes
+        }
+
         return CompositionState(
             rawBuffer: displayBuffer,
             selectedCandidateIndex: 0,
-            candidates: mergedWithAffixes,
+            candidates: finalCandidates,
             committedContext: context
         )
     }
