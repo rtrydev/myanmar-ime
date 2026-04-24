@@ -243,6 +243,14 @@ public enum Grammar {
         return upperClass == lowerClass
     }
 
+    /// Pali/Sanskrit loanwords can stack consonants across modern Burmese
+    /// phonetic classes. Keep the public/default parser strict, but allow
+    /// the engine's explicit loanword inference pass to ask for this relaxed
+    /// check and rank the resulting candidates lower.
+    public static func isValidStackLiberal(upper: Character, lower: Character) -> Bool {
+        stackableConsonants.contains(upper) && stackableConsonants.contains(lower)
+    }
+
     /// Kinzi is formed by: consonant + ္ + င  (where the first consonant becomes superscript).
     /// In practice, kinzi is almost always င + ္ + next consonant, written as
     /// the next consonant with a superscript င.

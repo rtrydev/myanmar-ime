@@ -607,13 +607,12 @@ public final class BurmeseEngine: @unchecked Sendable {
                 grammarParses.append(promoted)
             }
         }
-        // Stack inference (task 09): when the buffer carries no explicit
-        // `+` but has an orthographic kinzi / virama-stack site
-        // (`<V>n<C>`), re-parse with the inferred `+` injected and merge
-        // the resulting parses so the stacked surface enters the
-        // ranking pool alongside the unstacked one. The parser's
-        // soft-boundary gate turns cross-class sites into plain
-        // syllable breaks, so over-insertion is safe.
+        // Stack inference (tasks 09/05): when the buffer carries no
+        // explicit `+` but has an orthographic kinzi / Pali virama-stack
+        // site (`<V><coda><C>`), re-parse with the inferred `+` injected
+        // and merge the resulting parses so the stacked surface enters the
+        // ranking pool alongside the unstacked one. The inference pass uses
+        // liberal stack validation; regular parsing remains strict.
         //
         // Each injected `+` materialises as a DP vowelOnly transition
         // that bumps `syllableCount` by 1 even when the site resolves
@@ -635,7 +634,8 @@ public final class BurmeseEngine: @unchecked Sendable {
             let inferredParses = parser.parseCandidates(
                 inferred.input,
                 maxResults: Self.stackInferenceBudget,
-                isFullBuffer: !effectiveWindowed
+                isFullBuffer: !effectiveWindowed,
+                allowLiberalStacks: true
             )
             let existingOutputs = Set(grammarParses.map(\.output))
             for parse in inferredParses
@@ -654,13 +654,14 @@ public final class BurmeseEngine: @unchecked Sendable {
                 let adjustedLegality = parse.legalityScore > 0
                     ? max(1, parse.legalityScore - 100 * inferred.insertions)
                     : parse.legalityScore
+                let liberalPenalty = inferred.liberalInsertions
                 grammarParses.append(SyllableParse(
                     output: parse.output,
                     reading: parse.reading,
-                    aliasCost: parse.aliasCost,
+                    aliasCost: parse.aliasCost + 10 * liberalPenalty,
                     legalityScore: adjustedLegality,
                     score: parse.score,
-                    structureCost: parse.structureCost,
+                    structureCost: parse.structureCost + liberalPenalty,
                     syllableCount: adjustedCount,
                     rarityPenalty: parse.rarityPenalty
                 ))

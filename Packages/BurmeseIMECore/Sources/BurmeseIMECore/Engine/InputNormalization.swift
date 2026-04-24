@@ -192,20 +192,22 @@ extension BurmeseEngine {
     }
 
     /// Return `input` with implicit kinzi / virama-stack markers (`+`)
-    /// inserted at every orthographically plausible stack site, plus
-    /// the insertion count, or nil when the input already carries a
-    /// `+` (respect the user's explicit signal) or has no detectable
-    /// site.
+    /// inserted at every orthographically plausible Pali/Sanskrit stack
+    /// site, plus the insertion count, or nil when the input already
+    /// carries a `+` (respect the user's explicit signal) or has no
+    /// detectable site.
     ///
-    /// A site is `<simple-onset> <vowel-letter> n <consonant-letter>`:
-    /// the `n` could be the coda of an `-an` / `-in` / `-on` / `-un`
-    /// / `-ein` / `-ain` / `-own` vowel key, and the following
-    /// consonant could be the upper of a stack. Inference is gated on
-    /// the preceding onset being "simple" — no `y` / `r` / `w` medial
-    /// letters between the first consonant and the vowel. Modern
-    /// polysyllable words with medial-heavy onsets (e.g. `kwyantaw`
-    /// → ကျွန်တော်) conventionally spell the nasal coda with asat, not
-    /// a stack, so inferring one there would pick the wrong form.
+    /// A site is
+    /// `<simple-onset> <vowel-letter> <coda-letter> <consonant-letter>`:
+    /// the coda can be a Pali stack upper (`n`, `m`, `t`, `d`, `p`, `b`,
+    /// `k`, `g`, `s`, `r`, `l`), and the following consonant can become
+    /// the lower. A candidate site is inserted only when both letters map
+    /// to stackable Myanmar consonants. Inference is gated on the
+    /// preceding onset being "simple" — no `y` / `r` / `w` medial letters
+    /// between the first consonant and the vowel. Modern polysyllable
+    /// words with medial-heavy onsets (e.g. `kwyantaw` → ကျွန်တော်)
+    /// conventionally spell the nasal coda with asat, not a stack, so
+    /// inferring one there would pick the wrong form.
     ///
     /// The inserted `+` is then resolved by the parser's
     /// `softBoundaryContext` gate: same-class stacks materialise as
@@ -215,33 +217,34 @@ extension BurmeseEngine {
     /// runs for the same buffer.
     internal static func inferImplicitStackMarkers(
         _ input: String
-    ) -> (input: String, insertions: Int)? {
+    ) -> (input: String, insertions: Int, liberalInsertions: Int)? {
         guard !input.contains("+") else { return nil }
-        // Every plausible stack site hinges on the coda letter `n`
-        // (the `-an` / `-in` / `-on` / `-un` / `-ein` / `-ain` / `-own`
-        // endings). Skip the char-array allocation when there's no `n`
-        // at all — the rest of the scan would walk the buffer for
-        // nothing.
-        guard input.contains("n") else { return nil }
+        // Skip the char-array allocation when there is no plausible
+        // Pali stack upper at all — the rest of the scan would walk the
+        // buffer for nothing.
+        guard input.unicodeScalars.contains(where: { isPaliStackCodaScalar($0.value) }) else {
+            return nil
+        }
         // Second fast-exit: confirm the buffer has *any* candidate stack
-        // site (`<V> n <C>` where `<C>` starts the next syllable) before
+        // site (`<V> <coda> <C>` where `<C>` starts the next syllable) before
         // paying the per-site `Array(input)` / `lastIndex(of: "+")` /
         // medial-onset scan. Walk scalars once; bail out the moment we
         // either find a site or prove none exists.
-        let vowelLetters: Set<Character> = ["a", "e", "i", "o", "u", "w"]
         let scalars = input.unicodeScalars
         var sawCandidateSite = false
         var prev: UInt32 = 0
         var cur: UInt32 = 0
         for scalar in scalars {
             let value = scalar.value
-            if cur == 0x6E, // 'n'
-               let prevChar = Unicode.Scalar(prev).map(Character.init),
-               vowelLetters.contains(prevChar) {
-                let nextChar = Character(scalar)
-                if nextChar.isLetter,
-                   !vowelLetters.contains(nextChar),
-                   nextChar != "n" {
+            if isPaliStackCodaScalar(cur),
+               isPaliStackVowelScalar(prev) {
+                let coda = Unicode.Scalar(cur).map(Character.init)
+                let lower = Unicode.Scalar(value).map(Character.init)
+                if isAsciiLetterScalar(value),
+                   !isPaliStackVowelScalar(value),
+                   let coda,
+                   let lower,
+                   inferredPaliStackIsLiberal(coda: coda, lowerStart: lower) != nil {
                     sawCandidateSite = true
                     break
                 }
@@ -254,14 +257,17 @@ extension BurmeseEngine {
         guard chars.count >= 3 else { return nil }
         let medialLetters: Set<Character> = ["y", "r", "w"]
         var insertAt: [Int] = []
-        for i in 1..<(chars.count - 1) where chars[i] == "n" {
+        var liberalInsertions = 0
+        for i in 1..<(chars.count - 1) where isPaliStackCodaLetter(chars[i]) {
             let prev = chars[i - 1]
             let next = chars[i + 1]
-            guard vowelLetters.contains(prev) else { continue }
+            guard isPaliStackVowelLetter(prev) else { continue }
             guard next.isLetter,
-                  !vowelLetters.contains(next),
-                  next != "n"
+                  !isPaliStackVowelLetter(next)
             else { continue }
+            guard let isLiberal = inferredPaliStackIsLiberal(coda: chars[i], lowerStart: next) else {
+                continue
+            }
             // Reject medial-heavy onsets. The preceding syllable starts
             // at buffer head or the most recent `+`; any `y`/`r`/`w`
             // between positions 1 and `i-1` means the onset has at
@@ -272,6 +278,7 @@ extension BurmeseEngine {
                 && (onsetStart + 1..<i - 1).contains(where: { medialLetters.contains(chars[$0]) })
             guard !onsetHasMedial else { continue }
             insertAt.append(i + 1)
+            if isLiberal { liberalInsertions += 1 }
         }
         guard !insertAt.isEmpty else { return nil }
         var result = input
@@ -279,7 +286,63 @@ extension BurmeseEngine {
             let si = result.index(result.startIndex, offsetBy: idx)
             result.insert("+", at: si)
         }
-        return (result, insertAt.count)
+        return (result, insertAt.count, liberalInsertions)
+    }
+
+    private static func inferredPaliStackIsLiberal(
+        coda: Character,
+        lowerStart: Character
+    ) -> Bool? {
+        guard let upper = Romanization.romanToConsonant[String(coda)],
+              let lower = Romanization.romanToConsonant[String(lowerStart)],
+              Grammar.isValidStackLiberal(upper: upper, lower: lower)
+        else { return nil }
+        return !Grammar.isValidStack(upper: upper, lower: lower)
+    }
+
+    @inline(__always)
+    private static func isAsciiLetterScalar(_ value: UInt32) -> Bool {
+        (value >= 0x61 && value <= 0x7A) || (value >= 0x41 && value <= 0x5A)
+    }
+
+    @inline(__always)
+    private static func isPaliStackVowelScalar(_ value: UInt32) -> Bool {
+        switch value {
+        case 0x61, 0x65, 0x69, 0x6F, 0x75, 0x77: // a e i o u w
+            return true
+        default:
+            return false
+        }
+    }
+
+    @inline(__always)
+    private static func isPaliStackCodaScalar(_ value: UInt32) -> Bool {
+        switch value {
+        case 0x62, 0x64, 0x67, 0x6B, 0x6C, 0x6D, 0x6E, 0x70, 0x72, 0x73, 0x74:
+            return true
+        default:
+            return false
+        }
+    }
+
+    @inline(__always)
+    private static func isPaliStackVowelLetter(_ char: Character) -> Bool {
+        switch char {
+        case "a", "e", "i", "o", "u", "w":
+            return true
+        default:
+            return false
+        }
+    }
+
+    @inline(__always)
+    private static func isPaliStackCodaLetter(_ char: Character) -> Bool {
+        switch char {
+        case "n", "m", "t", "d", "p", "b", "k", "g", "s", "r", "l":
+            return true
+        default:
+            return false
+        }
     }
 
     /// Return `input` with the first kinzi-forming `+` removed, or nil if

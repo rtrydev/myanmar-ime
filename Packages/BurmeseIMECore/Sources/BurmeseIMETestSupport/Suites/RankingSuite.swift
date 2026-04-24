@@ -1085,6 +1085,24 @@ public enum RankingSuite {
                 )
             })
         }
+        for (buffer, expectedSurface) in [
+            ("padmaya",  "\u{1015}\u{1012}\u{1039}\u{1019}\u{101A}"),              // ပဒ္မယ
+            ("vandanar", "\u{1017}\u{1014}\u{1039}\u{1012}\u{1014}\u{102C}"),      // ဗန္ဒနာ
+            ("dhamma",   "\u{1013}\u{1019}\u{1039}\u{1019}"),                      // ဓမ္မ
+            ("kappa",    "\u{1000}\u{1015}\u{1039}\u{1015}"),                      // ကပ္ပ
+            ("ratna",    "\u{101B}\u{1010}\u{1039}\u{1014}"),                      // ရတ္န
+        ] {
+            cases.append(TestCase("tasksDir05_paliStackReachable_\(buffer)") { ctx in
+                let surfaces = BurmeseEngine().update(buffer: buffer, context: [])
+                    .candidates
+                    .map(\.surface)
+                ctx.assertTrue(
+                    surfaces.contains(expectedSurface),
+                    "tasksDir05_paliStackReachable_\(buffer)",
+                    detail: "expected \(expectedSurface) in panel for \(buffer); got \(surfaces)"
+                )
+            })
+        }
 
         // tasks/ 03: existing alternate surfaces must remain reachable in
         // the panel — promotion is a ranking change, not a delete.

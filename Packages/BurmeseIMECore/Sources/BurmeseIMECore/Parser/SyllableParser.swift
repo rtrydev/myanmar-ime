@@ -476,6 +476,20 @@ public final class SyllableParser: Sendable {
         maxResults: Int = 8,
         isFullBuffer: Bool = true
     ) -> [SyllableParse] {
+        parseCandidates(
+            input,
+            maxResults: maxResults,
+            isFullBuffer: isFullBuffer,
+            allowLiberalStacks: false
+        )
+    }
+
+    internal func parseCandidates(
+        _ input: String,
+        maxResults: Int,
+        isFullBuffer: Bool,
+        allowLiberalStacks: Bool
+    ) -> [SyllableParse] {
         let normalized = Self.normalizeForParser(input)
         guard !normalized.isEmpty, maxResults > 0 else { return [] }
 
@@ -487,7 +501,8 @@ public final class SyllableParser: Sendable {
             chars,
             onsetMatchesByStart: onsetMatchesByStart,
             vowelMatchesByStart: vowelMatchesByStart,
-            maxResults: beamWidth
+            maxResults: beamWidth,
+            allowLiberalStacks: allowLiberalStacks
         )
         return finalizeStates(
             arena: arena,

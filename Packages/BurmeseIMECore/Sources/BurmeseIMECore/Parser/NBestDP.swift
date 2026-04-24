@@ -24,13 +24,15 @@ extension SyllableParser {
         _ chars: [Character],
         onsetMatchesByStart: [[OnsetMatch]],
         vowelMatchesByStart: [[VowelMatch]],
-        maxResults: Int
+        maxResults: Int,
+        allowLiberalStacks: Bool = false
     ) -> (arena: [ParseState], finalIndices: [Int32]) {
         var (arena, dp) = runDP(
             chars,
             onsetMatchesByStart: onsetMatchesByStart,
             vowelMatchesByStart: vowelMatchesByStart,
-            maxResults: maxResults
+            maxResults: maxResults,
+            allowLiberalStacks: allowLiberalStacks
         )
         let n = chars.count
         if dp[n].needsPrune {
@@ -47,7 +49,8 @@ extension SyllableParser {
         _ chars: [Character],
         onsetMatchesByStart: [[OnsetMatch]],
         vowelMatchesByStart: [[VowelMatch]],
-        maxResults: Int
+        maxResults: Int,
+        allowLiberalStacks: Bool = false
     ) -> (arena: [ParseState], dp: [DPBucket]) {
         let n = chars.count
         var arena: [ParseState] = []
@@ -121,7 +124,11 @@ extension SyllableParser {
                     let stackLegal: Bool
                     switch viramaCtx {
                     case .upper(let upper):
-                        stackLegal = Grammar.isValidStack(upper: upper, lower: onsetEntry.onset)
+                        stackLegal = isValidStack(
+                            upper: upper,
+                            lower: onsetEntry.onset,
+                            allowLiberalStacks: allowLiberalStacks
+                        )
                     case .reject:
                         stackLegal = false
                     case .none:
@@ -269,7 +276,11 @@ extension SyllableParser {
                             for (oEnd, oEntry) in onsetsAtVowelEnd {
                                 let len = oEnd - vowelEnd
                                 if len == 1
-                                    && Grammar.isValidStack(upper: upper, lower: oEntry.onset) {
+                                    && isValidStack(
+                                        upper: upper,
+                                        lower: oEntry.onset,
+                                        allowLiberalStacks: allowLiberalStacks
+                                    ) {
                                     hasShortLegal = true
                                 }
                                 if len >= 2
@@ -369,6 +380,17 @@ extension SyllableParser {
         }
 
         return (arena, dp)
+    }
+
+    @inline(__always)
+    internal func isValidStack(
+        upper: Character,
+        lower: Character,
+        allowLiberalStacks: Bool
+    ) -> Bool {
+        allowLiberalStacks
+            ? Grammar.isValidStackLiberal(upper: upper, lower: lower)
+            : Grammar.isValidStack(upper: upper, lower: lower)
     }
 
     // MARK: - Virama Context
