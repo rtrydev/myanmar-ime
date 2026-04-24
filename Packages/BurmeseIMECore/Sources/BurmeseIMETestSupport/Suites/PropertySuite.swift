@@ -34,32 +34,13 @@ public enum PropertySuite {
         "arpegahtwatpyar",
         "kyawnaingtharway2",
         "lay2mingalarparshinbyar",
-    ]
-
-    /// Long buffers whose single-shot and sliding-window parses are
-    /// known to diverge at the current window size
-    /// (`compositionWindowSize = 20`). Each entry is a live bug — the
-    /// divergence is accepted because widening the window to eliminate
-    /// it costs more `incremental` benchmark p95/p99 than the 20 %/30 %
-    /// regression guard allows.
-    ///
-    /// Characterized divergence classes:
-    ///
-    /// * **Repeated `mingalarpar` chains (≥ 3 repetitions).** One of
-    ///   the middle `mingalarpar` units surfaces corrupted as
-    ///   `မီငလာပါ` or `မင်ဂလရပါ` depending on which exact boundary
-    ///   position the window split lands on. Incremental parse keeps
-    ///   the right segmentation because every intermediate state stays
-    ///   within the full-buffer DP path.
-    /// Removing an entry here should happen only when the underlying
-    /// divergence is fixed (either by widening the window safely or by
-    /// teaching `correctAaShape` / the DP split to see across the
-    /// frozen boundary). Add the buffer to `slidingWindowWhitelist`
-    /// instead.
-    private static let slidingWindowKnownDivergent: [String] = [
         String(repeating: "mingalarpar", count: 3),
         String(repeating: "mingalarpar", count: 5),
     ]
+
+    /// No current sliding-window divergences are accepted. Regressions
+    /// belong in `slidingWindowWhitelist` as failing cases, not here.
+    private static let slidingWindowKnownDivergent: [String] = []
 
     /// Returns true if `surface` contains ASCII *interleaved* with Myanmar —
     /// i.e., an ASCII character appears before a Myanmar character. Trailing
@@ -301,12 +282,9 @@ public enum PropertySuite {
                             "slidingWindow_\(firstFailure ?? "ok")")
         })
 
-        // tasks/ 06: the `slidingWindowKnownDivergent` set carries
-        // buffers for which single-shot and incremental parse intentionally
-        // disagree. Each entry here is a live bug report: if the
-        // divergence ever disappears, the entry can be moved up to the
-        // whitelist. Guard against silent drift by asserting that each
-        // listed buffer is *still* divergent.
+        // This list should stay empty. It exists only to make any temporary
+        // accepted sliding-window divergence visible until that buffer can
+        // be promoted to the whitelist above.
         cases.append(TestCase("property_slidingWindow_knownDivergent_staysDivergent") { ctx in
             var stillConverged: [String] = []
             for buf in Self.slidingWindowKnownDivergent {

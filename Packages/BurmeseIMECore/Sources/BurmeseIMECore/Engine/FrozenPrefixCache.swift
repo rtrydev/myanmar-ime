@@ -187,10 +187,39 @@ extension BurmeseEngine {
     /// Avoid freezing a connector-like `a` into the prefix when the next
     /// active-tail letter may need it as an onsetless `a...` word start
     /// (`...phaya` + `hain...` should remain able to form `...ဖေအိမ်...`).
+    ///
+    /// Also reject boundaries immediately before a plausible `n` coda /
+    /// implicit-stack site. A prefix ending in `...mi` parses legally on its
+    /// own, but if the full buffer has `...min<C>`, cutting before the `n`
+    /// forces the prefix to render `မီ` and the tail to render a fresh `င`,
+    /// corrupting repeated words like `mingalarpar`.
     internal static func isUnsafeFrozenSplit(chars: [Character], split: Int) -> Bool {
         guard split > 0, split < chars.count else { return false }
-        guard chars[split - 1] == "a" else { return false }
-        return chars[split].isLetter
+        if chars[split - 1] == "a", chars[split].isLetter {
+            return true
+        }
+        return isImplicitNCodaSplit(chars: chars, split: split)
+    }
+
+    private static func isImplicitNCodaSplit(chars: [Character], split: Int) -> Bool {
+        guard split + 1 < chars.count, chars[split] == "n" else { return false }
+        let next = chars[split + 1]
+        guard isNCodaVowelLetter(chars[split - 1]),
+              next.isLetter,
+              !isNCodaVowelLetter(next),
+              next != "n"
+        else { return false }
+
+        return true
+    }
+
+    private static func isNCodaVowelLetter(_ char: Character) -> Bool {
+        switch char {
+        case "a", "e", "i", "o", "u", "w":
+            return true
+        default:
+            return false
+        }
     }
 
     /// Length of a previously cached frozen prefix if it still applies to
