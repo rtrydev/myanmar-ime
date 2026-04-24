@@ -203,11 +203,69 @@ extension SyllableParser {
         @inline(__always) func isConsonantBase(_ v: UInt32) -> Bool {
             return (v >= 0x1000 && v <= 0x1021) || v == 0x103F
         }
+        @inline(__always) func isIndependentVowel(_ v: UInt32) -> Bool {
+            return v >= 0x1023 && v <= 0x102A
+        }
+        @inline(__always) func isDependentVowel(_ v: UInt32) -> Bool {
+            return v >= 0x102B && v <= 0x1032
+        }
+        @inline(__always) func isToneMark(_ v: UInt32) -> Bool {
+            return v >= 0x1036 && v <= 0x1038
+        }
+        @inline(__always) func isMedial(_ v: UInt32) -> Bool {
+            return v >= 0x103B && v <= 0x103E
+        }
+        @inline(__always) func isAttachableMark(_ v: UInt32) -> Bool {
+            return isDependentVowel(v) || isToneMark(v) || isMedial(v)
+        }
+        @inline(__always) func attachableMarkHasAnchor(at i: Int) -> Bool {
+            let current = indices[i].value
+            var j = i - 1
+            while j >= 0 {
+                let w = indices[j].value
+                if isConsonantBase(w) { return true }
+                // U+1038 after U+1026 is the standard ဦး spelling, and
+                // existing independent-vowel tone variants intentionally
+                // stay legal. Dependent vowels and medials still require a
+                // consonant base.
+                if isToneMark(current), isIndependentVowel(w) { return true }
+                if w == 0x103A {
+                    if isToneMark(current) {
+                        j -= 1
+                        continue
+                    }
+                    return false
+                }
+                if w == 0x200C {
+                    return j == 0
+                }
+                if isIndependentVowel(w) {
+                    return false
+                }
+                if w == 0x1039 {
+                    if j + 1 < n, isConsonantBase(indices[j + 1].value) {
+                        j -= 1
+                        continue
+                    }
+                    return false
+                }
+                if current == 0x1031 && w == 0x1031 {
+                    return false
+                }
+                if isAttachableMark(w) {
+                    j -= 1
+                    continue
+                }
+                return false
+            }
+            return false
+        }
         for i in 0..<n {
             let v = indices[i].value
-            // Fast path: only 0x1023–0x102A and 0x1039/0x103A need inspection.
+            // Fast path: only independent vowels, dependent marks, medials,
+            // and virama/asat need inspection.
             // Skip scalars outside those ranges with a single range test.
-            if v < 0x1023 || v > 0x103A { continue }
+            if v < 0x1023 || v > 0x103E { continue }
             if v == 0x1039 {
                 guard i >= 1 else { return false }
                 let prev = indices[i - 1]
@@ -241,6 +299,8 @@ extension SyllableParser {
                     let next = indices[i + 1].value
                     if next >= 0x102B && next <= 0x1032 { return false }
                 }
+            } else if isAttachableMark(v) {
+                if !attachableMarkHasAnchor(at: i) { return false }
             }
         }
         return true

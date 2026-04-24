@@ -1134,6 +1134,7 @@ public final class BurmeseEngine: @unchecked Sendable {
 
         merged = Self.expandAaVariants(merged)
         merged = Self.sanitizeOrphanZwnj(merged)
+        merged = Self.sanitizeMalformedMyanmarMarks(merged)
 
         // Pali loanword fallback: cross-class virama stacks like
         // ပဒ္မ / ဗန္ဒန / ဂန္ဒ are not produced by Grammar.isValidStack

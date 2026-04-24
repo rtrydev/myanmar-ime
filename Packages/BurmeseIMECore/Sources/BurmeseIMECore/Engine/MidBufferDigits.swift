@@ -229,56 +229,7 @@ extension BurmeseEngine {
     /// Myanmar into the candidate panel.
     internal static func tailFallbackOutputIsClean(_ s: String) -> Bool {
         guard !s.isEmpty else { return false }
-        let scalars = Array(s.unicodeScalars)
-        let isConsonantBase: (UInt32) -> Bool = { v in
-            (v >= 0x1000 && v <= 0x1021) || v == 0x103F
-        }
-        // No virama with a non-consonant left neighbour, asat-half not
-        // anchored to nga, or non-consonant right neighbour.
-        for i in 0..<scalars.count where scalars[i].value == 0x1039 {
-            guard i >= 1 else { return false }
-            let prev = scalars[i - 1].value
-            if prev == 0x103A {
-                let twoBack = i >= 2 ? scalars[i - 2].value : 0
-                if twoBack != 0x1004 { return false }
-            } else if !isConsonantBase(prev) {
-                return false
-            }
-            guard i + 1 < scalars.count else { return false }
-            if !isConsonantBase(scalars[i + 1].value) { return false }
-        }
-        // No two viramas within distance 2 (chained stack / kinzi+stack).
-        if scalars.count >= 3 {
-            for i in 0..<(scalars.count - 2) where scalars[i].value == 0x1039 {
-                if isConsonantBase(scalars[i + 1].value)
-                    && scalars[i + 2].value == 0x1039 {
-                    return false
-                }
-            }
-        }
-        // No asat (U+103A) whose base doesn't walk back to a consonant.
-        for i in 0..<scalars.count where scalars[i].value == 0x103A {
-            var j = i - 1
-            while j >= 0 {
-                let v = scalars[j].value
-                let isSkippable = (v >= 0x102B && v <= 0x1032)
-                    || (v >= 0x1036 && v <= 0x1038)
-                    || (v >= 0x103B && v <= 0x103E)
-                if isSkippable { j -= 1 } else { break }
-            }
-            guard j >= 0 else { return false }
-            if !isConsonantBase(scalars[j].value) { return false }
-        }
-        // No dep vowel sign after an independent vowel.
-        if scalars.count >= 2 {
-            for i in 0..<(scalars.count - 1) {
-                let v = scalars[i].value
-                guard v >= 0x1023 && v <= 0x102A else { continue }
-                let next = scalars[i + 1].value
-                if next >= 0x102B && next <= 0x1032 { return false }
-            }
-        }
-        return true
+        return SyllableParser.scanOutputLegality(s)
     }
 
     /// Replace ASCII digits (0-9) with Myanmar digits (U+1040–U+1049),

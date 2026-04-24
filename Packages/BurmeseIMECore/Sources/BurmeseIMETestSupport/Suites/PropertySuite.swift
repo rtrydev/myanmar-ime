@@ -87,6 +87,63 @@ public enum PropertySuite {
         return false
     }
 
+    private static func hasAnchoredMyanmarMarks(_ surface: String) -> Bool {
+        let scalars = Array(surface.unicodeScalars.map(\.value))
+        func isBase(_ v: UInt32) -> Bool {
+            (v >= 0x1000 && v <= 0x1021) || v == 0x103F
+        }
+        func isIndependentVowel(_ v: UInt32) -> Bool {
+            v >= 0x1023 && v <= 0x102A
+        }
+        func isDependentVowel(_ v: UInt32) -> Bool {
+            v >= 0x102B && v <= 0x1032
+        }
+        func isToneMark(_ v: UInt32) -> Bool {
+            v >= 0x1036 && v <= 0x1038
+        }
+        func isMedial(_ v: UInt32) -> Bool {
+            v >= 0x103B && v <= 0x103E
+        }
+        for i in scalars.indices {
+            let v = scalars[i]
+            guard isDependentVowel(v) || isToneMark(v) || isMedial(v) else {
+                continue
+            }
+            var j = i - 1
+            while j >= 0 {
+                let w = scalars[j]
+                if isBase(w) { break }
+                if isToneMark(v), isIndependentVowel(w) { break }
+                if w == 0x103A {
+                    if isToneMark(v) {
+                        j -= 1
+                        continue
+                    }
+                    return false
+                }
+                if w == 0x1039 || w == 0x200C || isIndependentVowel(w) {
+                    return false
+                }
+                if v == 0x1031 && w == 0x1031 {
+                    return false
+                }
+                if isDependentVowel(w) || isToneMark(w) || isMedial(w) {
+                    j -= 1
+                    continue
+                }
+                return false
+            }
+            if j < 0 { return false }
+        }
+        return true
+    }
+
+    private static func hasAsciiSurfaceScalar(_ surface: String) -> Bool {
+        surface.unicodeScalars.contains {
+            $0.value >= 0x21 && $0.value <= 0x7E
+        }
+    }
+
     public static let suite: TestSuite = {
         var cases: [TestCase] = []
 
@@ -171,6 +228,45 @@ public enum PropertySuite {
             }
             ctx.assertEqual(failures, 0,
                             "latinInterleaved_\(firstFailure ?? "ok")")
+        })
+
+        // MARK: - Property 4: every dependent sign is anchored
+        cases.append(TestCase("property_noOrphanMyanmarMarks_acrossSources") { ctx in
+            let engine = BurmeseEngine()
+            var rng = SeededRandom(seed: 0x5151_0101_5151_0101)
+            let targeted = [
+                "nayout", "kayout", "phyayout", "bayaung",
+                "nayaw", "kayaw", "payayout", "aungain",
+                "aungout", "outain",
+            ]
+            var buffers = targeted
+            for _ in 0..<500 {
+                let len = Int(rng.next() % 24) + 1
+                buffers.append(BurmeseGenerators.randomBuffer(length: len, rng: &rng))
+            }
+            var failures = 0
+            var firstFailure: String?
+            for buffer in buffers {
+                let state = engine.update(buffer: buffer, context: [])
+                let hasCleanCandidate = state.candidates.contains {
+                    !hasAsciiSurfaceScalar($0.surface)
+                        && hasAnchoredMyanmarMarks($0.surface)
+                }
+                guard hasCleanCandidate else { continue }
+                for cand in state.candidates {
+                    if hasAsciiSurfaceScalar(cand.surface) { continue }
+                    if !hasAnchoredMyanmarMarks(cand.surface) {
+                        failures += 1
+                        if firstFailure == nil {
+                            firstFailure =
+                                "seed=0x5151010151510101 buffer=\(buffer) surface=\(cand.surface) source=\(cand.source)"
+                        }
+                        break
+                    }
+                }
+            }
+            ctx.assertEqual(failures, 0,
+                            "orphanMyanmarMarks_\(firstFailure ?? "ok")")
         })
 
         // MARK: - Property 4: sliding-window equivalence on a curated whitelist

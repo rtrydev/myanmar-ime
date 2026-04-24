@@ -109,6 +109,7 @@ extension BurmeseEngine {
     /// cross-class pair — fails the gate so the engine drops the parse.
     internal static func hasOnlyCleanViramaStacks(_ parse: SyllableParse) -> Bool {
         guard parse.reading.contains("+") else { return false }
+        guard SyllableParser.scanOutputLegality(parse.output) else { return false }
         let scalars = parse.output.unicodeScalars.map(\.value)
         var sawVirama = false
         for i in 0..<scalars.count where scalars[i] == 0x1039 {

@@ -640,7 +640,10 @@ public final class SyllableParser: Sendable {
         guard !normalized.isEmpty, maxResults > 0 else { return (0, []) }
 
         let chars = Array(normalized)
-        let beamWidth = max(maxResults * 16, 64)
+        let finalizationLimit = chars.count > 20
+            ? max(maxResults, 32)
+            : max(maxResults, 4)
+        let beamWidth = max(finalizationLimit * 16, 128)
         let onsetMatchesByStart = precomputeOnsetMatches(chars)
         let vowelMatchesByStart = precomputeVowelMatches(chars)
         var (arena, dp) = runDP(
@@ -708,11 +711,14 @@ public final class SyllableParser: Sendable {
             let parses = finalizeStates(
                 arena: arena,
                 finalIndices: dp[k].stateIndices,
-                limit: maxResults,
+                limit: finalizationLimit,
                 requestedReading: String(chars.prefix(k))
             )
             if parses.contains(where: acceptable) {
-                return (k, parses)
+                return (k, Array(parses.prefix(maxResults)))
+            }
+            if probeAccepted {
+                return (k, Array(parses.prefix(maxResults)))
             }
         }
         return (0, [])

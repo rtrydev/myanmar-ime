@@ -148,6 +148,16 @@ extension BurmeseEngine {
         }
     }
 
+    internal static func sanitizeMalformedMyanmarMarks(_ candidates: [Candidate]) -> [Candidate] {
+        let hasClean = candidates.contains {
+            SyllableParser.scanOutputLegality($0.surface)
+        }
+        guard hasClean else { return candidates }
+        return candidates.filter {
+            SyllableParser.scanOutputLegality($0.surface)
+        }
+    }
+
     /// ZWSP is allowed as a lexicon word-boundary marker. ZWNJ/ZWJ are only
     /// tolerated for the parser's leading orphan-mark fallback; elsewhere in
     /// a lexicon surface they are corpus pollution and should not outrank a
