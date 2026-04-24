@@ -607,14 +607,27 @@ public final class BurmeseEngine: @unchecked Sendable {
             isFullBuffer: !effectiveWindowed
         )
         grammarParses.removeAll { Self.hasInterleavedLatin($0.output) }
-        // Parser-level orphan ZWNJ promotion: generate an implicit-အ
-        // sibling for every ZWNJ + combining-mark parse. See
-        // `Grammar.swift` module doc for the rationale. The later
-        // `sanitizeOrphanZwnj` step drops the original orphan once a
-        // legal sibling exists.
+        // Parser-level orphan promotion (task 01): generate implicit-အ
+        // siblings for parses whose surface has an unanchored mark. The
+        // leading-ZWNJ case swaps the ZWNJ for အ; the mid-surface case
+        // inserts အ before every interior orphan
+        // (`<...>103A 102D<...>` and friends). Both can coexist on the
+        // same parent (`aungain` surfaces as ZWNJ + ...103A 102D...), so
+        // run the mid-surface pass on the ZWNJ-promoted sibling too.
+        // `sanitizeMalformedMyanmarMarks` drops the original orphan once
+        // a legal sibling survives.
         let originalGrammarParseCount = grammarParses.count
         for i in 0..<originalGrammarParseCount {
-            if let promoted = Self.promoteOrphanZwnjToImplicitA(grammarParses[i]) {
+            let parent = grammarParses[i]
+            let zwnjPromoted = Self.promoteOrphanZwnjToImplicitA(parent)
+            if let zwnjPromoted {
+                grammarParses.append(zwnjPromoted)
+            }
+            if let promoted = Self.promoteOrphanInternalMarks(parent) {
+                grammarParses.append(promoted)
+            }
+            if let zwnjPromoted,
+               let promoted = Self.promoteOrphanInternalMarks(zwnjPromoted) {
                 grammarParses.append(promoted)
             }
         }

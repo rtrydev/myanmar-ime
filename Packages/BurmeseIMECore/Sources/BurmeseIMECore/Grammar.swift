@@ -227,10 +227,17 @@ public enum Grammar {
         return map
     }()
 
-    /// Consonants that may appear on either side of a virama stack. This is
-    /// every character with a `stackClass` assignment — derived from the
-    /// class table so the two cannot drift.
-    public static let stackableConsonants: Set<Character> = Set(stackClass.keys)
+    /// Consonants that may appear on either side of a virama stack.
+    /// Native same-class pairs come from `stackClass`; `ha` is added
+    /// so Pali/Sanskrit loanword forms like ဗြဟ္မ / အဟ္မဒ reach the
+    /// panel through the engine's liberal stack inference pass. Strict
+    /// `isValidStack` still rejects ha because `stackClass[ha] = nil`,
+    /// so native-text ranking stays untouched.
+    public static let stackableConsonants: Set<Character> = {
+        var set = Set(stackClass.keys)
+        set.insert(Myanmar.ha)
+        return set
+    }()
 
     /// Returns `true` if `upper + ္ + lower` forms a legal virama stack in
     /// modern Burmese. The rule is strict same-class stacking (see

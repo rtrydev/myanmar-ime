@@ -191,7 +191,7 @@ extension SyllableParser {
     /// independent vowel, triple virama stack) with a single pass that
     /// allocates the scalar array once. Short-circuits once any flag is
     /// set since downstream callers only inspect `isLegal`.
-    internal static func scanOutputLegality(_ output: String) -> Bool {
+    @_spi(Testing) public static func scanOutputLegality(_ output: String) -> Bool {
         // Reuse the scalars view directly — materializing an Array is pure
         // overhead when most outputs never hit any of the guarded scalar
         // values. The asat backward-walk uses the indices() view, which

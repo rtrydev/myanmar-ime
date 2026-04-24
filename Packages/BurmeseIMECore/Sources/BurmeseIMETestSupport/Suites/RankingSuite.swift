@@ -674,6 +674,42 @@ public enum RankingSuite {
             )
         })
 
+        // Task 01 (mid-surface orphan promotion): buffers whose DP emits
+        // a dep-vowel after an asat with no anchor now generate a legal
+        // အ-anchored sibling. The panel top must be the anchored form.
+        for (buffer, expectedTop) in [
+            ("aungain", "\u{1021}\u{1031}\u{102C}\u{1004}\u{103A}\u{1021}\u{102D}\u{1014}\u{103A}"),  // အောင်အိန်
+            ("aungout", "\u{1021}\u{1031}\u{102C}\u{1004}\u{103A}\u{1021}\u{1031}\u{1021}\u{102C}\u{1000}\u{103A}"),  // အောင်အေအာက်
+            ("outain",  "\u{1021}\u{1031}\u{102C}\u{1000}\u{103A}\u{1021}\u{102D}\u{1014}\u{103A}"),  // အောက်အိန်
+        ] {
+            cases.append(TestCase("tasksDir01_midSurfaceOrphanPromoted_\(buffer)") { ctx in
+                let top = BurmeseEngine().update(buffer: buffer, context: [])
+                    .candidates.first?.surface ?? ""
+                ctx.assertEqual(
+                    top, expectedTop,
+                    "tasksDir01_midSurfaceOrphanPromoted_\(buffer)"
+                )
+            })
+        }
+
+        // Task 01 (sanitizer): no candidate in the panel may contain a
+        // dependent-vowel / tone-mark / medial without a consonant anchor
+        // reachable via the skippable back-walk, when at least one clean
+        // sibling exists in the panel.
+        cases.append(TestCase("tasksDir01_noOrphanWhenCleanAvailable") { ctx in
+            let engine = BurmeseEngine()
+            for buffer in ["aungain", "aungout", "outain", "outaung", "nayout", "kayout"] {
+                let surfaces = engine.update(buffer: buffer, context: []).candidates.map(\.surface)
+                for surface in surfaces {
+                    ctx.assertTrue(
+                        SyllableParser.scanOutputLegality(surface),
+                        "tasksDir01_noOrphanWhenCleanAvailable_\(buffer)",
+                        detail: "unanchored mark surfaced for \(buffer): \(surface)"
+                    )
+                }
+            }
+        })
+
         cases.append(TestCase("task02_promotedOrphanRecomputesLegality") { ctx in
             let parser = SyllableParser()
             let orphan = parser.parseCandidates("aw", maxResults: 8).first {
@@ -1103,6 +1139,8 @@ public enum RankingSuite {
             ("dhamma",   "\u{1013}\u{1019}\u{1039}\u{1019}"),                      // ဓမ္မ
             ("kappa",    "\u{1000}\u{1015}\u{1039}\u{1015}"),                      // ကပ္ပ
             ("ratna",    "\u{101B}\u{1010}\u{1039}\u{1014}"),                      // ရတ္န
+            ("ahmada",   "\u{1021}\u{101F}\u{1039}\u{1019}\u{1012}"),              // အဟ္မဒ
+            ("brahma",   "\u{1018}\u{101B}\u{101F}\u{1039}\u{1019}"),              // ဘရဟ္မ
         ] {
             cases.append(TestCase("tasksDir05_paliStackReachable_\(buffer)") { ctx in
                 let surfaces = BurmeseEngine().update(buffer: buffer, context: [])

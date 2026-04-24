@@ -201,14 +201,18 @@ extension BurmeseEngine {
     /// `<simple-onset> <vowel-letter> <coda-letter> <consonant-letter>`,
     /// or the initial-`a` variant used by onsetless Pali words like
     /// `atta`: the coda can be a Pali stack upper (`n`, `m`, `t`, `d`,
-    /// `p`, `b`, `k`, `g`, `s`, `r`, `l`), and the following consonant
-    /// can become the lower. A candidate site is inserted only when both
-    /// letters map to stackable Myanmar consonants. Inference is gated on
-    /// the preceding onset being "simple" — no `y` / `r` / `w` medial
-    /// letters between the first consonant and the vowel. Modern
-    /// polysyllable words with medial-heavy onsets (e.g. `kwyantaw` →
-    /// ကျွန်တော်) conventionally spell the nasal coda with asat, not a
-    /// stack, so inferring one there would pick the wrong form.
+    /// `p`, `b`, `k`, `g`, `s`, `r`, `l`, `h`), and the following
+    /// consonant can become the lower. A candidate site is inserted only
+    /// when both letters map to stackable Myanmar consonants under the
+    /// liberal (Pali/Sanskrit) stack rule. Digraph onsets (`th`, `dh`,
+    /// `bh`, `kh`, `ph`, `sh`, `hm`, `hl`) stay safe because the
+    /// `prev == vowel-letter` guard rejects them — the `h` sits next to
+    /// a consonant, not a vowel. Inference is gated on the preceding
+    /// onset being "simple" — no `y` / `r` / `w` medial letters between
+    /// the first consonant and the vowel. Modern polysyllable words with
+    /// medial-heavy onsets (e.g. `kwyantaw` → ကျွန်တော်) conventionally
+    /// spell the nasal coda with asat, not a stack, so inferring one
+    /// there would pick the wrong form.
     ///
     /// The inserted `+` is then resolved by the parser's
     /// `softBoundaryContext` gate: same-class stacks materialise as
@@ -274,6 +278,12 @@ extension BurmeseEngine {
             // between positions 1 and `i-1` means the onset has at
             // least one medial. `h` is ambiguous (onset digraph `th`
             // vs medial `hm`) so it is excluded from the medial set.
+            //
+            // Exception for `h`-coda sites (Pali/Sanskrit loanwords like
+            // `brahma` / `brahman`): medial+stack is the canonical form
+            // (ဗြဟ္မ), so the medial onset does not disqualify the site.
+            // Native words with medial onsets do not use `h` as a coda,
+            // so this narrowing is safe.
             let onsetStart = chars[..<i].lastIndex(of: "+").map { $0 + 1 } ?? 0
             let hasSimpleOnset = Self.hasSimplePaliStackOnset(
                 chars: chars,
@@ -283,7 +293,7 @@ extension BurmeseEngine {
             guard hasSimpleOnset else { continue }
             let onsetHasMedial = onsetStart + 1 < i - 1
                 && (onsetStart + 1..<i - 1).contains(where: { medialLetters.contains(chars[$0]) })
-            guard !onsetHasMedial else { continue }
+            guard !onsetHasMedial || chars[i] == "h" else { continue }
             insertAt.append(i + 1)
             if isLiberal { liberalInsertions += 1 }
         }
@@ -338,7 +348,7 @@ extension BurmeseEngine {
     @inline(__always)
     private static func isPaliStackCodaScalar(_ value: UInt32) -> Bool {
         switch value {
-        case 0x62, 0x64, 0x67, 0x6B, 0x6C, 0x6D, 0x6E, 0x70, 0x72, 0x73, 0x74:
+        case 0x62, 0x64, 0x67, 0x68, 0x6B, 0x6C, 0x6D, 0x6E, 0x70, 0x72, 0x73, 0x74:
             return true
         default:
             return false
@@ -358,7 +368,7 @@ extension BurmeseEngine {
     @inline(__always)
     private static func isPaliStackCodaLetter(_ char: Character) -> Bool {
         switch char {
-        case "n", "m", "t", "d", "p", "b", "k", "g", "s", "r", "l":
+        case "n", "m", "t", "d", "p", "b", "k", "g", "s", "r", "l", "h":
             return true
         default:
             return false

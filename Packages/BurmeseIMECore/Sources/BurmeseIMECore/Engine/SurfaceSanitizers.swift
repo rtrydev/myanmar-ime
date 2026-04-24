@@ -283,4 +283,95 @@ extension BurmeseEngine {
             rarityPenalty: parse.rarityPenalty
         )
     }
+
+    /// Build a sibling parse where every mid-surface orphan attachable
+    /// mark (dependent vowel / tone mark / medial with no consonant
+    /// base behind it) has U+1021 (အ) inserted before it to provide an
+    /// anchor. Mirrors `promoteOrphanZwnjToImplicitA` for the mid-
+    /// surface case covered by task 01 — inputs like `aungain` whose
+    /// second vowel sits after a coda-asat with no onset to anchor it.
+    ///
+    /// Returns nil when the parse has no orphan marks, or when the
+    /// rebuilt surface still fails `scanOutputLegality`. Leading-ZWNJ
+    /// orphans stay with `promoteOrphanZwnjToImplicitA`.
+    internal static func promoteOrphanInternalMarks(_ parse: SyllableParse) -> SyllableParse? {
+        let scalars = Array(parse.output.unicodeScalars)
+        guard scalars.count >= 2 else { return nil }
+        if scalars[0].value == 0x200C { return nil }
+
+        let orphanPositions = orphanAttachableMarkIndices(in: scalars)
+        guard !orphanPositions.isEmpty else { return nil }
+
+        var rebuilt: [Unicode.Scalar] = []
+        rebuilt.reserveCapacity(scalars.count + orphanPositions.count)
+        let insertSet = Set(orphanPositions)
+        for i in scalars.indices {
+            if insertSet.contains(i) {
+                rebuilt.append(Unicode.Scalar(0x1021)!)
+            }
+            rebuilt.append(scalars[i])
+        }
+        let output = String(String.UnicodeScalarView(rebuilt))
+        guard SyllableParser.scanOutputLegality(output) else { return nil }
+        return SyllableParse(
+            output: output,
+            reading: parse.reading,
+            aliasCost: parse.aliasCost,
+            legalityScore: max(parse.legalityScore, 1),
+            score: parse.score,
+            structureCost: parse.structureCost,
+            syllableCount: max(1, parse.syllableCount),
+            rarityPenalty: parse.rarityPenalty
+        )
+    }
+
+    private static func orphanAttachableMarkIndices(in scalars: [Unicode.Scalar]) -> [Int] {
+        var result: [Int] = []
+        for i in scalars.indices {
+            let v = scalars[i].value
+            if !isAttachableMarkValue(v) { continue }
+            if !attachableMarkHasAnchor(scalars: scalars, at: i) {
+                result.append(i)
+            }
+        }
+        return result
+    }
+
+    private static func isAttachableMarkValue(_ v: UInt32) -> Bool {
+        (v >= 0x102B && v <= 0x1032)
+            || (v >= 0x1036 && v <= 0x1038)
+            || (v >= 0x103B && v <= 0x103E)
+    }
+
+    private static func attachableMarkHasAnchor(scalars: [Unicode.Scalar], at i: Int) -> Bool {
+        let current = scalars[i].value
+        let currentIsToneMark = current >= 0x1036 && current <= 0x1038
+        var j = i - 1
+        while j >= 0 {
+            let w = scalars[j].value
+            if (w >= 0x1000 && w <= 0x1021) || w == 0x103F { return true }
+            let wIsIndependentVowel = w >= 0x1023 && w <= 0x102A
+            if currentIsToneMark, wIsIndependentVowel { return true }
+            if w == 0x103A {
+                if currentIsToneMark { j -= 1; continue }
+                return false
+            }
+            if w == 0x200C { return j == 0 }
+            if wIsIndependentVowel { return false }
+            if w == 0x1039 {
+                if j + 1 < scalars.count {
+                    let next = scalars[j + 1].value
+                    if (next >= 0x1000 && next <= 0x1021) || next == 0x103F {
+                        j -= 1
+                        continue
+                    }
+                }
+                return false
+            }
+            if current == 0x1031 && w == 0x1031 { return false }
+            if isAttachableMarkValue(w) { j -= 1; continue }
+            return false
+        }
+        return false
+    }
 }
