@@ -93,6 +93,13 @@ public final class BurmeseEngine: @unchecked Sendable {
 
     private let parser: SyllableParser
     private let candidateStore: any CandidateStore
+    /// Word-lattice / segmentation decoder layered on top of the parser
+    /// + lexicon. Initialised eagerly because it captures the LM and
+    /// store references that are passed in at engine-init time anyway.
+    /// Kept as an implicit-`let` rather than `Optional` so callers can
+    /// always invoke it; an empty store / null LM degrade it into a
+    /// pass-through that returns `[]` quickly.
+    private let latticeDecoder: WordLatticeDecoder
     private let historyStore: any UserHistoryStore
     private let languageModel: any LanguageModel
 
@@ -197,6 +204,25 @@ public final class BurmeseEngine: @unchecked Sendable {
     /// Fallback used when no `IMESettings` instance is supplied.
     private static let anchorCommitThresholdDefault = 8
 
+    /// Minimum normalised-reading length before the lattice decoder
+    /// runs. Below this, the parser + whole-buffer lexicon path is
+    /// already optimal and lattice injection only invites rare
+    /// lexicon surfaces (tone-variant `ကျွန်တော့်` vs `ကျွန်တော်`
+    /// being the canonical example, winning the coda-only
+    /// single-scalar LM tiebreak by a narrow margin) to outrank clean
+    /// parser output. 12 is just above the single-word-plus-particle
+    /// ceiling (`kwyantaw` = 8 chars, `kwyantawka` = 10) and well
+    /// below where multi-word debt kicks in (~15+ chars).
+    private static let latticeMinReadingLen = 12
+
+    /// Maximum log-prob gap a lattice candidate can trail the
+    /// lattice top before being dropped at engine-injection time.
+    /// 3 nats ≈ factor 20×; anything weaker than that is a tail
+    /// variant (retroflex `ဌ`, punctuation artefact) that the
+    /// anchor history would promote on subsequent keystrokes if we
+    /// kept it in the panel at an intermediate buffer length.
+    private static let latticeLmInjectionMargin: Double = 3.0
+
     /// Page size for candidate display. Fallback used when no `IMESettings`
     /// instance is supplied.
     public static let candidatePageSizeDefault = 9
@@ -233,6 +259,12 @@ public final class BurmeseEngine: @unchecked Sendable {
         self.candidateStore = candidateStore
         self.historyStore = historyStore
         self.languageModel = languageModel
+        self.latticeDecoder = WordLatticeDecoder(
+            parser: parser,
+            candidateStore: candidateStore,
+            languageModel: languageModel,
+            tuning: tuning
+        )
         self.settings = settings
         self.tuning = tuning
         // Active-tail size in Roman chars. Once the buffer exceeds this,
@@ -913,6 +945,150 @@ public final class BurmeseEngine: @unchecked Sendable {
                 prefix: aliasPrefix,
                 previousSurface: previousSurface
             )
+        }
+
+        // Word-lattice decoder (task: long-sentence quality debt). The
+        // syllable-parser DP loses the LM-correct surface early in long
+        // multi-word buffers because its beam prunes by alias cost — by
+        // the time the engine's LM comparator runs, the right candidate
+        // is no longer reachable. The lattice decoder reads the same
+        // buffer through an arc graph (lexicon + syllable fallback)
+        // with the LM in the Viterbi loop, so the correct surface
+        // stays alive across word boundaries. Outputs land here as
+        // first-class grammar candidates so the existing composite
+        // / LM-dominance ranking picks between them and the parser
+        // candidates on the usual signals.
+        //
+        // Length gate: for short buffers (below `latticeMinReadingLen`)
+        // the parser + whole-buffer lexicon lookup already reach the
+        // right answer, and lattice injection does more harm than good —
+        // the lexicon carries rare pedagogical / Pali surfaces
+        // (independent-vowel forms `ဦ`, `ဧ`, literary `ကြဧ`) whose raw
+        // rank_score would win the synthetic-score comparison against
+        // clean parser output. Gating at ≥8 chars keeps the lattice
+        // focused on the multi-word regime where it actually moves the
+        // needle.
+        // Run the lattice decoder on the full normalized buffer, not
+        // on the active tail. Windowed / frozen-prefix decoding can
+        // commit a wrong parse in the prefix (e.g. `ဆစ်ဟွား` instead
+        // of `ဆီသွား`) which the tail-only lattice cannot undo. Running
+        // lattice on the full buffer lets it re-segment the whole
+        // sentence in one pass — the lexicon's suffix cache
+        // (`exactLookupCache`) keeps repeated keystrokes cheap.
+        //
+        // Because the lattice output represents the entire buffer
+        // from scratch, we skip the frozen-prefix prepend path that
+        // would otherwise apply in windowed mode.
+        // The lattice needs a real (vocabulary-bearing) LM to rank
+        // its word-arc alternatives — without one the Viterbi
+        // collapses to "highest lexicon rank_score wins" and that
+        // surfaces rare / literary variants (`တဦ` for `tu`, `ဦ`/`ဧ`
+        // forms) in place of the common reading. Skip the decoder
+        // under `NullLanguageModel` (tests that construct the engine
+        // with just a store).
+        let latticeOutputs: [WordLatticeDecoder.LatticeCandidate]
+        if normalized.count >= Self.latticeMinReadingLen
+            && languageModel.hasVocabulary {
+            latticeOutputs = latticeDecoder.decode(
+                reading: normalized,
+                baseContext: context
+            )
+        } else {
+            latticeOutputs = []
+        }
+        if !latticeOutputs.isEmpty {
+            // Rebuild the surface index after each injection path; we
+            // want lattice candidates to be deduped against existing
+            // grammar candidates too.
+            var injectIndex: [String: Int] = [:]
+            for (idx, cand) in grammarCandidates.enumerated() {
+                injectIndex[cand.candidate.surface] = idx
+            }
+            // Only inject lattice candidates whose LM score is within
+            // a reasonable margin of the lattice's top. The tail of
+            // the lattice output holds rare variants (retroflex `ဌ`,
+            // tone-dot aliases, punctuation artefacts) that would
+            // otherwise pollute the anchor history during progressive
+            // typing — at an intermediate buffer length the weak-LM
+            // variant can win a local tiebreak and then propagate as
+            // the committed prefix on subsequent keystrokes.
+            let latticeLmTop = latticeOutputs[0].lmLogProb
+            let latticeLmFloor = latticeLmTop - Self.latticeLmInjectionMargin
+            for (rank, out) in latticeOutputs.enumerated() where out.lmLogProb >= latticeLmFloor {
+                let fullSurface = out.surface
+                let fullReading = out.reading
+                if Self.hasInterleavedLatin(fullSurface) { continue }
+                // Lattice's Viterbi LM sum covers the whole buffer
+                // (we run decode on `normalized`, not the windowed
+                // tail). Use it as-is — arcwise trigram sum is the
+                // ranking signal we want, aligned with the word
+                // boundaries the lattice actually chose.
+                let totalLM = out.lmLogProb
+                // Synthetic rank score preserves the lattice's internal
+                // order. Sized to be on the same scale as parser DP
+                // scores (≤ 20 for a 10-char buffer): log(rank) is the
+                // primary input to the composite comparator, and
+                // `log(30) - log(10) = 1.1` is a ≈2.75 nat boost
+                // against a pure parser candidate. That lets lattice
+                // outputs surface in the top but still yields when
+                // a parser candidate has a clearly better LM signal
+                // (>≈3 nats, which the LM-dominance short-circuit
+                // already covers at 1 nat). Top-of-lattice gets 30,
+                // dropping by 2 per rank down to a floor of 10.
+                let latticeRankScore = Double(max(10, 30 - rank * 2))
+                if let existingIdx = injectIndex[fullSurface] {
+                    // Same surface already emitted by parser / lexicon.
+                    // Give it a modest lattice bonus (not full replace),
+                    // and refresh the LM score with the lattice view so
+                    // the absorbed candidate benefits from the decoder.
+                    let existing = grammarCandidates[existingIdx]
+                    grammarCandidates[existingIdx].candidate = Candidate(
+                        surface: existing.candidate.surface,
+                        reading: existing.candidate.reading,
+                        source: existing.candidate.source,
+                        score: existing.candidate.score + latticeRankScore
+                    )
+                    // Prefer the higher of the two LM readings — lattice
+                    // uses the same scorer but a different context
+                    // chain, so this is a safe max-of-both.
+                    if totalLM > existing.lmLogProb {
+                        grammarCandidates[existingIdx].lmLogProb = totalLM
+                    }
+                } else {
+                    // Approximate Burmese syllable count by counting
+                    // base consonants / independent vowels in the
+                    // surface. Using `arcCount` directly under-reports
+                    // for compound lexicon arcs (e.g. `အိမ်မှာ` = 1 arc
+                    // but 2 syllables), which would let lattice win the
+                    // DP-style `syllableCount` tiebreaker unfairly.
+                    let approxSyllables = Self.approximateSyllableCount(fullSurface)
+                    // Legality per syllable at 120 sits just above the
+                    // parser's DP-score-per-syllable (100-110) so the
+                    // lattice wins the legality tiebreak in
+                    // `grammarCandidateIsBetter` at equal syllableCount.
+                    // This is safe because every lattice arc is either a
+                    // lexicon hit (curated surface) or a parser-emitted
+                    // legal syllable — both are strictly as legal as the
+                    // parser's own output.
+                    grammarCandidates.append(RankedGrammarCandidate(
+                        candidate: Candidate(
+                            surface: fullSurface,
+                            reading: fullReading,
+                            source: .grammar,
+                            score: latticeRankScore
+                        ),
+                        legalityScore: 120 * max(1, approxSyllables),
+                        aliasCost: 0,
+                        parserScore: Int(latticeRankScore),
+                        structureCost: 0,
+                        syllableCount: max(1, approxSyllables),
+                        rarityPenalty: 0,
+                        lmLogProb: totalLM,
+                        absorbedMissingFromLM: false
+                    ))
+                    injectIndex[fullSurface] = grammarCandidates.count - 1
+                }
+            }
         }
 
         var grammarSurfaceIndex: [String: Int] = [:]
@@ -2861,6 +3037,49 @@ public final class BurmeseEngine: @unchecked Sendable {
     private static let codaMarkScalars: Set<UInt32> = [
         0x103A, 0x1036, 0x100A, 0x1037, 0x1009,
     ]
+
+    /// Approximate count of Burmese syllables in a surface string.
+    /// Counts base consonants (U+1000–U+1021) and independent vowels
+    /// (U+1023–U+1027, U+1029–U+102A) as syllable anchors, excluding
+    /// positions where the base is attached to another syllable
+    /// rather than starting one:
+    ///
+    /// - **Virama subscript**: a base immediately preceded by U+1039
+    ///   (virama) is the lower half of a stack (`က + ္ + ဿ`) or the
+    ///   subscript consonant after a kinzi's asat+virama — attaches
+    ///   to the preceding syllable, not a new one.
+    /// - **Coda consonant**: a base immediately followed by U+103A
+    ///   (asat) is a syllable-final consonant (`မ` in `မင်`, `န` in
+    ///   `ကျွန်`). Counting it would turn `ကျွန်တော်ကထမင်` into 7
+    ///   syllables instead of 5 and let a spurious parser split like
+    ///   `ကထမီန` (6 syllables under that same rule — the final `န`
+    ///   is not coda-marked there) win the `syllableCount < rhs`
+    ///   tiebreaker in `grammarCandidateIsBetter`.
+    ///
+    /// Must stay in lockstep with the parser's own `syllableCount`:
+    /// the DP counts one syllable per emitted onset / onset+vowel
+    /// transition, not per Unicode scalar, so lattice candidates
+    /// assigned an over-count here would systematically lose ties.
+    private static func approximateSyllableCount(_ surface: String) -> Int {
+        var count = 0
+        let scalars = Array(surface.unicodeScalars)
+        var previousWasVirama = false
+        for (i, scalar) in scalars.enumerated() {
+            let v = scalar.value
+            let isBase = (0x1000...0x1021).contains(v)
+                || (0x1023...0x1027).contains(v)
+                || (0x1029...0x102A).contains(v)
+            if isBase && !previousWasVirama {
+                let followedByAsat = (i + 1 < scalars.count)
+                    && scalars[i + 1].value == 0x103A
+                if !followedByAsat {
+                    count += 1
+                }
+            }
+            previousWasVirama = (v == 0x1039)
+        }
+        return count
+    }
 
     private static func isCodaOnlySingleScalarDifference(_ lhs: String, _ rhs: String) -> Bool {
         let a = Array(lhs.unicodeScalars)

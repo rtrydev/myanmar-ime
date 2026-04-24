@@ -436,7 +436,11 @@ public final class SyllableParser: Sendable {
 
     // MARK: - Public API
 
-    private static func normalizeForParser(_ input: String) -> String {
+    /// Normalize a reading into the parser's internal byte set: lowercase
+    /// it and strip anything that is neither a composing character nor a
+    /// numeric alias marker. Exposed so the lattice decoder can align its
+    /// per-position arc enumeration against the same buffer the DP sees.
+    public static func normalizeForParser(_ input: String) -> String {
         String(input.lowercased().filter {
             Romanization.composingCharacters.contains($0) || Romanization.isNumericAliasMarker($0)
         })
@@ -481,6 +485,126 @@ public final class SyllableParser: Sendable {
             requestedReading: normalized,
             isFullBuffer: isFullBuffer
         )
+    }
+
+    /// Single-syllable placement anchored at a concrete character span of
+    /// the normalized reading. Used by the lattice decoder as the fallback
+    /// arc set when no lexicon entry covers a position — one call to
+    /// `syllableArcs` produces every legal (onset + optional vowel) and
+    /// every standalone-vowel syllable that fits inside the buffer, so the
+    /// decoder can traverse arbitrary readings without per-position
+    /// re-parsing.
+    public struct SyllableArc: Sendable {
+        public let start: Int
+        public let end: Int
+        public let output: String
+        public let reading: String
+        public let aliasCost: Int
+        /// Parser DP score for a single match (consumed-chars minus rule
+        /// count minus aliasCost; illegal arcs carry a heavy negative
+        /// penalty — mirrors `scoreMatch`).
+        public let score: Int
+        public let isLegal: Bool
+    }
+
+    /// Enumerate every single-syllable placement reachable inside the
+    /// normalized reading. Each arc consumes `chars[start..<end]` and
+    /// produces the corresponding Myanmar `output`. Covers:
+    ///
+    /// - Onset-only transitions (inherent-vowel syllable, e.g. `t` → `တ`).
+    /// - Onset + vowel pairs (e.g. `tar` → `တာ`).
+    /// - Standalone vowels / independent-vowel entries (e.g. `a` → `အ`).
+    ///
+    /// No soft-boundary virama or stack-inference arcs are emitted — those
+    /// are engine-level compound rewrites; the lattice leaves stacks to
+    /// the curated lexicon, which already holds the correct surfaces.
+    ///
+    /// The reading span is sliced from the *normalized* input, so callers
+    /// that work off the original buffer must normalize first if they
+    /// need positional alignment. The character range is inclusive on
+    /// `start`, exclusive on `end`, in character units (not bytes).
+    public func syllableArcs(_ input: String) -> [SyllableArc] {
+        let normalized = Self.normalizeForParser(input)
+        guard !normalized.isEmpty else { return [] }
+        let chars = Array(normalized)
+        let onsetMatchesByStart = precomputeOnsetMatches(chars)
+        let vowelMatchesByStart = precomputeVowelMatches(chars)
+        var pairLegality: [UInt64: Int] = [:]
+
+        var arcs: [SyllableArc] = []
+        arcs.reserveCapacity(chars.count * 8)
+
+        for i in 0..<chars.count {
+            // Onset-only: bare consonant takes the inherent 'a'. Skip
+            // zero-length onsets.
+            for (onsetEnd, onsetEntry) in onsetMatchesByStart[i] where onsetEnd > i {
+                let onsetLegality = onsetBareLegality[Int(onsetEntry.id)]
+                let onsetReading = String(chars[i..<onsetEnd])
+                let onsetScore = (onsetEnd - i) - 1 - onsetEntry.aliasCost
+                    + (onsetLegality > 0 ? 0 : -10000)
+                arcs.append(SyllableArc(
+                    start: i,
+                    end: onsetEnd,
+                    output: onsetEntry.myanmar,
+                    reading: onsetReading,
+                    aliasCost: onsetEntry.aliasCost,
+                    score: onsetScore,
+                    isLegal: onsetLegality > 0
+                ))
+
+                // Onset + vowel pairs.
+                for (vowelEnd, vowelEntry) in vowelMatchesByStart[onsetEnd] {
+                    // Skip the soft-boundary virama marker — it is a DP
+                    // connector, not a user-facing syllable.
+                    if vowelEntry.id == softBoundaryViramaVowelId { continue }
+                    let key = Self.packPair(onsetEntry.id, vowelEntry.id)
+                    let legality: Int
+                    if let cached = pairLegality[key] {
+                        legality = cached
+                    } else {
+                        let raw = Grammar.validateSyllable(
+                            onset: onsetEntry.onset,
+                            medials: onsetEntry.medials,
+                            vowelRoman: vowelEntry.canonicalRoman
+                        )
+                        pairLegality[key] = raw
+                        legality = raw
+                    }
+                    let reading = String(chars[i..<vowelEnd])
+                    let score = (vowelEnd - i) - 2 - (onsetEntry.aliasCost + vowelEntry.aliasCost)
+                        + (legality > 0 ? 0 : -10000)
+                    arcs.append(SyllableArc(
+                        start: i,
+                        end: vowelEnd,
+                        output: onsetEntry.myanmar + vowelEntry.myanmar,
+                        reading: reading,
+                        aliasCost: onsetEntry.aliasCost + vowelEntry.aliasCost,
+                        score: score,
+                        isLegal: legality > 0
+                    ))
+                }
+            }
+
+            // Standalone vowels / independent-vowel entries.
+            for (vowelEnd, vowelEntry) in vowelMatchesByStart[i]
+            where vowelEntry.isStandalone && vowelEnd > i {
+                if vowelEntry.id == softBoundaryViramaVowelId { continue }
+                let legality = vowelOnlyLegality[Int(vowelEntry.id)]
+                let reading = String(chars[i..<vowelEnd])
+                let score = (vowelEnd - i) - 1 - vowelEntry.aliasCost
+                    + (legality > 0 ? 0 : -10000)
+                arcs.append(SyllableArc(
+                    start: i,
+                    end: vowelEnd,
+                    output: vowelEntry.myanmar,
+                    reading: reading,
+                    aliasCost: vowelEntry.aliasCost,
+                    score: score,
+                    isLegal: legality > 0
+                ))
+            }
+        }
+        return arcs
     }
 
     /// Find the longest prefix of `input` whose top-`maxResults` parses pass

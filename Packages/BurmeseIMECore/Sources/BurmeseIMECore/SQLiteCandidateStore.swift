@@ -18,6 +18,15 @@ public final class SQLiteCandidateStore: CandidateStore, @unchecked Sendable {
     private var db: OpaquePointer?
     private var prefixStmt: OpaquePointer?
     private var composePrefixStmt: OpaquePointer?
+    private var exactAliasStmt: OpaquePointer?
+    private var exactComposeStmt: OpaquePointer?
+    // Exact-match lookups are called many times per keystroke by the lattice
+    // decoder — at every position × every prefix length. Most sub-readings
+    // do not exist as lexicon entries, so a cheap per-engine-instance cache
+    // collapses each repeat lookup to a dictionary hit.
+    private var exactLookupCache: [String: [Candidate]] = [:]
+    private let exactLookupCacheLock = NSLock()
+    private static let exactLookupCacheCapacity = 4096
 
     /// Open a lexicon database at the given path.
     /// Returns nil if the database cannot be opened.
@@ -55,6 +64,8 @@ public final class SQLiteCandidateStore: CandidateStore, @unchecked Sendable {
     deinit {
         sqlite3_finalize(prefixStmt)
         sqlite3_finalize(composePrefixStmt)
+        sqlite3_finalize(exactAliasStmt)
+        sqlite3_finalize(exactComposeStmt)
         sqlite3_close(db)
     }
 
@@ -72,6 +83,50 @@ public final class SQLiteCandidateStore: CandidateStore, @unchecked Sendable {
         candidates += lookupPrefix(prefix: aliasPrefix, upperBound: upperBound)
         candidates += lookupComposePrefix(prefix: composePrefix, upperBound: composeUpperBound)
         return deduplicateCandidates(candidates)
+    }
+
+    public func lookupExactForLattice(reading: String) -> [(candidate: Candidate, aliasPenalty: Int)] {
+        guard !reading.isEmpty else { return [] }
+        let aliasKey = Romanization.aliasReading(reading)
+        let composeKey = Romanization.composeLookupKey(reading)
+        var results: [(candidate: Candidate, aliasPenalty: Int)] = []
+        results += lookupExactAliasWithPenalty(reading: aliasKey)
+        results += lookupExactComposeWithPenalty(reading: composeKey)
+        // Dedupe by surface, keeping the first (higher-ranked) entry.
+        var seen: Set<String> = []
+        var deduped: [(candidate: Candidate, aliasPenalty: Int)] = []
+        deduped.reserveCapacity(results.count)
+        for row in results where seen.insert(row.candidate.surface).inserted {
+            deduped.append(row)
+        }
+        return deduped
+    }
+
+    public func lookupExact(reading: String, previousSurface: String?) -> [Candidate] {
+        guard !reading.isEmpty else { return [] }
+        let aliasKey = Romanization.aliasReading(reading)
+        let composeKey = Romanization.composeLookupKey(reading)
+        let cacheKey = aliasKey + "\u{1F}" + composeKey
+
+        exactLookupCacheLock.lock()
+        if let hit = exactLookupCache[cacheKey] {
+            exactLookupCacheLock.unlock()
+            return hit
+        }
+        exactLookupCacheLock.unlock()
+
+        var candidates: [Candidate] = []
+        candidates += lookupExactAlias(reading: aliasKey)
+        candidates += lookupExactCompose(reading: composeKey)
+        let deduped = deduplicateCandidates(candidates)
+
+        exactLookupCacheLock.lock()
+        if exactLookupCache.count >= Self.exactLookupCacheCapacity {
+            exactLookupCache.removeAll(keepingCapacity: true)
+        }
+        exactLookupCache[cacheKey] = deduped
+        exactLookupCacheLock.unlock()
+        return deduped
     }
 
     // MARK: - Internal Queries
@@ -146,7 +201,164 @@ public final class SQLiteCandidateStore: CandidateStore, @unchecked Sendable {
             return false
         }
 
+        // Exact-match variants for the lattice decoder. The alias equality
+        // query hits `idx_reading_alias`; the compose equality query hits
+        // `idx_reading_compose` when present, else falls back to a REPLACE
+        // filter on `reading_alias_index` (mirrors the prefix fallback).
+        let exactAliasSQL: String
+        let exactComposeSQL: String
+        if usesAliasIndex {
+            exactAliasSQL = """
+                SELECT e.surface, a.canonical_reading, a.rank_score, a.alias_penalty
+                FROM reading_alias_index a
+                JOIN entries e ON e.id = a.entry_id
+                WHERE a.alias_reading = ?1
+                ORDER BY a.alias_penalty ASC, a.rank_score DESC
+                LIMIT 20
+                """
+            if usesComposeIndex {
+                exactComposeSQL = """
+                    SELECT e.surface, c.canonical_reading, c.rank_score, c.alias_penalty, c.separator_penalty
+                    FROM reading_compose_index c
+                    JOIN entries e ON e.id = c.entry_id
+                    WHERE c.compose_reading = ?1
+                    ORDER BY c.separator_penalty ASC, c.alias_penalty ASC, c.rank_score DESC
+                    LIMIT 20
+                    """
+            } else {
+                exactComposeSQL = """
+                    SELECT e.surface, a.canonical_reading, a.rank_score, a.alias_penalty,
+                           (LENGTH(a.alias_reading) - LENGTH(REPLACE(REPLACE(a.alias_reading, '+', ''), '''', ''))) AS separator_penalty
+                    FROM reading_alias_index a
+                    JOIN entries e ON e.id = a.entry_id
+                    WHERE REPLACE(REPLACE(a.alias_reading, '+', ''), '''', '') = ?1
+                    ORDER BY separator_penalty ASC, a.alias_penalty ASC, a.rank_score DESC
+                    LIMIT 20
+                    """
+            }
+        } else {
+            exactAliasSQL = """
+                SELECT e.surface, r.canonical_reading, r.rank_score,
+                       (LENGTH(r.canonical_reading) - LENGTH(REPLACE(REPLACE(r.canonical_reading, '2', ''), '3', ''))) AS alias_penalty
+                FROM reading_index r
+                JOIN entries e ON e.id = r.entry_id
+                WHERE REPLACE(REPLACE(r.canonical_reading, '2', ''), '3', '') = ?1
+                ORDER BY alias_penalty ASC, r.rank_score DESC
+                LIMIT 20
+                """
+            exactComposeSQL = """
+                SELECT e.surface, r.canonical_reading, r.rank_score,
+                       (LENGTH(r.canonical_reading) - LENGTH(REPLACE(REPLACE(r.canonical_reading, '2', ''), '3', ''))) AS alias_penalty,
+                       (LENGTH(r.canonical_reading) - LENGTH(REPLACE(REPLACE(r.canonical_reading, '+', ''), '''', ''))) AS separator_penalty
+                FROM reading_index r
+                JOIN entries e ON e.id = r.entry_id
+                WHERE REPLACE(REPLACE(REPLACE(REPLACE(r.canonical_reading, '+', ''), '''', ''), '2', ''), '3', '') = ?1
+                ORDER BY separator_penalty ASC, alias_penalty ASC, r.rank_score DESC
+                LIMIT 20
+                """
+        }
+
+        if sqlite3_prepare_v2(db, exactAliasSQL, -1, &exactAliasStmt, nil) != SQLITE_OK {
+            sqlite3_finalize(prefixStmt); prefixStmt = nil
+            sqlite3_finalize(composePrefixStmt); composePrefixStmt = nil
+            return false
+        }
+        if sqlite3_prepare_v2(db, exactComposeSQL, -1, &exactComposeStmt, nil) != SQLITE_OK {
+            sqlite3_finalize(prefixStmt); prefixStmt = nil
+            sqlite3_finalize(composePrefixStmt); composePrefixStmt = nil
+            sqlite3_finalize(exactAliasStmt); exactAliasStmt = nil
+            return false
+        }
+
         return true
+    }
+
+    private func lookupExactAlias(reading: String) -> [Candidate] {
+        guard !reading.isEmpty, let stmt = exactAliasStmt else { return [] }
+        defer { sqlite3_reset(stmt) }
+
+        sqlite3_bind_text(stmt, 1, reading, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+
+        var results: [Candidate] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let surface = String(cString: sqlite3_column_text(stmt, 0))
+            let readingStr = String(cString: sqlite3_column_text(stmt, 1))
+            let rankScore = sqlite3_column_double(stmt, 2)
+            let aliasPenalty = Int(sqlite3_column_int(stmt, 3))
+            results.append(Candidate(
+                surface: surface,
+                reading: readingStr,
+                source: .lexicon,
+                score: rankScore - Double(aliasPenalty) * 1000.0
+            ))
+        }
+        return results
+    }
+
+    private func lookupExactAliasWithPenalty(reading: String) -> [(candidate: Candidate, aliasPenalty: Int)] {
+        guard !reading.isEmpty, let stmt = exactAliasStmt else { return [] }
+        defer { sqlite3_reset(stmt) }
+
+        sqlite3_bind_text(stmt, 1, reading, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+
+        var results: [(candidate: Candidate, aliasPenalty: Int)] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let surface = String(cString: sqlite3_column_text(stmt, 0))
+            let readingStr = String(cString: sqlite3_column_text(stmt, 1))
+            let rankScore = sqlite3_column_double(stmt, 2)
+            let aliasPenalty = Int(sqlite3_column_int(stmt, 3))
+            results.append((
+                Candidate(surface: surface, reading: readingStr, source: .lexicon, score: rankScore),
+                aliasPenalty
+            ))
+        }
+        return results
+    }
+
+    private func lookupExactComposeWithPenalty(reading: String) -> [(candidate: Candidate, aliasPenalty: Int)] {
+        guard !reading.isEmpty, let stmt = exactComposeStmt else { return [] }
+        defer { sqlite3_reset(stmt) }
+
+        sqlite3_bind_text(stmt, 1, reading, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+
+        var results: [(candidate: Candidate, aliasPenalty: Int)] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let surface = String(cString: sqlite3_column_text(stmt, 0))
+            let readingStr = String(cString: sqlite3_column_text(stmt, 1))
+            let rankScore = sqlite3_column_double(stmt, 2)
+            let aliasPenalty = Int(sqlite3_column_int(stmt, 3))
+            // Column 4 is separator_penalty — intentionally ignored here;
+            // separator count is a reading-shape concern that the
+            // lattice's contiguous-arc traversal already handles.
+            results.append((
+                Candidate(surface: surface, reading: readingStr, source: .lexicon, score: rankScore),
+                aliasPenalty
+            ))
+        }
+        return results
+    }
+
+    private func lookupExactCompose(reading: String) -> [Candidate] {
+        guard !reading.isEmpty, let stmt = exactComposeStmt else { return [] }
+        defer { sqlite3_reset(stmt) }
+
+        sqlite3_bind_text(stmt, 1, reading, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+
+        var results: [Candidate] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let surface = String(cString: sqlite3_column_text(stmt, 0))
+            let readingStr = String(cString: sqlite3_column_text(stmt, 1))
+            let rankScore = sqlite3_column_double(stmt, 2)
+            let aliasPenalty = Int(sqlite3_column_int(stmt, 3))
+            let separatorPenalty = Int(sqlite3_column_int(stmt, 4))
+            results.append(Candidate(
+                surface: surface,
+                reading: readingStr,
+                source: .lexicon,
+                score: rankScore - Double(aliasPenalty) * 1000.0 - Double(separatorPenalty) * 250.0
+            ))
+        }
+        return results
     }
 
     private func lookupPrefix(prefix: String, upperBound: String) -> [Candidate] {
