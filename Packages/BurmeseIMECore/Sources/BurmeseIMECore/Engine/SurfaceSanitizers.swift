@@ -256,10 +256,10 @@ extension BurmeseEngine {
     /// replaced with U+1021 (အ, the independent "a" onset). Returns nil
     /// when `parse.output` is not a ZWNJ + combining-mark orphan. See
     /// `Grammar.swift` module doc for the orphan-ZWNJ rationale. The
-    /// sibling inherits the original scoring so it competes with other
-    /// parses on merits (structure, syllable count, rarity) rather than
-    /// dominating automatically.
-    internal static func promoteOrphanZwnjToImplicitA(_ parse: SyllableParse) -> SyllableParse? {
+    /// sibling inherits the original ranking signals, but recomputes
+    /// structural legality from the promoted surface so it can pass the
+    /// same acceptable-parse gates as parser-native legal output.
+    @_spi(Testing) public static func promoteOrphanZwnjToImplicitA(_ parse: SyllableParse) -> SyllableParse? {
         let scalars = Array(parse.output.unicodeScalars)
         guard scalars.count >= 2, scalars[0].value == 0x200C else { return nil }
         let mark = scalars[1].value
@@ -268,11 +268,15 @@ extension BurmeseEngine {
         replaced[0] = Unicode.Scalar(0x1021)!
         var scalarView = String.UnicodeScalarView()
         scalarView.append(contentsOf: replaced)
+        let output = String(scalarView)
+        let legalityScore = SyllableParser.scanOutputLegality(output)
+            ? max(parse.legalityScore, 1)
+            : 0
         return SyllableParse(
-            output: String(scalarView),
+            output: output,
             reading: parse.reading,
             aliasCost: parse.aliasCost,
-            legalityScore: parse.legalityScore,
+            legalityScore: legalityScore,
             score: parse.score,
             structureCost: parse.structureCost,
             syllableCount: max(1, parse.syllableCount),

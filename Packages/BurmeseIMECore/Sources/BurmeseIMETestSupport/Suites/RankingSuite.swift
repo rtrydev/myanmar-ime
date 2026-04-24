@@ -1,5 +1,5 @@
 import Foundation
-import BurmeseIMECore
+@_spi(Testing) import BurmeseIMECore
 
 /// Ranking regressions reported by users. These tests capture three
 /// bugs in the candidate-ranking pipeline:
@@ -656,6 +656,48 @@ public enum RankingSuite {
                     detail: "panel must keep orphan fallback when no legal sibling exists")
             })
         }
+
+        cases.append(TestCase("task02_awPromotedOrphanBecomesLegalCandidate") { ctx in
+            let state = BurmeseEngine().update(buffer: "aw", context: [])
+            let surfaces = state.candidates.map(\.surface)
+            ctx.assertTrue(
+                surfaces.first == "\u{1021}\u{1031}\u{102C}\u{103A}",
+                "task02_awTopPromoted",
+                detail: "expected promoted orphan surface; got: \(surfaces)"
+            )
+            ctx.assertFalse(
+                surfaces.contains { surface in
+                    surface.unicodeScalars.contains { $0.value < 0x1000 || $0.value > 0x109F }
+                },
+                "task02_awNoAsciiTail",
+                detail: "aw candidates must stay Myanmar-only; got: \(surfaces)"
+            )
+        })
+
+        cases.append(TestCase("task02_promotedOrphanRecomputesLegality") { ctx in
+            let parser = SyllableParser()
+            let orphan = parser.parseCandidates("aw", maxResults: 8).first {
+                let scalars = Array($0.output.unicodeScalars)
+                return scalars.count >= 2
+                    && scalars[0].value == 0x200C
+                    && (0x102B...0x103E).contains(scalars[1].value)
+            }
+            guard let orphan,
+                  let promoted = BurmeseEngine.promoteOrphanZwnjToImplicitA(orphan) else {
+                ctx.fail("task02_promotedSetup", detail: "expected an orphan parse for aw")
+                return
+            }
+            ctx.assertTrue(
+                promoted.output == "\u{1021}\u{1031}\u{102C}\u{103A}",
+                "task02_promotedSurface",
+                detail: "expected promoted output to replace ZWNJ with အ; got: \(promoted.output)"
+            )
+            ctx.assertTrue(
+                promoted.legalityScore > 0,
+                "task02_promotedIsLegal",
+                detail: "promoted parse inherited legality=\(promoted.legalityScore); output=\(promoted.output)"
+            )
+        })
 
         // Group 3: unrelated buffers (no orphan to begin with) must remain
         // byte-identical at rank 1.
