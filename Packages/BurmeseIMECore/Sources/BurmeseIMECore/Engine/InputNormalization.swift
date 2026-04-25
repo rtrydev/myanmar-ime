@@ -236,7 +236,8 @@ extension BurmeseEngine {
     /// (it would equal the no-`+` parse) or when all are strict (it
     /// would equal `input`).
     @_spi(Testing) public static func inferImplicitStackMarkers(
-        _ input: String
+        _ input: String,
+        digitBoundaries: Set<Int> = []
     ) -> (
         input: String,
         insertions: Int,
@@ -291,6 +292,16 @@ extension BurmeseEngine {
         where chars[ngStart] == "n" && chars[ngStart + 1] == "g"
            && chars[ngStart - 2] == "a" && chars[ngStart - 1] == "i" {
             let stackStart = ngStart + 2
+            // A digit anywhere in [1, stackStart] means the user placed a
+            // hard syllable break inside or immediately after the ai+ng
+            // pattern. Skip the collapse AND block the regular loop at
+            // ngStart — without this block the loop would fire at the
+            // 'ai+ng' vowel-rule boundary and produce a kinzi anyway.
+            if !digitBoundaries.isEmpty,
+               digitBoundaries.contains(where: { $0 > 0 && $0 <= stackStart }) {
+                blockedLowerIndices.insert(ngStart)
+                continue
+            }
             let lowers = stackLowerConsonantsStarting(chars: chars, at: stackStart)
             if lowers.isEmpty {
                 // No consonant after `ng` — user typed a bare-onset ng.
@@ -330,6 +341,9 @@ extension BurmeseEngine {
         var insertAt: [(index: Int, isLiberal: Bool, marker: String)] = []
         for lowerIndex in 1..<chars.count {
             guard !blockedLowerIndices.contains(lowerIndex) else { continue }
+            // A digit at this position explicitly separates syllables — the
+            // user did not intend a stack/kinzi here (task 01).
+            guard !digitBoundaries.contains(lowerIndex) else { continue }
             let lowerStart = chars[lowerIndex]
             guard lowerStart.isLetter,
                   !isPaliStackVowelLetter(lowerStart)

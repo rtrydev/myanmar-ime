@@ -189,6 +189,13 @@ public final class BurmeseEngine: @unchecked Sendable {
 
     private let settings: IMESettings?
     internal let tuning: RankingTuning
+    /// Digit boundaries passed inward from `extractMidBufferDigits` so
+    /// that `inferImplicitStackMarkers` can avoid inserting `+` across a
+    /// position where the user explicitly placed an ASCII digit (task 01).
+    /// Set immediately before the digit-extraction recursive `update()`
+    /// call and cleared after it returns. Never read on the windowed path
+    /// (offsets only apply to the full cleaned buffer, not the active tail).
+    private var midDigitBoundaries: Set<Int> = []
 
     /// Live-read wrapper. Falls back to the static default when no settings
     /// instance is wired; otherwise reflects the shared UserDefaults value,
@@ -300,7 +307,12 @@ public final class BurmeseEngine: @unchecked Sendable {
         let (midCleanedBuffer, midInsertions) =
             Self.extractMidBufferDigits(displayBuffer)
         if !midInsertions.isEmpty {
+            // Thread the digit boundary offsets into inferImplicitStackMarkers
+            // so it does not insert `+` across positions where the user placed
+            // a digit — the digit is a hard syllable break (task 01).
+            midDigitBoundaries = Set(midInsertions.map(\.offset))
             var state = update(buffer: midCleanedBuffer, context: context)
+            midDigitBoundaries = []
             state.rawBuffer = displayBuffer
             state.candidates = spliceMidBufferDigits(
                 into: state.candidates,
@@ -749,8 +761,14 @@ public final class BurmeseEngine: @unchecked Sendable {
         // promotion block (bestStrictInferredStackIndex) does not fire on
         // them.
         var liberalKinziOutputs: Set<String> = []
+        // Digit boundaries only apply to the full (non-windowed) cleaned
+        // buffer. When windowed, the active tail has different offsets.
+        let inferBoundaries = effectiveWindowed ? [] : midDigitBoundaries
         if !hasExactLexiconMatch,
-           let inferred = Self.inferImplicitStackMarkers(effectiveParseInput) {
+           let inferred = Self.inferImplicitStackMarkers(
+               effectiveParseInput,
+               digitBoundaries: inferBoundaries
+           ) {
             let existingOutputs = Set(grammarParses.map(\.output))
             // Add parses for the full inferred input (every `+` site).
             ingestInferredParses(
