@@ -218,8 +218,24 @@ extension SyllableParser {
         @inline(__always) func isAttachableMark(_ v: UInt32) -> Bool {
             return isDependentVowel(v) || isToneMark(v) || isMedial(v)
         }
+        // Categorise dependent-vowel scalars so the anchor walk can
+        // reject same-category duplicates without rejecting legitimate
+        // multi-scalar shapes (`o` = U+102D + U+102F crosses categories
+        // and is legal). Categories: aa / i / u / e / ai. Returns 0 for
+        // scalars outside the dep-vowel range. See task 02.
+        @inline(__always) func depVowelCategory(_ v: UInt32) -> Int {
+            switch v {
+            case 0x102B, 0x102C: return 1
+            case 0x102D, 0x102E: return 2
+            case 0x102F, 0x1030: return 3
+            case 0x1031:        return 4
+            case 0x1032:        return 5
+            default:            return 0
+            }
+        }
         @inline(__always) func attachableMarkHasAnchor(at i: Int) -> Bool {
             let current = indices[i].value
+            let currentCategory = depVowelCategory(current)
             var j = i - 1
             while j >= 0 {
                 let w = indices[j].value
@@ -250,6 +266,17 @@ extension SyllableParser {
                     return false
                 }
                 if current == 0x1031 && w == 0x1031 {
+                    return false
+                }
+                // Reject "dep vowel of category X stacked on a base
+                // already carrying a dep vowel of category X" — no
+                // Burmese syllable carries two `i`-family marks, two
+                // `u`-family marks, etc. on the same consonant. The
+                // multi-scalar `o` cluster (`102D 102F`) crosses
+                // categories so it is unaffected. Task 02.
+                if currentCategory != 0,
+                   isDependentVowel(w),
+                   depVowelCategory(w) == currentCategory {
                     return false
                 }
                 if isAttachableMark(w) {

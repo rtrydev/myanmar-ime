@@ -12,6 +12,7 @@ public enum BurmeseTestSuites {
         KinziInferenceSuite.suite,
         MidBufferStackInferenceSuite.suite,
         ExplicitViramaSuite.suite,
+        RepeatedDepVowelSuite.suite,
         ConsonantDigraphIntegritySuite.suite,
         PaliStackOverrideSuite.suite,
         BareVowelRepetitionSuite.suite,
