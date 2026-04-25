@@ -57,8 +57,14 @@ public enum GrammarSuite {
             ctx.assertTrue(Grammar.canConsonantTakeMedial(Myanmar.ka, Myanmar.medialWa))
         },
 
-        TestCase("medialHa_ka_isLegal") { ctx in
-            ctx.assertTrue(Grammar.canConsonantTakeMedial(Myanmar.ka, Myanmar.medialHa))
+        TestCase("medialHa_ma_isLegal") { ctx in
+            ctx.assertTrue(Grammar.canConsonantTakeMedial(Myanmar.ma, Myanmar.medialHa))
+        },
+
+        TestCase("medialHa_ka_isIllegal") { ctx in
+            // ka is a voiceless stop with no native ha-htoe form — see
+            // tasks/03-medial-ha-permissive-on-voiced-stops.md.
+            ctx.assertFalse(Grammar.canConsonantTakeMedial(Myanmar.ka, Myanmar.medialHa))
         },
 
         TestCase("medialRa_nga_isIllegal") { ctx in
@@ -90,7 +96,7 @@ public enum GrammarSuite {
 
         TestCase("validateSyllable_medialHaPlusLongI_rejected") { ctx in
             let score = Grammar.validateSyllable(
-                onset: Myanmar.ka,
+                onset: Myanmar.ma,
                 medials: [Myanmar.medialHa],
                 vowelRoman: "i:"
             )
@@ -99,7 +105,7 @@ public enum GrammarSuite {
 
         TestCase("validateSyllable_medialHaPlusLongU_rejected") { ctx in
             let score = Grammar.validateSyllable(
-                onset: Myanmar.ka,
+                onset: Myanmar.ma,
                 medials: [Myanmar.medialHa],
                 vowelRoman: "u:"
             )
@@ -108,7 +114,7 @@ public enum GrammarSuite {
 
         TestCase("validateSyllable_medialHaPlusShortI_legal") { ctx in
             let score = Grammar.validateSyllable(
-                onset: Myanmar.ka,
+                onset: Myanmar.ma,
                 medials: [Myanmar.medialHa],
                 vowelRoman: "i"
             )
@@ -116,9 +122,13 @@ public enum GrammarSuite {
         },
 
         TestCase("validateSyllable_tripleMedialWithPermittedVowels_legal") { ctx in
+            // `ma` is one of the few onsets that takes ha-htoe under
+            // the narrowed `canTakeMedialHa` set (task 03), so the
+            // triple-medial cluster `m + ya + wa + ha` is the
+            // canonical legality probe here.
             for vowel in ["a", "ar", "ar:", "ar2", "ar2:"] {
                 let score = Grammar.validateSyllable(
-                    onset: Myanmar.ka,
+                    onset: Myanmar.ma,
                     medials: [Myanmar.medialYa, Myanmar.medialWa, Myanmar.medialHa],
                     vowelRoman: vowel
                 )
@@ -1199,39 +1209,12 @@ public enum GrammarSuite {
         // match that ordering — accept post-consonant permutations as
         // onset aliases so the whole cluster stacks on one base.
 
-        TestCase("parse_tripleMedial_khywhar_stacksOnOneBase") { ctx in
-            let parser = SyllableParser()
-            let top = parser.parseCandidates("khywhar", maxResults: 1).first
-            let scalars = top?.output.unicodeScalars.map(\.value) ?? []
-            ctx.assertTrue(
-                (top?.syllableCount ?? -1) == 1,
-                detail: "khywhar must parse as a single syllable; got syl=\(top?.syllableCount ?? -1) scalars=\(scalars.map { String(format: "%04X", $0) })"
-            )
-            ctx.assertTrue(
-                scalars.contains(0x1001)
-                    && (scalars.contains(0x103B) || scalars.contains(0x103C))
-                    && scalars.contains(0x103D)
-                    && scalars.contains(0x103E),
-                detail: "khywhar must surface kha + (ya-pin|ya-yit) + wa + ha; got \(scalars.map { String(format: "%04X", $0) })"
-            )
-        },
-
-        TestCase("parse_tripleMedial_kywhar_stacksOnOneBase") { ctx in
-            let parser = SyllableParser()
-            let top = parser.parseCandidates("kywhar", maxResults: 1).first
-            let scalars = top?.output.unicodeScalars.map(\.value) ?? []
-            ctx.assertTrue(
-                (top?.syllableCount ?? -1) == 1,
-                detail: "kywhar must parse as a single syllable; got syl=\(top?.syllableCount ?? -1) scalars=\(scalars.map { String(format: "%04X", $0) })"
-            )
-            ctx.assertTrue(
-                scalars.contains(0x1000)
-                    && (scalars.contains(0x103B) || scalars.contains(0x103C))
-                    && scalars.contains(0x103D)
-                    && scalars.contains(0x103E),
-                detail: "kywhar must surface ka + (ya-pin|ya-yit) + wa + ha; got \(scalars.map { String(format: "%04X", $0) })"
-            )
-        },
+        // Removed: `khywhar` / `kywhar` (kha / ka triple-medial bases).
+        // Both bases lost ha-htoe support when `Grammar.canTakeMedialHa`
+        // was narrowed to native sonorants (task 03), so the
+        // single-syllable triple-medial parse is no longer valid for
+        // them. Equivalent coverage on a still-allowed base lives in
+        // `parse_tripleMedial_myhwar_stacksOnOneBase`.
 
         TestCase("parse_tripleMedial_myhwar_stacksOnOneBase") { ctx in
             // Users may type medials in a non-canonical order (yhw).

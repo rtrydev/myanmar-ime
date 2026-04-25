@@ -2,7 +2,10 @@ import BurmeseIMECore
 
 public enum TripleMedialLegalitySuite {
 
-    private static let tripleBasePrefixes = ["k", "kh", "g", "p", "m", "d", "s"]
+    // Bases listed here must take medial ha-htoe under
+    // `Grammar.canTakeMedialHa`. Voiced/voiceless stops were removed
+    // in task 03; only the native sonorant set survives.
+    private static let tripleBasePrefixes = ["m", "n", "ng", "l"]
     private static let forbiddenVowels = ["i", "ay", "u", "aw", "in", "o", "e"]
 
     private static func hasAsciiSurfaceScalar(_ surface: String) -> Bool {
@@ -30,7 +33,7 @@ public enum TripleMedialLegalitySuite {
 
     public static let suite = TestSuite(name: "TripleMedialLegality", cases: [
         TestCase("permittedVowelsRemainTripleMedialTop") { ctx in
-            for buffer in ["kywh", "kywha", "kywhar", "kywhar:"] {
+            for buffer in ["mywh", "mywha", "mywhar", "mywhar:"] {
                 let state = BurmeseEngine().update(buffer: buffer, context: [])
                 let top = state.candidates.first?.surface ?? ""
                 ctx.assertTrue(

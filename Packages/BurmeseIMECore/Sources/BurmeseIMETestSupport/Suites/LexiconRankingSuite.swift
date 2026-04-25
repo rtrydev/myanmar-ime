@@ -649,9 +649,12 @@ public enum LexiconRankingSuite {
                 ("kah",  [0x1000, 0x1021]),
                 ("kaht", [0x1000, 0x1011]),
             ]
-            let containsCases: [(String, [UInt32])] = [
-                ("hka",  [0x1000, 0x103E]),
-            ]
+            // `hka` previously expected `ka + ha-htoe (ကှ)` as a
+            // candidate. Task 03 narrowed `Grammar.canTakeMedialHa`
+            // to native sonorants, so `ka + ha-htoe` is now an
+            // illegal cluster — the expectation no longer holds and
+            // the case has been removed.
+            let containsCases: [(String, [UInt32])] = []
             var failures: [String] = []
             for (word, expectedScalars) in topCases {
                 _ = engine.update(buffer: "", context: [])

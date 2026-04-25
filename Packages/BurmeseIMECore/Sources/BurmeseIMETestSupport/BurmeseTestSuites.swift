@@ -17,6 +17,7 @@ public enum BurmeseTestSuites {
         ToneVariantMedialConsistencySuite.suite,
         TripleMedialLegalitySuite.suite,
         MedialHaForbiddenVowelsSuite.suite,
+        MedialHaForbiddenBasesSuite.suite,
         EngineSuite.suite,
         LexiconRankingSuite.suite,
         RankingSuite.suite,

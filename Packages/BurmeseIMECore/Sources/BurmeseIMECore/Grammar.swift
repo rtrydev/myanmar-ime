@@ -68,14 +68,17 @@ public enum Grammar {
         Myanmar.sa, Myanmar.ha,
     ]
 
-    /// Consonants that can take medial ha-htoe (ှ U+103E).
+    /// Consonants that can take medial ha-htoe (ှ U+103E). Limited to
+    /// nasals, liquids, and semivowels — modern Burmese orthography
+    /// only uses ha-htoe to mark the voiceless / aspirated form of a
+    /// sonorant (`hma`, `hna`, `hla`, `hya`, `hnga`, `hnya`, `hwa`).
+    /// Voiced stops, voiceless stops, and affricates have no native
+    /// ha-htoe-bearing form (`ပှ`, `ဘှ`, `ဂှ`, `ဒှ`, `ဇှ`, `ကှ`, `တှ`
+    /// are all unattested) and are excluded so the parser does not
+    /// surface them in the candidate panel.
     public static let canTakeMedialHa: Set<Character> = [
-        Myanmar.ka, Myanmar.kha, Myanmar.ga, Myanmar.gha, Myanmar.nga,
-        Myanmar.ca, Myanmar.cha, Myanmar.ja, Myanmar.nnya, Myanmar.nya,
-        Myanmar.ta, Myanmar.tha, Myanmar.da, Myanmar.dha, Myanmar.na, Myanmar.nna,
-        Myanmar.pa, Myanmar.pha, Myanmar.ba, Myanmar.bha, Myanmar.ma,
+        Myanmar.nga, Myanmar.nnya, Myanmar.nya, Myanmar.na, Myanmar.ma,
         Myanmar.ya, Myanmar.ra, Myanmar.la, Myanmar.wa,
-        Myanmar.sa,
     ]
 
     /// Check if a consonant can legally take a specific medial.
