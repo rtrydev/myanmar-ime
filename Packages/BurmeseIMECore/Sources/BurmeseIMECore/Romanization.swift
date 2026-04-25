@@ -220,6 +220,8 @@ public enum Romanization {
         // -ar family
         .init("ar2:", "\u{102B}\u{1038}"),  // ါး
         .init("ar:", "\u{102C}\u{1038}"),   // ား
+        .init("ar2.", "\u{102B}\u{1037}"),  // ါ့
+        .init("ar.", "\u{102C}\u{1037}"),   // ာ့
         .init("ar2", "\u{102B}"),           // ါ
         .init("ar", "\u{102C}"),            // ာ
 

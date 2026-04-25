@@ -159,6 +159,73 @@ public enum EngineSuite {
             )
         },
 
+        TestCase("candidates_creakyAaTopFor_par") { ctx in
+            // Task 01: `Xar.` must produce `X` + `ါ့` / `ာ့` (U+102B/C + U+1037)
+            // at rank 1, not the literal-`.` fallback (`X` + `ါ` + `.`).
+            let engine = BurmeseEngine()
+            let state = engine.update(buffer: "par.", context: [])
+            ctx.assertEqual(
+                state.candidates.first?.surface ?? "",
+                "\u{1015}\u{102B}\u{1037}",
+                "par_top"
+            )
+        },
+
+        TestCase("candidates_creakyAaTopFor_thar") { ctx in
+            let engine = BurmeseEngine()
+            let state = engine.update(buffer: "thar.", context: [])
+            ctx.assertEqual(
+                state.candidates.first?.surface ?? "",
+                "\u{101E}\u{102C}\u{1037}",
+                "thar_top"
+            )
+        },
+
+        TestCase("candidates_creakyAaTopFor_mar") { ctx in
+            let engine = BurmeseEngine()
+            let state = engine.update(buffer: "mar.", context: [])
+            ctx.assertEqual(
+                state.candidates.first?.surface ?? "",
+                "\u{1019}\u{102C}\u{1037}",
+                "mar_top"
+            )
+        },
+
+        TestCase("candidates_creakyAaTopFor_phar") { ctx in
+            let engine = BurmeseEngine()
+            let state = engine.update(buffer: "phar.", context: [])
+            ctx.assertEqual(
+                state.candidates.first?.surface ?? "",
+                "\u{1016}\u{102C}\u{1037}",
+                "phar_top"
+            )
+        },
+
+        TestCase("candidates_creakyAaTopFor_lar") { ctx in
+            let engine = BurmeseEngine()
+            let state = engine.update(buffer: "lar.", context: [])
+            ctx.assertEqual(
+                state.candidates.first?.surface ?? "",
+                "\u{101C}\u{102C}\u{1037}",
+                "lar_top"
+            )
+        },
+
+        TestCase("candidates_creakyAaNoLiteralDotFallback") { ctx in
+            // The literal-`.` fallback path must not fire for `par.`,
+            // `thar.`, etc. once the rule is present.
+            let engine = BurmeseEngine()
+            for buffer in ["par.", "thar.", "mar.", "phar.", "lar."] {
+                let state = engine.update(buffer: buffer, context: [])
+                let top = state.candidates.first?.surface ?? ""
+                ctx.assertFalse(
+                    top.unicodeScalars.contains { $0.value == 0x2E },
+                    "noLiteralDot.\(buffer)",
+                    detail: "top=\(top)"
+                )
+            }
+        },
+
         TestCase("candidates_aaShapeOnStackedConjunct") {
             ctx in
             let engine = BurmeseEngine()
@@ -981,7 +1048,10 @@ public enum EngineSuite {
             let engine = BurmeseEngine()
             for (buffer, suffix) in [
                 ("thar english", " english"),
-                ("thar.", "."),
+                // `ka.` has no `a.` rule, so `.` stays literal — unlike
+                // `thar.` which now consumes the `.` via the `ar.`
+                // creaky-tone rule (task 01).
+                ("ka.", "."),
                 ("thar123", "၁၂၃"),
             ] {
                 let top = engine.update(buffer: buffer, context: []).candidates.first?.surface ?? ""

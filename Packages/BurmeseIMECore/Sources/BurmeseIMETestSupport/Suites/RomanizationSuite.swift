@@ -44,6 +44,18 @@ public enum RomanizationSuite {
             ctx.assertEqual(entry?.myanmar, "\u{102C}")
         },
 
+        TestCase("vowelLookup_arCreaky") { ctx in
+            let entry = Romanization.romanToVowel["ar."]
+            ctx.assertTrue(entry != nil, detail: "ar. not found")
+            ctx.assertEqual(entry?.myanmar, "\u{102C}\u{1037}")
+        },
+
+        TestCase("vowelLookup_ar2Creaky") { ctx in
+            let entry = Romanization.romanToVowel["ar2."]
+            ctx.assertTrue(entry != nil, detail: "ar2. not found")
+            ctx.assertEqual(entry?.myanmar, "\u{102B}\u{1037}")
+        },
+
         TestCase("vowelLookup_virama") { ctx in
             let entry = Romanization.romanToVowel["+"]
             ctx.assertTrue(entry != nil, detail: "+ not found")

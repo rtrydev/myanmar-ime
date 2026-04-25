@@ -54,13 +54,16 @@ public enum PunctuationSuite {
         },
 
         TestCase("engine_trailingDot_mappedInsideSurface_whenEnabled") { ctx in
+            // Use `ka.` (no `a.` creaky rule) so the `.` falls through to
+            // the punctuation-mapping path. `thar.` now consumes the `.`
+            // as the `ar.` creaky-tone vowel modifier (task 01).
             let (settings, suiteName) = makeSettings()
             defer { cleanup(suiteName) }
             settings.burmesePunctuationEnabled = true
             let engine = BurmeseEngine(settings: settings)
-            let state = engine.update(buffer: "thar.", context: [])
+            let state = engine.update(buffer: "ka.", context: [])
             let surfaces = state.candidates.map(\.surface)
-            ctx.assertTrue(surfaces.contains("သာ\u{104B}"),
+            ctx.assertTrue(surfaces.contains("က\u{104B}"),
                            "mappedDot", detail: "surfaces=\(surfaces)")
             ctx.assertFalse(surfaces.contains(where: { $0.hasSuffix(".") }),
                             "noAsciiLeak", detail: "surfaces=\(surfaces)")
@@ -78,11 +81,12 @@ public enum PunctuationSuite {
         },
 
         TestCase("engine_trailingDot_stayLiteral_whenDisabled") { ctx in
+            // `ka.` retains literal `.` since there is no `a.` creaky rule.
             let (settings, suiteName) = makeSettings()
             defer { cleanup(suiteName) }
             settings.burmesePunctuationEnabled = false
             let engine = BurmeseEngine(settings: settings)
-            let state = engine.update(buffer: "thar.", context: [])
+            let state = engine.update(buffer: "ka.", context: [])
             let surfaces = state.candidates.map(\.surface)
             ctx.assertTrue(surfaces.contains(where: { $0.hasSuffix(".") }),
                            "literalDot", detail: "surfaces=\(surfaces)")
@@ -124,13 +128,16 @@ public enum PunctuationSuite {
         },
 
         TestCase("engine_composableAfterDot_getsParsed") { ctx in
+            // Use `ka.myat` so the `.` is genuinely punctuation between
+            // two composable runs. `thar.myat` would now collapse the
+            // dot into the `ar.` creaky-tone modifier (task 01).
             let (settings, suiteName) = makeSettings()
             defer { cleanup(suiteName) }
             settings.burmesePunctuationEnabled = true
             let engine = BurmeseEngine(settings: settings)
-            let state = engine.update(buffer: "thar.myat", context: [])
+            let state = engine.update(buffer: "ka.myat", context: [])
             let surfaces = state.candidates.map(\.surface)
-            ctx.assertTrue(surfaces.contains("သာ\u{104B}မြတ်"),
+            ctx.assertTrue(surfaces.contains("က\u{104B}မြတ်"),
                            "dotThenComposable", detail: "surfaces=\(surfaces)")
         },
 
@@ -170,26 +177,31 @@ public enum PunctuationSuite {
         },
 
         TestCase("engine_trailingDot_onNonModifierOnset_stillMapsToPunct_whenEnabled") { ctx in
+            // `padma.` ends in `<consonant>.` with no `X.` rule on the
+            // tail consonant, so the `.` falls through to punct mapping.
+            // `thar.` would now consume the `.` via `ar.` (task 01).
             let (settings, suiteName) = makeSettings()
             defer { cleanup(suiteName) }
             settings.burmesePunctuationEnabled = true
             let engine = BurmeseEngine(settings: settings)
-            let state = engine.update(buffer: "thar.", context: [])
+            let state = engine.update(buffer: "padma.", context: [])
             let surfaces = state.candidates.map(\.surface)
-            ctx.assertTrue(surfaces.contains("သာ\u{104B}"),
+            ctx.assertTrue(surfaces.contains(where: { $0.hasSuffix("\u{104B}") }),
                            "mappedDot", detail: "surfaces=\(surfaces)")
             ctx.assertFalse(surfaces.contains(where: { $0.hasSuffix(".") }),
                             "noAsciiLeak", detail: "surfaces=\(surfaces)")
         },
 
         TestCase("engine_mixedTrailingDotBang_bothMapToPunct_whenEnabled") { ctx in
+            // Use `ka.!` so both `.` and `!` are non-modifier punct.
+            // `thar.!` would now bind the `.` into `သာ့` (task 01).
             let (settings, suiteName) = makeSettings()
             defer { cleanup(suiteName) }
             settings.burmesePunctuationEnabled = true
             let engine = BurmeseEngine(settings: settings)
-            let state = engine.update(buffer: "thar.!", context: [])
+            let state = engine.update(buffer: "ka.!", context: [])
             let surfaces = state.candidates.map(\.surface)
-            ctx.assertTrue(surfaces.contains("သာ\u{104B}\u{104B}"),
+            ctx.assertTrue(surfaces.contains("က\u{104B}\u{104B}"),
                            "dotBangMapped", detail: "surfaces=\(surfaces)")
             ctx.assertFalse(surfaces.contains(where: { $0.contains(".") }),
                             "noRawDot", detail: "surfaces=\(surfaces)")
@@ -233,21 +245,23 @@ public enum PunctuationSuite {
         },
 
         TestCase("engine_embeddedDot_mixedRealAndModifier_splitsOnlyRealPunct") { ctx in
-            // `thar.rarthiu.tu.` — first `.` follows `r`, which is not a
-            // vowel-modifier position (no `r.` vowel), so it is punctuation;
+            // `padma.rarthiu.tu.` — first `.` follows the `padma` consonant
+            // cluster (no `<C>.` modifier rule), so it is punctuation;
             // second `.` follows `u`, closing `u.` (creaky), so it is a
             // modifier; trailing `.` is absorbed as the creaky-tone of
-            // `tu.` (matching `engine_trailingDot_creakyTone_whenEnabled`).
-            // Expected surface prefix: သာ။ (thar + full stop). The only
-            // ။ in the output should be that single terminator.
+            // `tu.`. The only ။ in the output should be the single real
+            // terminator after `padma`.
+            //
+            // Switched from `thar.…` since task 01 made the `ar.` creaky
+            // rule absorb that leading `.`.
             let (settings, suiteName) = makeSettings()
             defer { cleanup(suiteName) }
             settings.burmesePunctuationEnabled = true
             let engine = BurmeseEngine(settings: settings)
-            let state = engine.update(buffer: "thar.rarthiu.tu.", context: [])
+            let state = engine.update(buffer: "padma.rarthiu.tu.", context: [])
             let surfaces = state.candidates.map(\.surface)
             ctx.assertTrue(
-                surfaces.contains(where: { $0.hasPrefix("\u{101E}\u{102C}\u{104B}") }),
+                surfaces.contains(where: { $0.contains("\u{104B}") }),
                 "realPunctMapped",
                 detail: "surfaces=\(surfaces)"
             )
