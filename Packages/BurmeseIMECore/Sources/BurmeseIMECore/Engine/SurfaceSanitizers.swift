@@ -221,13 +221,20 @@ extension BurmeseEngine {
     /// covers the reading. `padma` in particular needs a cross-class
     /// `ဒ္မ` stack that `Grammar.isValidStack` rejects on principle,
     /// so the parser cannot synthesise it on its own.
+    ///
+    /// Sourced as data so adding a Pali loanword is a one-line change
+    /// to this table — no logic edit needed. The medium-term plan is
+    /// to relocate this to a curated TSV under `Data/` and have the
+    /// engine load it at init (see `tasks/05-pali-cross-class-stack-override-is-a-three-entry-hardcode.md`);
+    /// the table here keeps the public API stable in the meantime.
+    @_spi(Testing) public static let paliStackOverrides: [String: String] = [
+        "ganda":   "\u{1002}\u{1014}\u{1039}\u{1012}",          // ဂန္ဒ
+        "padma":   "\u{1015}\u{1012}\u{1039}\u{1019}",          // ပဒ္မ
+        "vandana": "\u{1017}\u{1014}\u{1039}\u{1012}\u{1014}",  // ဗန္ဒန
+    ]
+
     internal static func paliStackOverrideSurface(for normalized: String) -> String? {
-        switch normalized {
-        case "ganda":   return "\u{1002}\u{1014}\u{1039}\u{1012}"          // ဂန္ဒ
-        case "padma":   return "\u{1015}\u{1012}\u{1039}\u{1019}"          // ပဒ္မ
-        case "vandana": return "\u{1017}\u{1014}\u{1039}\u{1012}\u{1014}"  // ဗန္ဒန
-        default: return nil
-        }
+        paliStackOverrides[normalized]
     }
 
     /// Bare onsetless vowels whose DP+LM pick lands on a coda-cluster

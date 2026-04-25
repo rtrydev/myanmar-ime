@@ -110,6 +110,10 @@ final class ConsonantDigraphIntegrityXCTests: XCTestCase {
     func testAll() { runSuite(ConsonantDigraphIntegritySuite.suite, xctest: self) }
 }
 
+final class PaliStackOverrideXCTests: XCTestCase {
+    func testAll() { runSuite(PaliStackOverrideSuite.suite, xctest: self) }
+}
+
 final class MedialHaForbiddenBasesXCTests: XCTestCase {
     func testAll() { runSuite(MedialHaForbiddenBasesSuite.suite, xctest: self) }
 }
