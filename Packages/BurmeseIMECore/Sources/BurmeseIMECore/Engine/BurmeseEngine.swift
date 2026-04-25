@@ -300,15 +300,17 @@ public final class BurmeseEngine: @unchecked Sendable {
             }
             return state
         }
-        // If punct mapping is on and the buffer contains a mapped-punct
-        // char that is NOT just at the very tail, everything up to and
-        // including the *last* such punct becomes a frozen rendering
-        // (each composable run resolved via single-best parse, punct
-        // chars replaced with their Myanmar equivalents). We then recurse
-        // on the active suffix so the current word still gets N-best
-        // candidates, and prepend the frozen prefix to every surface.
-        if burmesePunctuationEnabled,
-           let split = splitAtLastEmbeddedMappedPunct(displayBuffer) {
+        // Mid-buffer literal punctuation (task 03): when ANY non-composable
+        // non-digit character (e.g. `,`, `;`, `-`, `_`, `(`, `)`, `!`, `?`,
+        // mapped subset `.`, `,`, `!`, `?`, `;`) sits between two composable
+        // runs, split the buffer at the *last* such literal-punct and
+        // recurse on the active suffix so it is parsed as Myanmar instead
+        // of held verbatim in the literal tail. Mapped punct is substituted
+        // for its Myanmar equivalent only when `burmesePunctuationEnabled`
+        // is on; non-mapped literal punct stays verbatim regardless. This
+        // generalises the older `splitAtLastEmbeddedMappedPunct` path
+        // (which only fired for the five mapped chars under the toggle).
+        if let split = splitAtLastEmbeddedLiteralPunct(displayBuffer) {
             var state = update(buffer: split.activeBuffer, context: context)
             state.rawBuffer = displayBuffer
             if state.candidates.isEmpty {

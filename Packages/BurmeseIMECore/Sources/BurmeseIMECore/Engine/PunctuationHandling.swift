@@ -116,51 +116,125 @@ extension BurmeseEngine {
         return false
     }
 
-    /// Locate the last mapped-punct character that is followed by more
-    /// content, and split `buffer` there. Purely trailing mapped-punct
-    /// returns `nil` — that case is already covered by the main
-    /// pipeline's `stripTrailingMappablePunctuation` path.
-    internal func splitAtLastEmbeddedMappedPunct(_ buffer: String) -> EmbeddedPunctSplit? {
+    /// Locate the last literal-punct character that has at least one
+    /// composable letter after it, and split `buffer` there. "Literal
+    /// punct" is any character that cannot extend a composable run —
+    /// mapped punct (`.`, `,`, `!`, `?`, `;`), the composing-punct
+    /// subset (`*`, `'`, `:`, `.` outside the modifier exception),
+    /// and every other non-letter / non-digit / non-`+` character
+    /// (`-`, `_`, `(`, `)`, brackets, whitespace, ...).
+    ///
+    /// Purely trailing literal punct returns `nil` so the existing
+    /// trailing-punct path (`stripTrailingMappablePunctuation` /
+    /// literal-tail concatenation) still handles `thar,`, `thar.`, …
+    /// without recursing.
+    ///
+    /// Generalises `splitAtLastEmbeddedMappedPunct`. Task 03.
+    internal func splitAtLastEmbeddedLiteralPunct(_ buffer: String) -> EmbeddedPunctSplit? {
         var boundary: String.Index? = nil
+        var renderedPrefixCache: String? = nil
         for idx in buffer.indices.reversed() {
-            guard PunctuationMapper.isMappable(buffer[idx]) else { continue }
-            let after = buffer.index(after: idx)
-            guard after != buffer.endIndex else { continue }
-            guard buffer[after...].contains(where: { !PunctuationMapper.isMappable($0) }) else {
-                continue
-            }
-            // `.` is overloaded: it terminates a sentence when it follows
-            // arbitrary content (`thar.myat`), but it is also the creaky-
-            // tone marker on vowels like `u.`, `i.`, `an.`, `aung.`. If
-            // the current position closes one of those vowel suffixes, the
-            // `.` is acting as a modifier and must not split the buffer —
-            // otherwise `rarthiu.tu.` would freeze `rarthiu.` as a punct
-            // segment and render ရာသီဦ။တု instead of ရာသီဦးတု။.
-            if buffer[idx] == ".",
+            let c = buffer[idx]
+            guard Self.isLiteralPunctSplitChar(c) else { continue }
+            // `.` and `:` are overloaded: they terminate / separate when
+            // they follow arbitrary content, but they are also creaky-
+            // tone modifiers on vowel suffixes like `u.`, `i.`, `an.`,
+            // `aung.`, `aw:`. When the current position closes one of
+            // those modifier endings, leave the char attached to the
+            // composable run instead of splitting on it.
+            if c == ".",
                Self.dotActsAsVowelModifier(prefixEndingAtDot: buffer[...idx]) {
                 continue
             }
+            if c == ":",
+               Self.colonActsAsVowelModifier(prefixEndingAtColon: buffer[...idx]) {
+                continue
+            }
+            let after = buffer.index(after: idx)
+            guard after != buffer.endIndex else { continue }
+            // Active suffix must contain at least one composable letter
+            // (a-z) — otherwise there's nothing to recompose and the
+            // legacy literal-tail path is fine.
+            guard buffer[after...].contains(where: Self.isAsciiLetter) else {
+                continue
+            }
+            // The rendered prefix must be ASCII-letter-free. If a
+            // segment in the prefix can't compose cleanly (parser
+            // dropping unparseable chars to the literal tail —
+            // common on fuzz inputs like `arc:dlax...`), splitting
+            // here would leak ASCII into the surface. Defer to the
+            // regular pipeline's parser-driven cleanup instead.
+            // Mirrors the same guard in `splitAtLastEmbeddedComposingPunct`.
+            let renderedPrefix = renderFrozenPunctSegments(String(buffer[..<after]))
+            guard !Self.hasAsciiLetters(renderedPrefix) else { continue }
             boundary = after
+            renderedPrefixCache = renderedPrefix
             break
         }
-        guard let boundary else { return nil }
+        guard let boundary, let renderedPrefix = renderedPrefixCache else {
+            return nil
+        }
         return EmbeddedPunctSplit(
-            renderedPrefix: renderFrozenPunctSegments(String(buffer[..<boundary])),
+            renderedPrefix: renderedPrefix,
             activeBuffer: String(buffer[boundary...])
         )
     }
 
-    /// Render a buffer slice as Myanmar, splitting on mapped-punct chars
-    /// and running single-best parsing on each composable run between
-    /// them. Used only for the frozen prefix — lexicon + N-best are
-    /// reserved for the active tail.
+    /// True for characters that break a composable run when seen
+    /// mid-buffer. Excludes:
+    /// - composable letters (a-z, A-Z)
+    /// - digits (handled separately by `splitLeadingDigits` / digit
+    ///   spliceback)
+    /// - `+` (kinzi separator that the parser consumes)
+    /// - `*` and `'` (asat / null-vowel separator that the parser
+    ///   consumes — they belong inside a syllable, not between
+    ///   syllables)
+    /// - whitespace (script transition — stays literal per the
+    ///   Pinyin-style inline-mixing convention; `thar english`
+    ///   commits as `သာ english`, not `သာ ယ်ငလီရှ`)
+    ///
+    /// `:` and `.` are split candidates here, but the splitter calls
+    /// `dotActsAsVowelModifier` / `colonActsAsVowelModifier` first to
+    /// keep creaky-tone / tone-variant suffix usage attached to the
+    /// composable run.
+    internal static func isLiteralPunctSplitChar(_ c: Character) -> Bool {
+        guard c.unicodeScalars.count == 1, let scalar = c.unicodeScalars.first else {
+            return true
+        }
+        let v = scalar.value
+        if v >= 0x61 && v <= 0x7A { return false }   // a-z
+        if v >= 0x41 && v <= 0x5A { return false }   // A-Z
+        if v >= 0x30 && v <= 0x39 { return false }   // 0-9
+        if v == 0x2B { return false }                 // `+`  (kinzi)
+        if v == 0x2A { return false }                 // `*`  (asat marker)
+        if v == 0x27 { return false }                 // `'`  (null-vowel separator)
+        // Whitespace — script transition, stays literal.
+        if v == 0x20 || v == 0x09 || v == 0x0A || v == 0x0D { return false }
+        return true
+    }
+
+    @inline(__always)
+    private static func isAsciiLetter(_ c: Character) -> Bool {
+        guard c.unicodeScalars.count == 1, let scalar = c.unicodeScalars.first else {
+            return false
+        }
+        let v = scalar.value
+        return (v >= 0x61 && v <= 0x7A) || (v >= 0x41 && v <= 0x5A)
+    }
+
+    /// Render a buffer slice as Myanmar, splitting on every literal-punct
+    /// boundary (mapped, composing-punct, and any other non-composable
+    /// non-digit char) and running single-best parsing on each composable
+    /// run between them. Used only for the frozen prefix — lexicon + N-best
+    /// are reserved for the active tail.
     internal func renderFrozenPunctSegments(_ s: String) -> String {
         var out = ""
         var current = ""
         for c in s {
-            // When `.` closes a creaky-tone vowel suffix (`u.`, `i.`,
-            // `an.`, …) it stays attached to the current composable
-            // run instead of flushing as punctuation.
+            // When `.` / `:` closes a creaky-tone or tone-variant vowel
+            // suffix (`u.`, `i.`, `an.`, `aw:`, …) it stays attached to
+            // the current composable run instead of flushing as
+            // punctuation.
             if c == ".",
                Self.dotActsAsVowelModifier(prefixEndingAtDot: Substring(current + ".")) {
                 current.append(".")
@@ -171,7 +245,18 @@ extension BurmeseEngine {
                 current.append(":")
                 continue
             }
-            if PunctuationMapper.isMappable(c) || Self.midBufferComposingPunctuation.contains(c) {
+            // Flush at any literal-punct split char *or* the in-syllable
+            // composing-punct subset (`*`, `'`). The split-char set
+            // already covers the broader literal-punct range
+            // (`,`, `;`, `(`, `-`, ...); the additional check on
+            // `midBufferComposingPunctuation` keeps `*` and `'` flushing
+            // here so the older `splitAtLastEmbeddedComposingPunct` call
+            // site (which expects `ka*.tar` to render the `*` as a
+            // literal between rendered segments) keeps its behaviour.
+            // The new mid-buffer literal-punct path never enters this
+            // renderer with `*` or `'` because the composing-punct
+            // splitter already runs first.
+            if Self.isLiteralPunctSplitChar(c) || Self.midBufferComposingPunctuation.contains(c) {
                 if !current.isEmpty {
                     out += renderFrozenSegment(current)
                     current = ""
@@ -216,7 +301,15 @@ extension BurmeseEngine {
             return digitPart + composable + literal
         }
         let topParse = parser.parseCandidates(probe, maxResults: 1).first
-        let output = topParse?.output ?? probe
+        var output = topParse?.output ?? probe
+        // Apply orphan-ZWNJ promotion so bare-vowel segments (`aung`,
+        // `i`, `ee`, …) get an explicit `အ` independent-vowel anchor
+        // instead of a leading U+200C that renders the dependent-vowel
+        // marks unanchored. Mirrors the engine's `update` post-process.
+        if let parse = topParse,
+           let promoted = Self.promoteOrphanZwnjToImplicitA(parse) {
+            output = promoted.output
+        }
         return digitPart + output + dropped + literal
     }
 
