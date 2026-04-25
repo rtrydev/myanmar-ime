@@ -114,6 +114,10 @@ final class PaliStackOverrideXCTests: XCTestCase {
     func testAll() { runSuite(PaliStackOverrideSuite.suite, xctest: self) }
 }
 
+final class BareVowelRepetitionXCTests: XCTestCase {
+    func testAll() { runSuite(BareVowelRepetitionSuite.suite, xctest: self) }
+}
+
 final class MedialHaForbiddenBasesXCTests: XCTestCase {
     func testAll() { runSuite(MedialHaForbiddenBasesSuite.suite, xctest: self) }
 }

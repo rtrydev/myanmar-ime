@@ -238,25 +238,44 @@ extension BurmeseEngine {
     }
 
     /// Bare onsetless vowels whose DP+LM pick lands on a coda-cluster
-    /// parse (`ည်` for `i`) or a double-asat decomposition (`ယ်ယ်` for
-    /// `ee`) instead of the independent-vowel form a typist reaches for
-    /// (task 08).
+    /// parse (`ည်` for `i`) or a repeated-asat / stacked-indep-vowel
+    /// decomposition (`ယ်ယ်ယ်` for `eee`, `ဦဦ` for `uu`) instead of
+    /// the independent-vowel form a typist reaches for.
     ///
-    /// `i`  → `အိ` (implicit-အ + short-i). The default parser rule
-    ///        `i` → `ီ` (long-i) would produce `အီ` via orphan-ZWNJ
-    ///        promotion; the short-i sibling is injected here.
-    /// `ee` → `အီ` (implicit-အ + long-i). No `ee` rule exists; the
-    ///        decomposition `e + e` yields `ယ်ယ်`.
+    /// Two patterns trigger the override:
     ///
-    /// The surface is injected at rank 1 if missing, or promoted to
-    /// rank 1 if already present, so alternates (`ည်` / `ယ်ယ်` /
-    /// longer-vowel sibling) stay reachable in the panel.
+    /// 1. The single-letter `i` rule needs the short-i shape `အိ` —
+    ///    the parser rule `i` → `ီ` (long-i) would produce `အီ` via
+    ///    orphan-ZWNJ promotion; the short-i sibling is injected
+    ///    here.
+    /// 2. A bare vowel letter (`a`, `e`, `i`, `o`, `u`) repeated
+    ///    N times (N ≥ 2). The parser materialises each letter as
+    ///    its own syllable (`eee` → `ယ်ယ်ယ်`, `uu` → `ဦဦ`); the
+    ///    canonical *single*-vowel form is what the user is reaching
+    ///    for when mashing the same key. The repeated decomposition
+    ///    stays reachable as a lower-ranked sibling.
+    ///
+    /// The single-letter `aaa…` collapses to inherent `အ` already, so
+    /// the table below maps `a*` → `အ` for symmetry. `ay`, `oo`,
+    /// `u2`, etc. are handled by other rules and are intentionally
+    /// not entered here.
+    private static let canonicalRepeatedBareVowel: [Character: String] = [
+        "a": "\u{1021}",            // အ
+        "e": "\u{1021}\u{102E}",    // အီ
+        "i": "\u{1024}",            // ဤ
+        "o": "\u{1029}",            // ဩ
+        "u": "\u{1021}\u{1030}",    // အူ
+    ]
+
     internal static func bareVowelOverrideSurface(for normalized: String) -> String? {
-        switch normalized {
-        case "i":  return "\u{1021}\u{102D}"  // အိ
-        case "ee": return "\u{1021}\u{102E}"  // အီ
-        default: return nil
+        if normalized == "i" { return "\u{1021}\u{102D}" } // အိ
+        guard let first = normalized.first,
+              normalized.count >= 2,
+              normalized.allSatisfy({ $0 == first })
+        else {
+            return nil
         }
+        return canonicalRepeatedBareVowel[first]
     }
 
     /// Build a sibling parse where the leading ZWNJ orphan has been
