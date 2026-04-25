@@ -370,31 +370,42 @@ extension BurmeseEngine {
         return false
     }
 
-    /// Bare buffers whose Burmese typographic convention resolves to
-    /// ya-pin despite the lexicon-absorbed ya-yit sibling winning the
-    /// default comparator composite (task 07). The set is narrow by
-    /// design: siblings differ per final vowel (`kyay` → ya-pin but
-    /// `kya` → ya-yit, `khyin` → ya-pin but `kyaw:` → ya-yit) so a
-    /// consonant-only rule would over-promote. Grows only when a new
-    /// `task13_yapin_*` top-1 target lands.
-    package static let yapinPrimaryBareBuffers: Set<String> = [
-        "kywan", "kyay", "kyi", "khyay", "khyin",
+    /// Replaced by `yaPinPreferredOnsetClusters` (task 02). The earlier
+    /// per-buffer carve-out collapsed once the cluster-driven rule
+    /// landed — kept as an empty set so anything that referenced it
+    /// (e.g. the property suite's invariant check) keeps compiling.
+    package static let yapinPrimaryBareBuffers: Set<String> = []
+
+    /// Onset cluster keys whose lexicon weight is dominantly ya-pin.
+    /// Counted on the curated lexicon (task 02): `ကျ` 1.95M vs `ကြ`
+    /// 531k, `ကျော်` 275k vs `ကြော်` 30k, `ဂျပန်` 87k vs `ဂြပန်` 0,
+    /// `ချင်` 142k vs `ခြင်` 36k, `ဃျ` family 0.16k vs `ဃြ` 0. Buffers
+    /// whose first onset is one of these clusters get their ya-pin
+    /// sibling promoted to rank 0 even when the parser's structural
+    /// `Cy` → ya-yit rule and the absorbed lexicon score would otherwise
+    /// tie or favour ya-yit.
+    ///
+    /// `chy` / `phy` / `shy` are intentionally omitted: lexicon evidence
+    /// is mixed for those (e.g. `ဆျ` rare; `ရှ` is the canonical sh-
+    /// cluster anyway) and the structural `Cy` → ya-yit rule there
+    /// matches user expectation.
+    internal static let yaPinPreferredOnsetClusters: [String] = [
+        "khy", "ghy", "ky", "gy",
     ]
 
     /// Typing-intent promotion for ya-pin readings: when the user buffer
-    /// is one of the known-primary ya-pin bare readings, optionally with
-    /// a trailing tone marker, move the lowest-aliasCost ya-pin sibling
-    /// whose digit-stripped reading matches to rank 0 (task 07, task 05).
-    ///
-    /// For short readings like `kyay` / `kyi`, the default comparator
-    /// picks ya-yit on composite score because the ya-yit sibling is
-    /// often lexicon-absorbed while the ya-pin is not — that +frequency
-    /// offset beats the ya-pin's narrow LM advantage. But the bare
-    /// digit-less buffer is itself the canonical user signal for ya-pin
-    /// in Burmese typing convention, so we flip the pick when the
-    /// buffer expresses that intent. Tone-only variants of the same root
-    /// keep the same medial choice; longer buffers or other coda markers
-    /// fall through to the default comparator untouched.
+    /// starts with one of `yaPinPreferredOnsetClusters`, move the
+    /// lowest-aliasCost ya-pin sibling whose digit-stripped reading
+    /// matches the user buffer to rank 0 (task 02). Generalises the
+    /// earlier exact-bare-buffer carve-out (`yapinPrimaryBareBuffers`)
+    /// to every word that starts with one of these clusters — the
+    /// underlying parser-level alias asymmetry treats ya-yit as cheaper
+    /// at aliasCost 0 vs ya-pin at aliasCost 1, and even with explicit
+    /// cluster aliases at aliasCost 0 the lexicon-absorbed composite
+    /// can still favour ya-yit when its row is in-vocab and ya-pin's is
+    /// not. The promotion is the data-driven tie-breaker that surfaces
+    /// the corpus-dominant medial choice; the ya-yit sibling stays in
+    /// the panel as a lower-ranked option.
     internal static func promoteYapinForExactBareReading(
         _ candidates: [RankedGrammarCandidate],
         userBuffer: String
@@ -409,14 +420,7 @@ extension BurmeseEngine {
     }
 
     internal static func isYapinPromotionBuffer(_ userBuffer: String) -> Bool {
-        switch userBuffer {
-        case "kywan", "kyay", "kyi", "khyay", "khyin",
-             "kywan:", "kyay:", "kyi:", "khyay:", "khyin:",
-             "kywan.", "kyay.", "kyi.", "khyay.", "khyin.":
-            return true
-        default:
-            return false
-        }
+        bufferStartsWithYaPinCluster(userBuffer)
     }
 
     internal static func yapinPromotionPreservedSurface(
@@ -434,19 +438,24 @@ extension BurmeseEngine {
         userBuffer: String
     ) -> Int? {
         guard candidates.count >= 2 else { return nil }
+        guard bufferStartsWithYaPinCluster(userBuffer) else { return nil }
+        // Match a ya-pin sibling against the top candidate's reading
+        // (digit-stripped + tone-stripped) rather than the user buffer
+        // — the parser inserts an implicit `a` for inherent-vowel
+        // syllables, so e.g. `gypan` becomes `gyapan` / `gy2apan`
+        // canonically. Comparing to the user buffer would miss those.
+        // Iterate from 0 because ya-pin can already win the comparator
+        // (cluster alias paths reach aliasCost 0); we still need to
+        // pick the best ya-pin sibling among them.
+        let topReading = candidates[0].candidate.reading
+        let topAliasRoot = strippingTrailingToneMarkers(
+            from: Romanization.aliasReading(topReading)
+        )
         let bareRoot = strippingTrailingToneMarkers(from: userBuffer)
-        guard isYapinPrimaryBareBuffer(bareRoot) else { return nil }
-        // Already ya-pin on top? Nothing to do.
-        if isYapinReading(candidates[0].candidate.reading) { return nil }
-        // Among candidates whose digit-stripped reading is exactly
-        // the user buffer (or the same root with tone stripped), pick
-        // the ya-pin sibling with the smallest aliasCost (prefers
-        // `ky2i` → ကျီ over the double-alias `ky2i2` → ကျည် when the
-        // user typed bare `kyi`).
         let bareRootMatchKey = promotionMatchKey(bareRoot)
         var bestIndex: Int?
         var bestAliasCost = Int.max
-        for i in 1..<candidates.count {
+        for i in 0..<candidates.count {
             let reading = candidates[i].candidate.reading
             guard isYapinReading(reading) else { continue }
             let aliasReading = Romanization.aliasReading(reading)
@@ -454,12 +463,15 @@ extension BurmeseEngine {
             guard aliasReading == userBuffer
                     || aliasRoot == bareRoot
                     || promotionMatchKey(aliasRoot) == bareRootMatchKey
+                    || aliasRoot == topAliasRoot
             else { continue }
             if candidates[i].aliasCost < bestAliasCost {
                 bestAliasCost = candidates[i].aliasCost
                 bestIndex = i
             }
         }
+        // Best ya-pin already at index 0 — nothing to do.
+        if bestIndex == 0 { return nil }
         return bestIndex
     }
 
@@ -471,13 +483,20 @@ extension BurmeseEngine {
         return stripped
     }
 
-    private static func isYapinPrimaryBareBuffer(_ buffer: String) -> Bool {
-        switch buffer {
-        case "kywan", "kyay", "kyi", "khyay", "khyin":
+    /// Returns true if `buffer`'s first onset cluster is in
+    /// `yaPinPreferredOnsetClusters`. The cluster keys are listed
+    /// longest-first so `khy` / `ghy` are preferred over `ky` / `gy`
+    /// when both would prefix the buffer. The parser interprets the
+    /// cluster as the first onset regardless of what follows it
+    /// (consonant, vowel, digit, or end of buffer), so the prefix
+    /// match alone is the correct trigger — buffers like `gypan`
+    /// (`gy` onset + `pan` next syllable) and `kyaw` (`ky` onset +
+    /// `aw` vowel) both qualify.
+    private static func bufferStartsWithYaPinCluster(_ buffer: String) -> Bool {
+        for cluster in yaPinPreferredOnsetClusters where buffer.hasPrefix(cluster) {
             return true
-        default:
-            return false
         }
+        return false
     }
 
     private static func promotionMatchKey(_ buffer: String) -> String {

@@ -125,4 +125,8 @@ final class MedialHaForbiddenBasesXCTests: XCTestCase {
 final class KinziTallAaXCTests: XCTestCase {
     func testAll() { runSuite(KinziTallAaSuite.suite, xctest: self) }
 }
+
+final class ClusterMedialPreferenceXCTests: XCTestCase {
+    func testAll() { runSuite(ClusterMedialPreferenceSuite.suite, xctest: self) }
+}
 #endif

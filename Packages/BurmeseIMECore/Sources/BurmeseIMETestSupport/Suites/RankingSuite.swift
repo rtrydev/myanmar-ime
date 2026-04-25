@@ -548,15 +548,19 @@ public enum RankingSuite {
                 "pwarColon_shortAa")
         })
 
-        cases.append(TestCase("task11_gyawColon_shortAaAfterGaYaYitEkar") { ctx in
+        cases.append(TestCase("task11_gyawColon_shortAaAfterGaYaPinEkar") { ctx in
+            // Cluster `gy` defaults to ya-pin (task 02); short-aa
+            // preservation rule still applies — the medial keeps the
+            // round bottom from colliding with ာ.
             assertTopScalars(ctx, "gyaw:",
-                [0x1002, 0x103C, 0x1031, 0x102C],
+                [0x1002, 0x103B, 0x1031, 0x102C],
                 "gyawColon_shortAa")
         })
 
-        cases.append(TestCase("task11_khyawColon_shortAaAfterKhaYaYitEkar") { ctx in
+        cases.append(TestCase("task11_khyawColon_shortAaAfterKhaYaPinEkar") { ctx in
+            // Cluster `khy` defaults to ya-pin (task 02).
             assertTopScalars(ctx, "khyaw:",
-                [0x1001, 0x103C, 0x1031, 0x102C],
+                [0x1001, 0x103B, 0x1031, 0x102C],
                 "khyawColon_shortAa")
         })
 
@@ -582,10 +586,12 @@ public enum RankingSuite {
 
         // Control: non-descender onset with medial always used short-aa;
         // regression guard so the exception doesn't accidentally flip
-        // anyone's correct shape.
+        // anyone's correct shape. (Cluster `ky` defaults to ya-pin per
+        // task 02, but the short-aa shape is independent of the medial
+        // choice — `ka` itself is not a descender.)
         cases.append(TestCase("task11_kyawColon_shortAaPreservedOnNonDescender") { ctx in
             assertTopScalars(ctx, "kyaw:",
-                [0x1000, 0x103C, 0x1031, 0x102C],
+                [0x1000, 0x103B, 0x1031, 0x102C],
                 "kyawColon_shortAa")
         })
 
@@ -795,7 +801,9 @@ public enum RankingSuite {
         // flows through the separate leading-digit path.
         for (buffer, expectedTop) in [
             ("'thar'", "သာ"),
-            ("123kya", "၁၂၃ကြ"),
+            // `ky` cluster defaults to ya-pin (task 02) regardless of
+            // the literal-digit prefix path.
+            ("123kya", "၁၂၃ကျ"),
         ] {
             cases.append(TestCase("task04_preservedBehavior_\(buffer)") { ctx in
                 let state = BurmeseEngine().update(buffer: buffer, context: [])
@@ -893,7 +901,10 @@ public enum RankingSuite {
             ("th2ar",    "သ၂ာ"),
             ("n2ay",     "န၂ေ"),
             ("k3aung",   "က၃ောင်"),
-            ("ky2un",    "ကြ၂ူန"),
+            // `ky` cluster defaults to ya-pin (task 02); the literal `2`
+            // splices in after the digit-cleaned `kyun` parses with the
+            // ya-pin medial.
+            ("ky2un",    "ကျ၂ူန"),
         ] {
             cases.append(TestCase("task10_midDigit_\(buffer)") { ctx in
                 let engine = BurmeseEngine()
@@ -980,7 +991,10 @@ public enum RankingSuite {
         // shape from the task spec). The medial must stay attached to
         // the onset rather than promoting to a standalone consonant.
         for (buffer, expectedTop) in [
-            ("k2yun",  "က၂ြူန"),
+            // `k2yun` strips the mid-buffer digit and re-parses `kyun`,
+            // which falls under the ya-pin cluster preference (task 02);
+            // the digit splices back at its typed position.
+            ("k2yun",  "က၂ျူန"),
             ("l2wann", "လ၂ွန်န"),
         ] {
             cases.append(TestCase("task10_digitBetweenMedial_\(buffer)") { ctx in

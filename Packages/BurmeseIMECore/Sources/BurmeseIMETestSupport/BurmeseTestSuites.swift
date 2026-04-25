@@ -21,6 +21,7 @@ public enum BurmeseTestSuites {
         MedialHaForbiddenVowelsSuite.suite,
         MedialHaForbiddenBasesSuite.suite,
         KinziTallAaSuite.suite,
+        ClusterMedialPreferenceSuite.suite,
         EngineSuite.suite,
         LexiconRankingSuite.suite,
         RankingSuite.suite,

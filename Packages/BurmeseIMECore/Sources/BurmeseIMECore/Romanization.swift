@@ -126,9 +126,18 @@ public enum Romanization {
     /// both ကြ (canonical "ky") and ကျ (digit-stripped alias of "ky2"). The
     /// cluster aliases below mirror that behaviour: each ya-pin shortcut gets
     /// a ya-yit twin at a slight alias-cost bump so users typing "jar" see
-    /// ကြာ in the candidate list alongside ကျာ. "gy"/"gyw" already pick up
-    /// their ya-yit twin from the canonical `cons+"y"` path, so they need no
-    /// explicit mirror here.
+    /// ကြာ in the candidate list alongside ကျာ.
+    ///
+    /// The medial preference for `ky` / `khy` / `gy` / `ghy` is handled at
+    /// the engine layer (`BurmeseEngine.yaPinPreferredOnsetClusters`,
+    /// task 02), not here — keeping the cluster table parser-symmetric
+    /// preserves the reverse-romanizer round-trip (`ကြောင်း` ↔
+    /// `kyaung:`) that several test suites and lexicon offline tools
+    /// rely on. Lexicon evidence shows ya-pin dominates these clusters
+    /// (`ကျ` 1.95M vs `ကြ` 531k, `ဂျပန်` 87k vs `ဂြပန်` 0, …); the
+    /// engine-level promotion runs after parsing and surfaces the
+    /// ya-pin sibling on top while the structural ya-yit form stays
+    /// reachable as a lower-ranked candidate.
     public static let clusterAliases: [ClusterAliasEntry] = [
         .init(roman: "j",   consonant: Myanmar.ka,  medials: [Myanmar.medialYa], aliasCost: 0),
         .init(roman: "j",   consonant: Myanmar.ka,  medials: [Myanmar.medialRa], aliasCost: 1),
