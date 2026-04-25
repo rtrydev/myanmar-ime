@@ -33,6 +33,22 @@ extension BurmeseEngine {
         }
     }()
 
+    /// Subset of `vowelSuffixesWithTrailingDot` whose Myanmar output does NOT
+    /// end in U+103A (asat). These "open" vowel forms (e.g. `u.`, `i.`, `ar.`)
+    /// leave no structural boundary in the scalar stream, so a following
+    /// onset-less syllable would fuse onto the preceding vowel cluster unless
+    /// the engine forces a split at the dot.
+    ///
+    /// "Closed" forms like `e.` (→ `yzATBATBATD`) and `in.` (→ `IngATBATBATD`) end in
+    /// asat, giving the parser a structural break; they do not need the split.
+    internal static let openDotVowelSuffixes: Set<String> = {
+        Set(Romanization.vowels.compactMap { entry -> String? in
+            guard entry.roman.hasSuffix(".") else { return nil }
+            guard entry.myanmar.unicodeScalars.last?.value != 0x103A else { return nil }
+            return entry.roman
+        })
+    }()
+
     internal static let vowelSuffixesWithTrailingColon: [String] = {
         Romanization.vowels.compactMap { entry in
             entry.roman.hasSuffix(":") ? entry.roman : nil
@@ -76,6 +92,19 @@ extension BurmeseEngine {
         guard Self.midBufferComposingPunctuation.contains(c) else { return false }
         if c == ".",
            Self.dotActsAsVowelModifier(prefixEndingAtDot: buffer[...idx]) {
+            // When an OPEN dot vowel-modifier (no asat at the end of its Myanmar
+            // output) is immediately followed by a vowel-starting letter, the
+            // suffix begins an onset-less syllable. Force a split so each syllable
+            // renders with its own base instead of fusing with the preceding vowel
+            // cluster (task 02). Closed forms like `e.` already end in asat and
+            // provide a structural break; they must not trigger the split.
+            let after = buffer.index(after: idx)
+            if after < buffer.endIndex,
+               Self.isVowelStartChar(buffer[after]),
+               Self.openDotVowelSuffixes.contains(where: { buffer[...idx].hasSuffix($0) }),
+               Self.hasOnlyComposableLettersBefore(buffer, dotAt: idx) {
+                return true
+            }
             return false
         }
         if c == ":",
@@ -144,7 +173,16 @@ extension BurmeseEngine {
             // composable run instead of splitting on it.
             if c == ".",
                Self.dotActsAsVowelModifier(prefixEndingAtDot: buffer[...idx]) {
-                continue
+                let after = buffer.index(after: idx)
+                if after < buffer.endIndex,
+                   Self.isVowelStartChar(buffer[after]),
+                   Self.openDotVowelSuffixes.contains(where: { buffer[...idx].hasSuffix($0) }),
+                   Self.hasOnlyComposableLettersBefore(buffer, dotAt: idx) {
+                    // Open dot vowel-modifier followed by an onset-less syllable,
+                    // with a pure composable prefix: fall through to split logic.
+                } else {
+                    continue
+                }
             }
             if c == ":",
                Self.colonActsAsVowelModifier(prefixEndingAtColon: buffer[...idx]) {
@@ -210,6 +248,37 @@ extension BurmeseEngine {
         if v == 0x27 { return false }                 // `'`  (null-vowel separator)
         // Whitespace — script transition, stays literal.
         if v == 0x20 || v == 0x09 || v == 0x0A || v == 0x0D { return false }
+        return true
+    }
+
+    @inline(__always)
+    private static func isVowelStartChar(_ c: Character) -> Bool {
+        switch c {
+        case "a", "e", "i", "o", "u": return true
+        default: return false
+        }
+    }
+
+    /// True when every character in `buffer` strictly before `dotIdx`
+    /// is a composable ASCII letter (`a`–`z`), stacker (`+`), or
+    /// null-vowel connector (`'`). A pure prefix means that rendering
+    /// `buffer[...dotIdx]` via a single parser call is safe — no
+    /// embedded colons, asterisks, or earlier dots that would force a
+    /// long multi-segment string onto the single-best parser path.
+    private static func hasOnlyComposableLettersBefore(
+        _ buffer: String,
+        dotAt dotIdx: String.Index
+    ) -> Bool {
+        var i = buffer.startIndex
+        while i < dotIdx {
+            let v = buffer[i].unicodeScalars.first?.value ?? 0
+            guard (v >= 0x61 && v <= 0x7A)
+               || (v >= 0x41 && v <= 0x5A)
+               || v == 0x2B               // '+'
+               || v == 0x27               // '\''
+            else { return false }
+            i = buffer.index(after: i)
+        }
         return true
     }
 

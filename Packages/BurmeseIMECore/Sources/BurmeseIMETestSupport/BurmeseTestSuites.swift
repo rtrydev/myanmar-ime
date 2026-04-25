@@ -46,5 +46,6 @@ public enum BurmeseTestSuites {
         LexiconLMDriftSuite.suite,
         DiphthongPlusBareNgaSuite.suite,
         MidBufferDigitStackSplitSuite.suite,
+        CreakyToneOnsetlessFollowupSuite.suite,
     ]
 }
