@@ -22,7 +22,6 @@ public enum PropertySuite {
         "kyemaminbyar",
         "ngarmyartawbyar",
         "parhartamin",
-        "shinbyarmingalarpar",
         "kyawzaw2tharwa",
         "thankyoushinbyarpar",
         "arpegaparshinpyar",
@@ -47,10 +46,10 @@ public enum PropertySuite {
     /// future task 04 / anchor-reconciliation fix can restore
     /// convergence and promote these back to the whitelist.
     private static let slidingWindowKnownDivergent: [String] = [
-        "kyawzawnainglay",
         "kyawnainglay2",
         "kyawnaingtharway2",
         "pyaepyaemingalarpar",
+        "shinbyarmingalarpar",
     ]
 
     /// Returns true if `surface` contains ASCII *interleaved* with Myanmar —

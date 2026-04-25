@@ -225,9 +225,25 @@ extension BurmeseEngine {
     /// syllable break — so over-insertion is safe, the unstacked
     /// reading is preserved via the existing no-`+` parse that also
     /// runs for the same buffer.
+    /// Result of `inferImplicitStackMarkers`. `input` carries every
+    /// inferred `+` (strict-valid and liberal-only). `strictOnlyInput`
+    /// carries only the strict-valid `+` insertions and is non-nil
+    /// **only when at least one strict-valid site coexists with a
+    /// liberal-only site** — the engine picks it up as a sibling
+    /// inferred parse so the cross-class liberal stacks don't poison
+    /// the otherwise-clean strict kinzi/native-stack rendering. The
+    /// strict-only string is suppressed when all sites are liberal
+    /// (it would equal the no-`+` parse) or when all are strict (it
+    /// would equal `input`).
     @_spi(Testing) public static func inferImplicitStackMarkers(
         _ input: String
-    ) -> (input: String, insertions: Int, liberalInsertions: Int)? {
+    ) -> (
+        input: String,
+        insertions: Int,
+        liberalInsertions: Int,
+        strictOnlyInput: String?,
+        strictOnlyInsertions: Int
+    )? {
         guard !input.contains("+") else { return nil }
         // Skip the char-array allocation when there is no plausible
         // Pali stack upper at all — the rest of the scan would walk the
@@ -238,8 +254,7 @@ extension BurmeseEngine {
         let chars = Array(input)
         guard chars.count >= 3 else { return nil }
         let medialLetters: Set<Character> = ["y", "r", "w"]
-        var insertAt: [Int] = []
-        var liberalInsertions = 0
+        var insertAt: [(index: Int, isLiberal: Bool)] = []
         for lowerIndex in 1..<chars.count {
             let lowerStart = chars[lowerIndex]
             guard lowerStart.isLetter,
@@ -269,10 +284,11 @@ extension BurmeseEngine {
                 continue
             }
             // Reject medial-heavy onsets. The preceding syllable starts
-            // at buffer head or the most recent `+`; any `y`/`r`/`w`
-            // between positions 1 and the matched vowel means the onset has at
-            // least one medial. `h` is ambiguous (onset digraph `th`
-            // vs medial `hm`) so it is excluded from the medial set.
+            // at the end of the most recently completed vowel (or the
+            // last `+` if explicit); any `y`/`r`/`w` between positions
+            // 1 and the matched vowel means the onset has at least one
+            // medial. `h` is ambiguous (onset digraph `th` vs medial
+            // `hm`) so it is excluded from the medial set.
             //
             // Exception for `h`-coda sites (Pali/Sanskrit loanwords like
             // `brahma` / `brahman`): medial+stack is the canonical form
@@ -286,20 +302,11 @@ extension BurmeseEngine {
             // syllable and reject the site whenever any earlier vowel
             // contained a `y`/`r`/`w` letter (`ar`, `aw`, `ay`, …) —
             // which kills mid-buffer kinzi for almost every natural
-            // sentence. For strict-valid (same-class) sites use the
-            // current syllable's onset only; for liberal-only
-            // (cross-class) sites stay with the conservative
-            // whole-prefix scan so this fix doesn't accidentally
-            // over-generate cross-class stacks (task 04 owns that).
-            let onsetStart: Int
-            if inferred.isLiberal {
-                onsetStart = chars[..<lowerIndex].lastIndex(of: "+").map { $0 + 1 } ?? 0
-            } else {
-                onsetStart = currentOnsetStart(
-                    chars: chars,
-                    vowelStart: inferred.vowelStart
-                )
-            }
+            // sentence.
+            let onsetStart = currentOnsetStart(
+                chars: chars,
+                vowelStart: inferred.vowelStart
+            )
             let hasSimpleOnset = Self.hasSimplePaliStackOnset(
                 chars: chars,
                 onsetStart: onsetStart,
@@ -311,16 +318,34 @@ extension BurmeseEngine {
                     .contains(where: { medialLetters.contains(chars[$0]) })
             let precedingCoda = lowerIndex >= 1 ? chars[lowerIndex - 1] : "\0"
             guard !onsetHasMedial || precedingCoda == "h" else { continue }
-            insertAt.append(lowerIndex)
-            if inferred.isLiberal { liberalInsertions += 1 }
+            insertAt.append((lowerIndex, inferred.isLiberal))
         }
         guard !insertAt.isEmpty else { return nil }
+        let liberalInsertions = insertAt.lazy.filter(\.isLiberal).count
+        let strictInsertAt = insertAt.filter { !$0.isLiberal }
+        let result = injectMarkers(input, at: insertAt.map(\.index))
+        let strictOnlyResult: String?
+        if liberalInsertions > 0, !strictInsertAt.isEmpty {
+            strictOnlyResult = injectMarkers(input, at: strictInsertAt.map(\.index))
+        } else {
+            strictOnlyResult = nil
+        }
+        return (
+            result,
+            insertAt.count,
+            liberalInsertions,
+            strictOnlyResult,
+            strictInsertAt.count
+        )
+    }
+
+    private static func injectMarkers(_ input: String, at indices: [Int]) -> String {
         var result = input
-        for idx in insertAt.reversed() {
+        for idx in indices.reversed() {
             let si = result.index(result.startIndex, offsetBy: idx)
             result.insert("+", at: si)
         }
-        return (result, insertAt.count, liberalInsertions)
+        return result
     }
 
     /// Locate the start of the current syllable's onset for inference's

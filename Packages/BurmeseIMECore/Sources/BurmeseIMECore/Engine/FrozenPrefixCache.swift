@@ -69,31 +69,26 @@ extension BurmeseEngine {
         var strictInferredStackOutputs: Set<String> = []
         if let inferred = Self.inferImplicitStackMarkers(prefix) {
             let existingOutputs = Set(parses.map(\.output))
-            let inferredParses = stackInferenceParses(inferred.input, isFullBuffer: true)
-            for parse in inferredParses where !Self.hasInterleavedLatin(parse.output) {
-                let adjustedCount = max(1, parse.syllableCount - inferred.insertions)
-                let adjustedLegality = parse.legalityScore > 0
-                    ? max(1, parse.legalityScore - 100 * inferred.insertions)
-                    : parse.legalityScore
-                let liberalPenalty = inferred.liberalInsertions
-                let adjusted = SyllableParse(
-                    output: parse.output,
-                    reading: parse.reading,
-                    aliasCost: parse.aliasCost + 10 * liberalPenalty,
-                    legalityScore: adjustedLegality,
-                    score: parse.score,
-                    structureCost: parse.structureCost + liberalPenalty,
-                    syllableCount: adjustedCount,
-                    rarityPenalty: parse.rarityPenalty
+            ingestInferredParses(
+                input: inferred.input,
+                insertions: inferred.insertions,
+                liberalInsertions: inferred.liberalInsertions,
+                isFullBuffer: true,
+                grammarParses: &parses,
+                existingOutputs: existingOutputs,
+                strictInferredStackOutputs: &strictInferredStackOutputs
+            )
+            if let strictOnly = inferred.strictOnlyInput {
+                let outputsAfterFull = Set(parses.map(\.output))
+                ingestInferredParses(
+                    input: strictOnly,
+                    insertions: inferred.strictOnlyInsertions,
+                    liberalInsertions: 0,
+                    isFullBuffer: true,
+                    grammarParses: &parses,
+                    existingOutputs: outputsAfterFull,
+                    strictInferredStackOutputs: &strictInferredStackOutputs
                 )
-                if liberalPenalty == 0,
-                   Self.surfaceHasOnlyNativeViramaStacks(adjusted.output) {
-                    strictInferredStackOutputs.insert(adjusted.output)
-                    strictInferredStackOutputs.insert(Self.correctAaShape(adjusted.output))
-                }
-                if !existingOutputs.contains(adjusted.output) {
-                    parses.append(adjusted)
-                }
             }
         }
         let branches: [FrozenPrefixBranch]

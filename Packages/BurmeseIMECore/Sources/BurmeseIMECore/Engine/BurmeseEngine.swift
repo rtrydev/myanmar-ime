@@ -681,45 +681,35 @@ public final class BurmeseEngine: @unchecked Sendable {
         var strictInferredStackOutputs: Set<String> = []
         if !hasExactLexiconMatch,
            let inferred = Self.inferImplicitStackMarkers(effectiveParseInput) {
-            let inferredParses = stackInferenceParses(
-                inferred.input,
-                isFullBuffer: !effectiveWindowed
-            )
             let existingOutputs = Set(grammarParses.map(\.output))
-            for parse in inferredParses
-            where !Self.hasInterleavedLatin(parse.output) {
-                // Neutralise the bookkeeping bump each injected `+` adds:
-                // the parser treats a soft-boundary transition as a new
-                // vowel slot, so it contributes +1 `syllableCount` and a
-                // per-syllable `legalityScore` step (~+100) regardless of
-                // whether the site actually stacked. Reverting both keeps
-                // the inferred parse on equal footing with the original
-                // no-`+` parse, so the two compete on their real merits
-                // (parser score, alias cost, LM) rather than on ghost
-                // legality the `+` produced.
-                let adjustedCount = max(1, parse.syllableCount - inferred.insertions)
-                let adjustedLegality = parse.legalityScore > 0
-                    ? max(1, parse.legalityScore - 100 * inferred.insertions)
-                    : parse.legalityScore
-                let liberalPenalty = inferred.liberalInsertions
-                let adjusted = SyllableParse(
-                    output: parse.output,
-                    reading: parse.reading,
-                    aliasCost: parse.aliasCost + 10 * liberalPenalty,
-                    legalityScore: adjustedLegality,
-                    score: parse.score,
-                    structureCost: parse.structureCost + liberalPenalty,
-                    syllableCount: adjustedCount,
-                    rarityPenalty: parse.rarityPenalty
+            // Add parses for the full inferred input (every `+` site).
+            ingestInferredParses(
+                input: inferred.input,
+                insertions: inferred.insertions,
+                liberalInsertions: inferred.liberalInsertions,
+                isFullBuffer: !effectiveWindowed,
+                grammarParses: &grammarParses,
+                existingOutputs: existingOutputs,
+                strictInferredStackOutputs: &strictInferredStackOutputs
+            )
+            // When the buffer mixes strict-valid (e.g. kinzi) and
+            // liberal-only (cross-class Pali) inference sites, also
+            // add parses for the strict-only inferred input. This
+            // gives the ranker a clean kinzi/native-stack candidate
+            // that doesn't carry the liberal cross-class virama
+            // (task 04: prevent liberal sites from poisoning the
+            // strict parse via shared structure/syllable scoring).
+            if let strictOnly = inferred.strictOnlyInput {
+                let outputsAfterFull = Set(grammarParses.map(\.output))
+                ingestInferredParses(
+                    input: strictOnly,
+                    insertions: inferred.strictOnlyInsertions,
+                    liberalInsertions: 0,
+                    isFullBuffer: !effectiveWindowed,
+                    grammarParses: &grammarParses,
+                    existingOutputs: outputsAfterFull,
+                    strictInferredStackOutputs: &strictInferredStackOutputs
                 )
-                if liberalPenalty == 0,
-                   Self.surfaceHasOnlyNativeViramaStacks(adjusted.output) {
-                    strictInferredStackOutputs.insert(adjusted.output)
-                    strictInferredStackOutputs.insert(Self.correctAaShape(adjusted.output))
-                }
-                if !existingOutputs.contains(adjusted.output) {
-                    grammarParses.append(adjusted)
-                }
             }
         }
         // `windowFallback` is set when the tail-only parse failed so we
@@ -1500,6 +1490,58 @@ public final class BurmeseEngine: @unchecked Sendable {
             candidates: finalCandidates,
             committedContext: context
         )
+    }
+
+    /// Run the inferred-`+` parses for `input`, neutralise the
+    /// per-`+` bookkeeping bumps so the inferred parse competes with
+    /// the no-`+` parse on real merits, and push the result into
+    /// `grammarParses` (skipping outputs already present). Used twice
+    /// per buffer when `inferImplicitStackMarkers` returns both a
+    /// full-site and a strict-only inferred form.
+    internal func ingestInferredParses(
+        input: String,
+        insertions: Int,
+        liberalInsertions: Int,
+        isFullBuffer: Bool,
+        grammarParses: inout [SyllableParse],
+        existingOutputs: Set<String>,
+        strictInferredStackOutputs: inout Set<String>
+    ) {
+        let inferredParses = stackInferenceParses(input, isFullBuffer: isFullBuffer)
+        for parse in inferredParses
+        where !Self.hasInterleavedLatin(parse.output) {
+            // Neutralise the bookkeeping bump each injected `+` adds:
+            // the parser treats a soft-boundary transition as a new
+            // vowel slot, so it contributes +1 `syllableCount` and a
+            // per-syllable `legalityScore` step (~+100) regardless of
+            // whether the site actually stacked. Reverting both keeps
+            // the inferred parse on equal footing with the original
+            // no-`+` parse, so the two compete on their real merits
+            // (parser score, alias cost, LM) rather than on ghost
+            // legality the `+` produced.
+            let adjustedCount = max(1, parse.syllableCount - insertions)
+            let adjustedLegality = parse.legalityScore > 0
+                ? max(1, parse.legalityScore - 100 * insertions)
+                : parse.legalityScore
+            let adjusted = SyllableParse(
+                output: parse.output,
+                reading: parse.reading,
+                aliasCost: parse.aliasCost + 10 * liberalInsertions,
+                legalityScore: adjustedLegality,
+                score: parse.score,
+                structureCost: parse.structureCost + liberalInsertions,
+                syllableCount: adjustedCount,
+                rarityPenalty: parse.rarityPenalty
+            )
+            if liberalInsertions == 0,
+               Self.surfaceHasOnlyNativeViramaStacks(adjusted.output) {
+                strictInferredStackOutputs.insert(adjusted.output)
+                strictInferredStackOutputs.insert(Self.correctAaShape(adjusted.output))
+            }
+            if !existingOutputs.contains(adjusted.output) {
+                grammarParses.append(adjusted)
+            }
+        }
     }
 
     internal func stackInferenceParses(
