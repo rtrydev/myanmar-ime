@@ -44,7 +44,7 @@ extension BurmeseEngine {
     /// so a `Character`-level scan would never see the aa scalar on its
     /// own and the correction would silently no-op on multi-sign
     /// syllables like `ပေါင်း`.
-    internal static func correctAaShape(_ text: String) -> String {
+    @_spi(Testing) public static func correctAaShape(_ text: String) -> String {
         let shortAa: UInt32 = 0x102C
         let tallAa: UInt32 = 0x102B
         // Most surfaces have no aa sign at all (garbage-bash buffers, or
@@ -75,15 +75,19 @@ extension BurmeseEngine {
                 let pv = prev.value
                 if pv >= 0x103B && pv <= 0x103E { sawMedial = true }
                 if Myanmar.isConsonant(prev) {
-                    // A round-bottomed consonant sitting as the subscript of a
-                    // virama-stacked conjunct (e.g. ပ္ပ in အဓိပ္ပာယ်, ဂ္ဂ in
-                    // အဂ္ဂ) takes the plain ာ, not the hooked ါ — the stacking
-                    // already disambiguates the visual footprint.
-                    let virama: UInt32 = 0x1039
-                    let isStackedSubscript = j >= 1 && scalars[j - 1].value == virama
-                    let wantsTall = tallAaSet.contains(prev.value)
-                        && !isStackedSubscript
-                        && !sawMedial
+                    // `Grammar.requiresTallAa` is the orthographic source of
+                    // truth at every position the descender consonant
+                    // appears, regardless of what scalar precedes it. The
+                    // earlier "if preceded by virama, fall back to short"
+                    // carve-out (task 01) was wrong — the lexicon shows the
+                    // tall hook is the only attested form for kinzi+ဂ+aa
+                    // (`အင်္ဂါ`, `ဘင်္ဂါလီ`), the only attested form for
+                    // ဂ_+aa Pali stacks (`မဂ္ဂါဝပ်`), and the dominant form
+                    // for ပ_+aa (`အဓိပ္ပါယ်` 23,838× vs. `အဓိပ္ပာယ်`
+                    // 17,340×). Any per-surface short-aa exception is now
+                    // encoded as a data table override (see task 05),
+                    // not as a structural rule here.
+                    let wantsTall = tallAaSet.contains(prev.value) && !sawMedial
                     let target: UInt32 = wantsTall ? tallAa : shortAa
                     if v != target {
                         scalars[i] = Unicode.Scalar(target)!

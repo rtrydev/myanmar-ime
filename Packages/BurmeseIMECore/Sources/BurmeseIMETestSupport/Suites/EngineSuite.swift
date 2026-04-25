@@ -163,40 +163,31 @@ public enum EngineSuite {
             ctx in
             let engine = BurmeseEngine()
 
-            // ပ္ပ + aa: stacked round-bottomed subscript takes plain ာ, not ါ.
+            // ပ္ပ + aa: descender lower of a virama stack takes the tall
+            // hook ါ, matching the dominant lexicon spelling
+            // (`အဓိပ္ပါယ်` 23,838× vs. `အဓိပ္ပာယ်` 17,340×).
             let stackedP = "\u{1015}\u{1039}\u{1015}"
             let pPar = engine.update(buffer: "p+par", context: [])
             ctx.assertTrue(
-                pPar.candidates.contains { $0.surface.contains(stackedP + "\u{102C}") },
-                "p+par_shortAa", detail: "Expected ပ္ပာ (plain ာ) for stacked ပ္ပ"
-            )
-            ctx.assertFalse(
                 pPar.candidates.contains { $0.surface.contains(stackedP + "\u{102B}") },
-                "p+par_noTallAa", detail: "ါ must not appear after stacked ပ္ပ"
+                "p+par_tallAa", detail: "Expected ပ္ပါ (tall ါ) for stacked ပ္ပ"
             )
 
-            // User typing the tall-aa token explicitly still gets rewritten
-            // to plain ာ when the preceding consonant is a stacked subscript.
+            // User typing the tall-aa token explicitly stays tall after
+            // a stacked descender subscript.
             let pPar2 = engine.update(buffer: "p+par2", context: [])
             ctx.assertTrue(
-                pPar2.candidates.contains { $0.surface.contains(stackedP + "\u{102C}") },
-                "p+par2_shortAa", detail: "ar2 after stacked ပ္ပ must fold to ာ"
-            )
-            ctx.assertFalse(
                 pPar2.candidates.contains { $0.surface.contains(stackedP + "\u{102B}") },
-                "p+par2_noTallAa", detail: "ါ must not survive after stacked ပ္ပ"
+                "p+par2_tallAa", detail: "ar2 after stacked ပ္ပ stays as ါ"
             )
 
-            // Same rule for another round-bottomed stack (ဂ္ဂ as in အဂ္ဂ…).
+            // ဂ + aa as the lower of a virama stack: tall is the only
+            // attested form in the lexicon (`မဂ္ဂါဝပ်`, …).
             let stackedG = "\u{1002}\u{1039}\u{1002}"
             let gGar = engine.update(buffer: "g+gar", context: [])
             ctx.assertTrue(
-                gGar.candidates.contains { $0.surface.contains(stackedG + "\u{102C}") },
-                "g+gar_shortAa", detail: "Expected ဂ္ဂာ (plain ာ) for stacked ဂ္ဂ"
-            )
-            ctx.assertFalse(
                 gGar.candidates.contains { $0.surface.contains(stackedG + "\u{102B}") },
-                "g+gar_noTallAa", detail: "ါ must not appear after stacked ဂ္ဂ"
+                "g+gar_tallAa", detail: "Expected ဂ္ဂါ (tall ါ) for stacked ဂ္ဂ"
             )
         },
 

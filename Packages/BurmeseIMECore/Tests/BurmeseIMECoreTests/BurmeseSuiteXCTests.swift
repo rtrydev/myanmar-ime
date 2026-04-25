@@ -121,4 +121,8 @@ final class BareVowelRepetitionXCTests: XCTestCase {
 final class MedialHaForbiddenBasesXCTests: XCTestCase {
     func testAll() { runSuite(MedialHaForbiddenBasesSuite.suite, xctest: self) }
 }
+
+final class KinziTallAaXCTests: XCTestCase {
+    func testAll() { runSuite(KinziTallAaSuite.suite, xctest: self) }
+}
 #endif

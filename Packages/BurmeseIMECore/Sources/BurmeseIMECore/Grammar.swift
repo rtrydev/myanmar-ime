@@ -133,11 +133,12 @@ public enum Grammar {
     /// force the orthographically-correct aa shape based on the preceding
     /// consonant — the user never sees the wrong-shape sibling.
     ///
-    /// Exception: when one of these consonants is the subscript of a
-    /// virama-stacked conjunct (e.g. ပ္ပ in အဓိပ္ပာယ်, ဂ္ဂ in အဂ္ဂ), native
-    /// spelling uses the plain ာ — the stacking alters the visual footprint
-    /// so the hook's disambiguation is no longer needed. That case is
-    /// handled in `BurmeseEngine.correctAaShape`.
+    /// The rule applies regardless of whether the descender consonant sits
+    /// as the lower of a virama stack (`ဂ္ဂ`, `ပ္ပ`, `ဒ_`) or below a
+    /// kinzi superscript (`င်္ဂ`): the lexicon's dominant or exclusive
+    /// spelling for those shapes still uses the tall hook (`အင်္ဂါ`,
+    /// `မဂ္ဂါဝပ်`, `အဓိပ္ပါယ်`). Per-surface short-aa carve-outs are
+    /// expressed as data table overrides, not as a structural rule.
     public static let requiresTallAa: Set<Character> = [
         Myanmar.kha, Myanmar.ga, Myanmar.nga,
         Myanmar.da, Myanmar.pa, Myanmar.wa,
