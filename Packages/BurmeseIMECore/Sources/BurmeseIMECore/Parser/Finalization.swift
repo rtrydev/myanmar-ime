@@ -632,6 +632,21 @@ extension SyllableParser {
         if lhs.state.structureCost != rhs.state.structureCost {
             return lhs.state.structureCost < rhs.state.structureCost
         }
+        // Task 04: when every DP factor ties, prefer the parse whose
+        // surface emits more scalars. The canonical case is the
+        // `aing` competition where `ai + ng` (diphthong + bare nga →
+        // 5 surface scalars) ties with `ain + g` (short-i + na-asat +
+        // bare ga → 4 scalars) on consumed-vs-rule-count and alias
+        // cost; without this tip, output-lexicographic ordering
+        // arbitrarily picks the shorter `ain` decomposition. A richer
+        // surface tends to mean the parser used a longer single
+        // vowel arc and therefore matched a more specific
+        // orthographic shape.
+        let lhsScalarCount = lhs.output.unicodeScalars.count
+        let rhsScalarCount = rhs.output.unicodeScalars.count
+        if lhsScalarCount != rhsScalarCount {
+            return lhsScalarCount > rhsScalarCount
+        }
         if lhs.output != rhs.output {
             return lhs.output < rhs.output
         }
@@ -674,6 +689,13 @@ extension SyllableParser {
         }
         if lhs.state.structureCost != rhs.state.structureCost {
             return lhs.state.structureCost < rhs.state.structureCost
+        }
+        // See task 04 note in the marker-penalty overload above —
+        // richer-surface tiebreak applies here too.
+        let lhsScalarCount = lhs.output.unicodeScalars.count
+        let rhsScalarCount = rhs.output.unicodeScalars.count
+        if lhsScalarCount != rhsScalarCount {
+            return lhsScalarCount > rhsScalarCount
         }
         if lhs.output != rhs.output {
             return lhs.output < rhs.output

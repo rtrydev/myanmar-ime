@@ -253,6 +253,26 @@ extension BurmeseEngine {
         }
         let chars = Array(input)
         guard chars.count >= 3 else { return nil }
+        // Task 04 fast-path: `ai + ng + <stackable>` collapses the
+        // user's bare `ng` into the diphthong's existing nga-asat
+        // coda and inserts a single `+` between `ai` and the
+        // stackable lower. The `ai` rule already emits
+        // `102D 102F 1004 103A` (i + u + nga + asat), so an
+        // additional bare-onset `ng` would surface as a redundant
+        // second `င` — the user typed it intending the kinzi upper,
+        // which is the same nga that `ai` already provides. Output
+        // the canonical `ai+<rest>` instead of letting the regular
+        // loop infer two competing sites that produce double-nga
+        // surfaces (task 03/04 combined case).
+        if chars.count >= 5,
+           chars[0] == "a", chars[1] == "i",
+           chars[2] == "n", chars[3] == "g" {
+            let lowers = stackLowerConsonantsStarting(chars: chars, at: 4)
+            if lowers.contains(where: { Grammar.isValidStack(upper: Myanmar.nga, lower: $0) }) {
+                let collapsed = "ai+" + String(chars[4...])
+                return (collapsed, 1, 0, nil, 1)
+            }
+        }
         let medialLetters: Set<Character> = ["y", "r", "w"]
         var insertAt: [(index: Int, isLiberal: Bool, marker: String)] = []
         for lowerIndex in 1..<chars.count {
@@ -326,6 +346,25 @@ extension BurmeseEngine {
             // `+` is enough.
             let marker = inferred.isBareNga ? "*+" : "+"
             insertAt.append((lowerIndex, inferred.isLiberal, marker))
+        }
+        // When a bare-nga site fires at lowerIndex K, the bare nga
+        // upper occupies chars[K-2..K-1] ("ng"). Any earlier site
+        // landing at lowerIndex K-2 or K-1 would put a marker inside
+        // that nga digraph and produce a competing decomposition
+        // whose injected `+` poisons the parser output (e.g.
+        // `ainggar` would receive both the existing site at
+        // chars[1..2] boundary AND the bare-nga site at chars[3..4],
+        // yielding `ai+ng*+gar` whose parses are illegal). Drop the
+        // overlapping non-bare-nga sites so only the bare-nga
+        // injection survives, mirroring how the strict/liberal split
+        // already protects `anggar` via `strictOnlyInput`.
+        let bareNgaIndices = Set(insertAt.lazy.filter { $0.marker == "*+" }.map(\.index))
+        if !bareNgaIndices.isEmpty {
+            insertAt.removeAll { entry in
+                guard entry.marker != "*+" else { return false }
+                return bareNgaIndices.contains(entry.index + 1)
+                    || bareNgaIndices.contains(entry.index + 2)
+            }
         }
         guard !insertAt.isEmpty else { return nil }
         let liberalInsertions = insertAt.lazy.filter(\.isLiberal).count
@@ -547,7 +586,7 @@ extension BurmeseEngine {
         return false
     }
 
-    private static func stackLowerConsonantsStarting(
+    internal static func stackLowerConsonantsStarting(
         chars: [Character],
         at index: Int
     ) -> [Character] {
@@ -586,12 +625,16 @@ extension BurmeseEngine {
         // stackable consonant. The parser consumes `ng` as a bare
         // OnsetEntry (no preceding asat-vowel arc), so neither of the
         // checks above matches. Restrict to the buffer-leading case
-        // (`a` / `o` / `i` / …) since that is the only site where the
-        // upper `nga` lands as a bare onset rather than the coda of
-        // a previous syllable's vowel rule. The injection emits
-        // `*+` (asat + virama) so the parser materialises the kinzi
-        // (`<vowel> 1004 103A 1039 <C>`) rather than a bare virama
-        // stack (`<vowel> 1004 1039 <C>`).
+        // (single-letter vowel at chars[0]) since that is the only
+        // site where the upper `nga` lands as a bare onset rather
+        // than the coda of a previous syllable's vowel rule. The
+        // injection emits `*+` (asat + virama) so the parser
+        // materialises the kinzi (`<vowel> 1004 103A 1039 <C>`)
+        // rather than a bare virama stack
+        // (`<vowel> 1004 1039 <C>`). The `ai`-diphthong case
+        // (`ainggar`) is intercepted earlier in
+        // `inferImplicitStackMarkers` because the user's `ng` there
+        // is redundant with the diphthong's nga-asat coda.
         if codaIndex == 2,
            chars[codaIndex] == "g",
            chars[codaIndex - 1] == "n",

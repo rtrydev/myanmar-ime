@@ -773,6 +773,55 @@ public final class BurmeseEngine: @unchecked Sendable {
                     strictInferredStackOutputs: &strictInferredStackOutputs
                 )
             }
+            // Inferred parses arrive after the orphan-ZWNJ promotion
+            // pass above, so any inferred surface that materialises a
+            // leading ZWNJ + combining mark (the standard parser
+            // emission for an onset-less leading vowel rule) misses
+            // the promotion and gets filtered by `sanitizeOrphanZwnj`
+            // downstream. Run a second promotion pass on the
+            // inferred parses, but ONLY when the buffer is the
+            // diphthong-collapse fast-path shape (`ai + ng +
+            // <stackable>`, task 04) — that is the only inference
+            // path whose user-intended surface is a kinzi-anchored
+            // form like `အိုင်္ဂါ` that requires the
+            // ZWNJ→အ promotion to survive sanitisation. Other
+            // inference paths (existing inference at boundaries
+            // inside the buffer, generic `*+` injections) already
+            // produce surfaces that either ride forward via the
+            // primary parses' promoted siblings or are not the
+            // user's intended top — promoting them would surface
+            // spurious kinzi candidates for inputs like `aing` or
+            // `aingthi`.
+            // Match the exact fast-path signature in
+            // `inferImplicitStackMarkers`: buffer starts with `aing`
+            // and the next character forms a strict-valid kinzi pair
+            // with `nga` (velar-class lower like `g`, `k`, `kh`,
+            // `gh`). For other `aing<X>` shapes the inferred kinzi
+            // is a spurious nga+nga interpretation that should not
+            // surface as the user-visible top.
+            let isAiNgFastPathShape: Bool = {
+                let bufChars = Array(effectiveParseInput)
+                guard bufChars.count >= 5,
+                      bufChars[0] == "a", bufChars[1] == "i",
+                      bufChars[2] == "n", bufChars[3] == "g"
+                else { return false }
+                let lowers = Self.stackLowerConsonantsStarting(chars: bufChars, at: 4)
+                return lowers.contains { Grammar.isValidStack(upper: Myanmar.nga, lower: $0) }
+            }()
+            if isAiNgFastPathShape {
+                let inferredCount = grammarParses.count
+                for i in 0..<inferredCount {
+                    let parent = grammarParses[i]
+                    if let zwnjPromoted = Self.promoteOrphanZwnjToImplicitA(parent),
+                       !grammarParses.contains(where: { $0.output == zwnjPromoted.output }) {
+                        grammarParses.append(zwnjPromoted)
+                        if Self.surfaceHasOnlyNativeViramaStacks(zwnjPromoted.output) {
+                            strictInferredStackOutputs.insert(zwnjPromoted.output)
+                            strictInferredStackOutputs.insert(Self.correctAaShape(zwnjPromoted.output))
+                        }
+                    }
+                }
+            }
         }
         // `windowFallback` is set when the tail-only parse failed so we
         // retried with the full buffer. In that case the anchor is still
@@ -1322,6 +1371,21 @@ public final class BurmeseEngine: @unchecked Sendable {
                     source: .grammar,
                     score: 100
                 ), at: 0)
+            }
+        }
+
+        // `ai` diphthong override (task 04): when the buffer starts
+        // with `aing<…>` and the merged panel still carries a
+        // diphthong-anchored candidate (often demoted by an LM that
+        // sees the short-i + na-asat sibling more often in the
+        // corpus), promote it. The short-i sibling stays in the
+        // panel as a lower-ranked alternative.
+        if Self.aiDiphthongOverrideApplies(to: normalized) {
+            if let idx = merged.firstIndex(where: {
+                Self.candidateLeadsWithAiDiphthong($0.surface)
+            }), idx > 0 {
+                let keeper = merged.remove(at: idx)
+                merged.insert(keeper, at: 0)
             }
         }
 

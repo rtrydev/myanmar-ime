@@ -282,6 +282,43 @@ extension BurmeseEngine {
         return canonicalRepeatedBareVowel[first]
     }
 
+    /// Task 04: scalar prefix of the `ai` diphthong (`ိုင်`,
+    /// U+102D U+102F U+1004 U+103A). When the buffer starts with
+    /// `ai` directly followed by `ng`, the parser's no-bias DP ties
+    /// `ai + ng` (diphthong + bare nga) with `ain + g` (short-i +
+    /// na-asat + bare ga). LM frequency in the corpus may prefer
+    /// either, but the canonical Burmese reading users mean by
+    /// typing `aing<…>` is the diphthong-anchored one.
+    private static let aiDiphthongScalars: [UInt32] = [0x102D, 0x102F, 0x1004, 0x103A]
+
+    /// True when `normalized` begins with `aing` and the next char
+    /// is a letter (i.e. the `ng` is forming a bare nga onset for a
+    /// following syllable). `ai`, `ai.`, `ai:`, `aing` alone, and
+    /// `ain<X≠g>` shapes do not trigger the override — those reach
+    /// the diphthong via the existing parser path.
+    internal static func aiDiphthongOverrideApplies(to normalized: String) -> Bool {
+        let chars = Array(normalized)
+        guard chars.count >= 4 else { return false }
+        return chars[0] == "a"
+            && chars[1] == "i"
+            && chars[2] == "n"
+            && chars[3] == "g"
+    }
+
+    /// True when the candidate surface starts with the `ai` diphthong
+    /// scalar sequence (allowing a leading independent vowel `အ`
+    /// or invisible base ZWNJ).
+    internal static func candidateLeadsWithAiDiphthong(_ surface: String) -> Bool {
+        let scalars = surface.unicodeScalars.map(\.value)
+        for offset in 0...min(1, scalars.count) {
+            guard scalars.count >= offset + aiDiphthongScalars.count else { continue }
+            if Array(scalars[offset..<offset + aiDiphthongScalars.count]) == aiDiphthongScalars {
+                return true
+            }
+        }
+        return false
+    }
+
     /// Build a sibling parse where the leading ZWNJ orphan has been
     /// replaced with U+1021 (အ, the independent "a" onset). Returns nil
     /// when `parse.output` is not a ZWNJ + combining-mark orphan. See
