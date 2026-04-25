@@ -796,11 +796,12 @@ public enum RankingSuite {
         }
 
         // Task 04 — currently-working inputs must return byte-identical
-        // surfaces after the refactor. `'thar'` uses `'` as a composable
-        // null-vowel separator so the apostrophes get swallowed; `123kya`
+        // surfaces after the refactor. `'thar'` now surfaces the apostrophes
+        // as literal quote marks (task 03 fix — leading/trailing `'` is no
+        // longer silently consumed as a null-vowel connector). `123kya`
         // flows through the separate leading-digit path.
         for (buffer, expectedTop) in [
-            ("'thar'", "သာ"),
+            ("'thar'", "'\u{101E}\u{102C}'"),  // 'သာ'
             // `ky` cluster defaults to ya-pin (task 02) regardless of
             // the literal-digit prefix path.
             ("123kya", "၁၂၃ကျ"),

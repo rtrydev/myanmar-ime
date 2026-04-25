@@ -62,14 +62,15 @@ public enum LoneComposingPunctSuite {
             }
         },
 
-        // Two-character buffers built on top of a composing-punct char
-        // (`'a`, `'thar`) continue to work — the parser consumes the
-        // separator and parses the rest.
+        // Leading `'` now surfaces as a literal quote/apostrophe (task 03):
+        // `'a` → `'အ`, `'thar` → `'သာ`. The `'` is no longer silently
+        // absorbed as a null-vowel connector when it has no left letter
+        // neighbour.
         TestCase("loneComposingPunct_overlaidContentStillParses") { ctx in
             let engine = defaultEngine()
             for (buffer, expected) in [
-                ("'a", "\u{1021}"),                             // အ
-                ("'thar", "\u{101E}\u{102C}"),                  // သာ
+                ("'a", "'\u{1021}"),                            // 'အ
+                ("'thar", "'\u{101E}\u{102C}"),                 // 'သာ
             ] {
                 let top = engine.update(buffer: buffer, context: []).candidates.first?.surface ?? ""
                 ctx.assertTrue(

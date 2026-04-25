@@ -90,6 +90,28 @@ extension BurmeseEngine {
     ) -> Bool {
         let c = buffer[idx]
         guard Self.midBufferComposingPunctuation.contains(c) else { return false }
+        if c == "'" {
+            // Treat apostrophe as a literal split character when at least one
+            // neighbour is not a composable ASCII letter. This covers leading
+            // `'` (quote, no left neighbour), trailing `'` adjacent to
+            // end-of-buffer (handled separately by the trailing-strip path in
+            // BurmeseEngine), and `'` next to punctuation/digits.
+            //
+            // When both neighbours ARE letters (e.g. `nya'n`, `don't`) the
+            // null-vowel connector role is preserved — the split does not fire
+            // here; contraction handling is a follow-up (task 03 noted).
+            let hasLetterLeft: Bool = idx > buffer.startIndex && {
+                let prev = buffer.index(before: idx)
+                let v = buffer[prev].unicodeScalars.first?.value ?? 0
+                return (v >= 0x61 && v <= 0x7A) || (v >= 0x41 && v <= 0x5A)
+            }()
+            let nextIdx = buffer.index(after: idx)
+            let hasLetterRight: Bool = nextIdx < buffer.endIndex && {
+                let v = buffer[nextIdx].unicodeScalars.first?.value ?? 0
+                return (v >= 0x61 && v <= 0x7A) || (v >= 0x41 && v <= 0x5A)
+            }()
+            return !(hasLetterLeft && hasLetterRight)
+        }
         if c == ".",
            Self.dotActsAsVowelModifier(prefixEndingAtDot: buffer[...idx]) {
             // When an OPEN dot vowel-modifier (no asat at the end of its Myanmar

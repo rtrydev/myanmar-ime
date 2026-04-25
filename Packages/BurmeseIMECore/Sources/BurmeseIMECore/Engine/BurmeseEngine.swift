@@ -398,7 +398,16 @@ public final class BurmeseEngine: @unchecked Sendable {
         // (punctuation, whitespace, etc.) is held aside and emitted verbatim
         // on commit — this lets the user freely mix Burmese-convertible text
         // with literal content without the IME swallowing either.
-        let (rawComposable, rawLiteralTail) = splitComposablePrefix(postDigitBuffer)
+        let (rawComposable0, rawLiteralTail) = splitComposablePrefix(postDigitBuffer)
+        // Trailing `'` characters surface as literal quote/apostrophe marks,
+        // not as null-vowel connectors. Peel them into the literal tail before
+        // the composable run reaches the parser (task 03).
+        var rawComposable = rawComposable0
+        var trailingApostrophes = ""
+        while rawComposable.last == "'" {
+            rawComposable.removeLast()
+            trailingApostrophes = "'" + trailingApostrophes
+        }
         // `.` is in `Romanization.composingCharacters` for abbreviation
         // handling, so trailing punctuation lands in the composable portion
         // rather than the literal tail. When punctuation mapping is on,
@@ -410,10 +419,10 @@ public final class BurmeseEngine: @unchecked Sendable {
         if burmesePunctuationEnabled {
             let (kept, peeled) = stripTrailingMappablePunctuation(rawComposable)
             composable = kept
-            literalTail = peeled + rawLiteralTail
+            literalTail = peeled + trailingApostrophes + rawLiteralTail
         } else {
             composable = rawComposable
-            literalTail = rawLiteralTail
+            literalTail = trailingApostrophes + rawLiteralTail
         }
         let initialNormalized = Self.normalizeForParser(composable)
         guard !initialNormalized.isEmpty else {
