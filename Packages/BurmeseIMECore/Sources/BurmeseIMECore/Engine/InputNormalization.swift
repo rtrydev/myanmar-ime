@@ -254,7 +254,7 @@ extension BurmeseEngine {
         let chars = Array(input)
         guard chars.count >= 3 else { return nil }
         let medialLetters: Set<Character> = ["y", "r", "w"]
-        var insertAt: [(index: Int, isLiberal: Bool)] = []
+        var insertAt: [(index: Int, isLiberal: Bool, marker: String)] = []
         for lowerIndex in 1..<chars.count {
             let lowerStart = chars[lowerIndex]
             guard lowerStart.isLetter,
@@ -318,15 +318,25 @@ extension BurmeseEngine {
                     .contains(where: { medialLetters.contains(chars[$0]) })
             let precedingCoda = lowerIndex >= 1 ? chars[lowerIndex - 1] : "\0"
             guard !onsetHasMedial || precedingCoda == "h" else { continue }
-            insertAt.append((lowerIndex, inferred.isLiberal))
+            // Bare-onset nga sites need an asat-then-virama injection
+            // (`*+`) so the parser materialises kinzi (`ng + asat +
+            // virama + <C>`) instead of a bare virama stack
+            // (`ng + virama + <C>`). Other inference sites carry the
+            // asat in the preceding vowel rule's output, so a plain
+            // `+` is enough.
+            let marker = inferred.isBareNga ? "*+" : "+"
+            insertAt.append((lowerIndex, inferred.isLiberal, marker))
         }
         guard !insertAt.isEmpty else { return nil }
         let liberalInsertions = insertAt.lazy.filter(\.isLiberal).count
         let strictInsertAt = insertAt.filter { !$0.isLiberal }
-        let result = injectMarkers(input, at: insertAt.map(\.index))
+        let result = injectMarkers(input, at: insertAt.map { ($0.index, $0.marker) })
         let strictOnlyResult: String?
         if liberalInsertions > 0, !strictInsertAt.isEmpty {
-            strictOnlyResult = injectMarkers(input, at: strictInsertAt.map(\.index))
+            strictOnlyResult = injectMarkers(
+                input,
+                at: strictInsertAt.map { ($0.index, $0.marker) }
+            )
         } else {
             strictOnlyResult = nil
         }
@@ -339,11 +349,14 @@ extension BurmeseEngine {
         )
     }
 
-    private static func injectMarkers(_ input: String, at indices: [Int]) -> String {
+    private static func injectMarkers(
+        _ input: String,
+        at insertions: [(index: Int, marker: String)]
+    ) -> String {
         var result = input
-        for idx in indices.reversed() {
-            let si = result.index(result.startIndex, offsetBy: idx)
-            result.insert("+", at: si)
+        for entry in insertions.sorted(by: { $0.index > $1.index }) {
+            let si = result.index(result.startIndex, offsetBy: entry.index)
+            result.insert(contentsOf: entry.marker, at: si)
         }
         return result
     }
@@ -395,7 +408,7 @@ extension BurmeseEngine {
     private static func inferredPaliStackIsLiberal(
         chars: [Character],
         insertIndex: Int
-    ) -> (isLiberal: Bool, vowelStart: Int)? {
+    ) -> (isLiberal: Bool, vowelStart: Int, isBareNga: Bool)? {
         guard insertIndex > 0,
               insertIndex < chars.count
         else { return nil }
@@ -414,12 +427,18 @@ extension BurmeseEngine {
                     continue
                 }
                 if Grammar.isValidStack(upper: upper, lower: lower) {
-                    return (false, upperMatch.vowelStart)
+                    return (false, upperMatch.vowelStart, upperMatch.isBareNga)
                 }
                 sawLiberal = true
             }
         }
-        return sawLiberal ? (true, upperMatch.vowelStart) : nil
+        // Bare-onset nga is strict-only — kinzi never participates in
+        // liberal cross-class stacking, so reject the site if the
+        // strict path failed.
+        if upperMatch.isBareNga {
+            return nil
+        }
+        return sawLiberal ? (true, upperMatch.vowelStart, false) : nil
     }
 
     private static let stackLowerRomanKeys: [String] = {
@@ -552,20 +571,34 @@ extension BurmeseEngine {
     private static func stackUpperConsonantsEndingBeforeLower(
         chars: [Character],
         insertIndex: Int
-    ) -> (uppers: [Character], vowelStart: Int)? {
-        let matchedVowels = vowelRuleUpperConsonants(chars: chars, insertIndex: insertIndex)
-        if let matchedVowels {
-            return matchedVowels
+    ) -> (uppers: [Character], vowelStart: Int, isBareNga: Bool)? {
+        if let matchedVowels = vowelRuleUpperConsonants(chars: chars, insertIndex: insertIndex) {
+            return (matchedVowels.uppers, matchedVowels.vowelStart, false)
         }
         let codaIndex = insertIndex - 1
-        guard codaIndex > 0,
-              isPaliStackCodaLetter(chars[codaIndex]),
-              isPaliStackVowelLetter(chars[codaIndex - 1]),
-              let upper = Romanization.romanToConsonant[String(chars[codaIndex])]
-        else {
-            return nil
+        if codaIndex > 0,
+           isPaliStackCodaLetter(chars[codaIndex]),
+           isPaliStackVowelLetter(chars[codaIndex - 1]),
+           let upper = Romanization.romanToConsonant[String(chars[codaIndex])] {
+            return ([upper], codaIndex - 1, false)
         }
-        return ([upper], codaIndex - 1)
+        // Task 03: leading independent vowel + bare-onset `nga` +
+        // stackable consonant. The parser consumes `ng` as a bare
+        // OnsetEntry (no preceding asat-vowel arc), so neither of the
+        // checks above matches. Restrict to the buffer-leading case
+        // (`a` / `o` / `i` / …) since that is the only site where the
+        // upper `nga` lands as a bare onset rather than the coda of
+        // a previous syllable's vowel rule. The injection emits
+        // `*+` (asat + virama) so the parser materialises the kinzi
+        // (`<vowel> 1004 103A 1039 <C>`) rather than a bare virama
+        // stack (`<vowel> 1004 1039 <C>`).
+        if codaIndex == 2,
+           chars[codaIndex] == "g",
+           chars[codaIndex - 1] == "n",
+           isPaliStackVowelLetter(chars[0]) {
+            return ([Myanmar.nga], 0, true)
+        }
+        return nil
     }
 
     private struct StackVowelUpperRule: Sendable {
