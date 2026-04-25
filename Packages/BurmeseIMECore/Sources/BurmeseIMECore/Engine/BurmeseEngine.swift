@@ -1341,6 +1341,9 @@ public final class BurmeseEngine: @unchecked Sendable {
         // with a parser-derived anchor extension would revert a deliberate
         // pick.
         if !merged.isEmpty, merged[0].source != .history {
+            let topLM = scoreSurfaceCached(
+                merged[0].surface, context: context, cache: &lmCache
+            )
             var promoted = false
             for anchor in historySnapshot.reversed() {
                 guard !anchor.normalized.isEmpty,
@@ -1355,6 +1358,20 @@ public final class BurmeseEngine: @unchecked Sendable {
                     break
                 }
                 if let idx = merged.firstIndex(where: { Self.scalarHasPrefix(Self.stripZWSP($0.surface), anchorKey) }) {
+                    // LM-margin guard (tasks 02 / 05): if the LM clearly
+                    // prefers the current top over the anchor-matching
+                    // candidate, the recorded anchor reflects a transient
+                    // segmentation/medial pick that the longer buffer no
+                    // longer supports. Skip the promotion and let the
+                    // LM-best surface lead. The anchor remains in history
+                    // so a future keystroke whose LM evidence does match
+                    // it can still resurrect it.
+                    let candidateLM = scoreSurfaceCached(
+                        merged[idx].surface, context: context, cache: &lmCache
+                    )
+                    if topLM - candidateLM > Self.lmDominanceThreshold {
+                        continue
+                    }
                     let keeper = merged.remove(at: idx)
                     merged.insert(keeper, at: 0)
                     promoted = true
@@ -1368,6 +1385,11 @@ public final class BurmeseEngine: @unchecked Sendable {
             // with the anchor's medial swapped in. This preserves the
             // correct syllable count while keeping the user's previously-
             // seen prefix stable on screen.
+            //
+            // Same LM-margin guard applies here: only synthesise the
+            // medial-swapped variant when the LM does not strongly
+            // prefer the current top. Otherwise the synthesis would
+            // freeze a medial that LM has since out-voted.
             if !promoted {
                 let topStripped = Self.stripZWSP(merged[0].surface)
                 for anchor in historySnapshot.reversed() {
@@ -1383,6 +1405,12 @@ public final class BurmeseEngine: @unchecked Sendable {
                             in: merged[0].surface,
                             matching: anchorStripped
                         )
+                        let variantLM = scoreSurfaceCached(
+                            variant, context: context, cache: &lmCache
+                        )
+                        if topLM - variantLM > Self.lmDominanceThreshold {
+                            continue
+                        }
                         merged.insert(Candidate(
                             surface: variant,
                             reading: merged[0].reading,
@@ -1401,6 +1429,12 @@ public final class BurmeseEngine: @unchecked Sendable {
                             in: merged[0].surface,
                             matching: anchorStripped
                         )
+                        let variantLM = scoreSurfaceCached(
+                            variant, context: context, cache: &lmCache
+                        )
+                        if topLM - variantLM > Self.lmDominanceThreshold {
+                            continue
+                        }
                         merged.insert(Candidate(
                             surface: variant,
                             reading: merged[0].reading,
