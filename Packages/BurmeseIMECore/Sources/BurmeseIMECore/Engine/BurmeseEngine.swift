@@ -657,6 +657,31 @@ public final class BurmeseEngine: @unchecked Sendable {
                 grammarParses.append(promoted)
             }
         }
+        // Explicit user-typed `+` (task 01): when the buffer carries an
+        // explicit `+`, the primary strict parse rejects cross-class
+        // pairs (`pad+ma`, `brah+ma`, `nag+ma`) and the DP soft-boundary
+        // path silently drops the virama. Re-parse with liberal stack
+        // validation so the cross-class stacked surface reaches the
+        // candidate pool. The user explicitly asked for a stack — so the
+        // liberal merge does NOT pay the rarity penalty that the
+        // implicit-inference path applies to demote liberal stacks on
+        // plain Burmese compounds. Same-class pairs (`pak+ka`, `dham+ma`)
+        // are unaffected: strict and liberal both produce the same
+        // surface, and the dedupe-by-output skips the duplicate.
+        if effectiveParseInput.contains("+") {
+            let liberalParses = parser.parseCandidates(
+                effectiveParseInput,
+                maxResults: Self.grammarCandidateBudget(for: effectiveParseInput),
+                isFullBuffer: !effectiveWindowed,
+                allowLiberalStacks: true
+            )
+            let existingOutputs = Set(grammarParses.map(\.output))
+            for parse in liberalParses
+            where !Self.hasInterleavedLatin(parse.output)
+               && !existingOutputs.contains(parse.output) {
+                grammarParses.append(parse)
+            }
+        }
         // Stack inference (tasks 09/05): when the buffer carries no
         // explicit `+` but has an orthographic kinzi / Pali virama-stack
         // site (`<V><coda><C>`), re-parse with the inferred `+` injected

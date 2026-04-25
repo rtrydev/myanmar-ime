@@ -856,14 +856,17 @@ public enum EngineSuite {
             )
         },
 
-        TestCase("engine_crossClassStack_pTa_rejectsMalformed") { ctx in
-            // Parser returns legal=0; the rescue path must not let the
-            // labial+dental (`1015 1039 1010`) surface through.
+        TestCase("engine_crossClassStack_pTa_admitsLiberalStack_task01") { ctx in
+            // Task 01: an explicit user-typed `+` between cross-class
+            // consonants (here labial p + dental t) must surface a
+            // liberal-stacked candidate. `p+ta` → ပ္တ is the user's
+            // ask; the soft-boundary fallback ပတ remains in the panel
+            // as a sibling.
             let state = BurmeseEngine().update(buffer: "p+ta", context: [])
-            let bad: [UInt32] = [0x1015, 0x1039, 0x1010]
-            ctx.assertFalse(
-                state.candidates.contains { $0.surface.unicodeScalars.map(\.value) == bad },
-                "p+ta_noCrossClassStack",
+            let expected: [UInt32] = [0x1015, 0x1039, 0x1010]
+            ctx.assertTrue(
+                state.candidates.contains { $0.surface.unicodeScalars.map(\.value) == expected },
+                "p+ta_hasLiberalStack",
                 detail: "surfaces=\(state.candidates.map(\.surface))"
             )
         },
@@ -1061,62 +1064,74 @@ public enum EngineSuite {
                             "kin+ga must still produce ကင်္ဂ at rank 1")
         },
 
-        // MARK: - Cross-class `+` degrades to syllable break (task 02)
+        // MARK: - Cross-class `+` produces a liberal stack (task 01)
         //
-        // When the user types an explicit `+` but the resulting virama
-        // stack is orthographically impossible (cross-class or lower is
-        // a non-stackable semi-vowel), the `+` must act as a syllable
-        // break instead of forcing right-shrink to drop the tail.
+        // When the user types an explicit `+` between cross-class
+        // consonants whose virama stack is liberal-valid (both stackable
+        // under `Grammar.isValidStackLiberal`), the engine must surface
+        // the stacked form at top — the explicit `+` is the user's
+        // signal that they want a stack. The soft-boundary sibling
+        // remains in the panel for cases where the user actually meant
+        // a syllable break. When the lower is a non-stackable semi-vowel
+        // (`y`, `r`, `w`), or the previous state is a plain vowel that
+        // virama can't bond to, the soft-boundary fires unconditionally
+        // — those cases are still tested below as regressions on the
+        // gating logic.
 
-        TestCase("engine_crossClass_kPlusTar_emitsSyllableBreak_task02") { ctx in
+        TestCase("engine_crossClass_kPlusTar_admitsLiberalStack_task01") { ctx in
             let state = BurmeseEngine().update(buffer: "k+tar", context: [])
             let top = state.candidates.first?.surface ?? ""
             ctx.assertEqual(top.unicodeScalars.map(\.value),
-                            [0x1000, 0x1010, 0x102C],
-                            "k+tar must produce ကတာ as two syllables; got '\(top)'")
+                            [0x1000, 0x1039, 0x1010, 0x102C],
+                            "k+tar must produce က္တာ via liberal stack; got '\(top)'")
         },
 
-        TestCase("engine_crossClass_shinPlusByar_emitsSyllableBreak_task02") { ctx in
-            // shin = ရှင်, byar = ဘြ + aa (short-aa retained; bha is not
-            // a descender-aa onset, so no tall-aa rewrite fires).
+        TestCase("engine_crossClass_shinPlusByar_kinziSiblingReachable_task01") { ctx in
+            // shin + byar: under liberal stacks the n+b kinzi virama is
+            // reachable as a sibling. The soft-boundary form ရှင်ဘြာ
+            // remains the top because it scores at least as well, but
+            // the kinzi-stacked form must reach the panel.
             let state = BurmeseEngine().update(buffer: "shin+byar", context: [])
-            let top = state.candidates.first?.surface ?? ""
-            ctx.assertEqual(top.unicodeScalars.map(\.value),
-                            [0x101B, 0x103E, 0x1004, 0x103A, 0x1018, 0x103C, 0x102C],
-                            "shin+byar must produce ရှင်ဘြာ; got '\(top)'")
+            let kinzi: [UInt32] = [0x101B, 0x103E, 0x1004, 0x103A, 0x1039, 0x1018, 0x103C, 0x102C]
+            ctx.assertTrue(
+                state.candidates.contains { $0.surface.unicodeScalars.map(\.value) == kinzi },
+                "shin+byar_kinziSiblingReachable",
+                detail: "surfaces=\(state.candidates.map(\.surface))"
+            )
         },
 
-        TestCase("engine_crossClass_shinPlusPar_emitsSyllableBreak_task02") { ctx in
-            // shin + par: ပ is a descender onset, so aa-shape correction
-            // writes U+102B (tall-aa).
+        TestCase("engine_crossClass_shinPlusPar_kinziSiblingReachable_task01") { ctx in
             let state = BurmeseEngine().update(buffer: "shin+par", context: [])
-            let top = state.candidates.first?.surface ?? ""
-            ctx.assertEqual(top.unicodeScalars.map(\.value),
-                            [0x101B, 0x103E, 0x1004, 0x103A, 0x1015, 0x102B],
-                            "shin+par must produce ရှင်ပါ; got '\(top)'")
+            let kinzi: [UInt32] = [0x101B, 0x103E, 0x1004, 0x103A, 0x1039, 0x1015, 0x102B]
+            ctx.assertTrue(
+                state.candidates.contains { $0.surface.unicodeScalars.map(\.value) == kinzi },
+                "shin+par_kinziSiblingReachable",
+                detail: "surfaces=\(state.candidates.map(\.surface))"
+            )
         },
 
-        TestCase("engine_crossClass_yaPlusPPlusGa_emitsSyllableBreaks_task02") { ctx in
-            // ya + p + ga: both `+` connectors are structurally impossible
-            // stacks. Top candidate must not contain a cross-class virama.
+        TestCase("engine_crossClass_yaPlusPPlusGa_partialStack_task01") { ctx in
+            // ya + p + ga: the first `+` follows a plain vowel (y+a
+            // inherent), so the virama-after-vowel rule still forces
+            // a syllable break there. The second `+` (between p and g)
+            // is liberal-stackable, so the top must surface the p+g
+            // stack while keeping y as a separate syllable.
             let state = BurmeseEngine().update(buffer: "ya+p+ga", context: [])
             let top = state.candidates.first?.surface ?? ""
             let scalars = top.unicodeScalars.map(\.value)
-            // Must not contain virama U+1039 — every `+` here is impossible.
-            ctx.assertFalse(scalars.contains(0x1039),
-                            "ya+p+ga must not contain a virama stack; got '\(top)' scalars=\(scalars.map { String(format: "%04X", $0) })")
-            // Must retain all three onset consonants in order.
-            ctx.assertTrue(scalars.contains(0x101A) && scalars.contains(0x1015) && scalars.contains(0x1002),
-                           "ya+p+ga must preserve y/p/g onsets; got '\(top)'")
+            ctx.assertEqual(
+                scalars,
+                [0x101A, 0x1015, 0x1039, 0x1002],
+                "ya+p+ga must produce ယပ္ဂ (y syllable break, p+g liberal stack); got '\(top)'"
+            )
         },
 
-        TestCase("engine_crossClass_pPlusTar_emitsSyllableBreak_task02") { ctx in
-            // Labial + dental is cross-class illegal; soft-boundary path.
+        TestCase("engine_crossClass_pPlusTar_admitsLiberalStack_task01") { ctx in
             let state = BurmeseEngine().update(buffer: "p+tar", context: [])
             let top = state.candidates.first?.surface ?? ""
             ctx.assertEqual(top.unicodeScalars.map(\.value),
-                            [0x1015, 0x1010, 0x102C],
-                            "p+tar must produce ပတာ as two syllables; got '\(top)'")
+                            [0x1015, 0x1039, 0x1010, 0x102C],
+                            "p+tar must produce ပ္တာ via liberal stack; got '\(top)'")
         },
 
         // MARK: - Connector-only and consecutive-connector buffers (task 08)
