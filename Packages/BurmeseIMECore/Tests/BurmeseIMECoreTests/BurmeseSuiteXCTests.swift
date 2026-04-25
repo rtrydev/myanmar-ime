@@ -105,4 +105,8 @@ final class LexiconLMDriftXCTests: XCTestCase {
 final class MidBufferStackInferenceXCTests: XCTestCase {
     func testAll() { runSuite(MidBufferStackInferenceSuite.suite, xctest: self) }
 }
+
+final class ConsonantDigraphIntegrityXCTests: XCTestCase {
+    func testAll() { runSuite(ConsonantDigraphIntegritySuite.suite, xctest: self) }
+}
 #endif

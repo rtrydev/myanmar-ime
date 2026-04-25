@@ -252,6 +252,16 @@ extension BurmeseEngine {
             guard !isContinuationOfStackLowerConsonant(chars: chars, at: lowerIndex) else {
                 continue
             }
+            // Don't slice an aspirated / cluster-alias consonant
+            // digraph (`dh`, `ph`, `gh`, `bh`, `th`, `sh`, `hm`, …).
+            // The previous + current character pair (or a longer
+            // span centred on the insertion point) may form a single
+            // consonant key — inserting `+` between them would
+            // re-parse the digraph as `<base> + virama + <ha-or-medial>`
+            // and emit a malformed surface.
+            guard !isInsideMultiCharConsonantKey(chars: chars, insertIndex: lowerIndex) else {
+                continue
+            }
             guard let inferred = inferredPaliStackIsLiberal(
                 chars: chars,
                 insertIndex: lowerIndex
@@ -404,6 +414,76 @@ extension BurmeseEngine {
     private static let stackVowelUpperRuleLastLetters: Set<Character> = {
         Set(stackVowelUpperRules.compactMap(\.key.last))
     }()
+
+    /// True when inserting `+` at `insertIndex` would slice a
+    /// single-consonant digraph in half. Two patterns trigger this
+    /// guard:
+    ///
+    /// 1. The character immediately before `insertIndex` is a `stop`
+    ///    consonant (`b`, `c`, `d`, `g`, `k`, `p`, `s`, `t`, `z`) and
+    ///    the character at `insertIndex` is `h`. This covers every
+    ///    aspirated digraph the user can type (`dh`, `ph`, `gh`, `bh`,
+    ///    `th`, `ch`, `sh`, …) — including the bare `bh` form that has
+    ///    no separate `Romanization.consonants` entry. Splitting any
+    ///    of these forces the parser to re-read the digraph as
+    ///    `<base> + virama + ha-or-medial`, producing a malformed
+    ///    surface.
+    /// 2. The pair at the insertion point matches a multi-char
+    ///    consonant key from `Romanization.consonants` /
+    ///    `Romanization.clusterAliases` whose split form would be
+    ///    similarly malformed (`khr`, `dhr`, `bhr`, `ghr`, `phr`,
+    ///    `thr`, `shw`).
+    ///
+    /// `ng` / `ny` / `zz` / `ss` are intentionally NOT covered: the
+    /// kinzi-forming `<vowel>n + g<C>` site needs `n+g` to split,
+    /// and the doubled-letter digraphs don't reach this loop because
+    /// their preceding letters aren't Pali coda letters. Leading-`h`
+    /// cluster aliases (`hm`, `hn`, `hl`, `hr`, `hw`) are also out —
+    /// `precedingCoda == "h"` is a deliberate carve-out for Pali
+    /// loanwords (`brahma`, `ahmat`) where the inference splits the
+    /// alias into a real `<C> + virama + <C>` stack on purpose.
+    private static func isInsideMultiCharConsonantKey(
+        chars: [Character],
+        insertIndex: Int
+    ) -> Bool {
+        guard insertIndex > 0, insertIndex < chars.count else { return false }
+        let stops: Set<Character> = ["b", "c", "d", "g", "k", "p", "s", "t", "z"]
+        if chars[insertIndex] == "h", stops.contains(chars[insertIndex - 1]) {
+            return true
+        }
+        let lo = max(0, insertIndex - maxStackLowerRomanKeyLength + 1)
+        let hi = min(chars.count, insertIndex + maxStackLowerRomanKeyLength)
+        for start in lo..<insertIndex {
+            for key in stackLowerRomanKeys
+            where keyMustNotBeSplit(key) {
+                let end = start + key.count
+                guard end <= hi, end > insertIndex else { continue }
+                if matchesRomanKey(key, chars: chars, at: start) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    /// Multi-char consonant keys whose interior boundary should never
+    /// receive an inferred `+`. These are the keys whose split form
+    /// (`<base> + virama + <ha-or-medial>`) is orthographically
+    /// malformed — i.e. the digraph is a single consonant or a
+    /// cluster alias, not a Pali stack site.
+    private static func keyMustNotBeSplit(_ key: String) -> Bool {
+        // Aspirated and cluster-alias digraphs have `h` somewhere
+        // after position 0 (`dh`, `ph`, `sh`, `khr`, `dhr`, …).
+        // The leading `h` cluster aliases (`hm`, `hn`, `hl`, `hr`,
+        // `hw`, …) are intentionally excluded — the existing
+        // `precedingCoda == "h"` carve-out (Pali words like `brahma`,
+        // `ahmat`) needs the inference to fire there, splitting the
+        // alias into a real `<C> + virama + <C>` stack on purpose.
+        guard let hIdx = key.firstIndex(of: "h"), hIdx != key.startIndex else {
+            return false
+        }
+        return true
+    }
 
     private static func isContinuationOfStackLowerConsonant(
         chars: [Character],
