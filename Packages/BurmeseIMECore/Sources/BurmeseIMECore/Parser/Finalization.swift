@@ -313,17 +313,49 @@ extension SyllableParser {
     /// user-unexpected). Independent vowels are not penalized: the user
     /// already pays `aliasCost` for picking an independent-vowel variant,
     /// and explicit disambiguators like "u2." specifically request them.
+    ///
+    /// +5 per "aspirated digraph split": `<unaspirated-stop> 103A 101F`
+    /// or `<unaspirated-stop> 1039 101F`. The user typed an aspirated
+    /// digraph (`kh`, `gh`, `dh`, `ph`, `th`) and the parser materialised
+    /// the closed-syllable + standalone-ha reading instead of the single
+    /// aspirated consonant (`ခ`, `ဃ`, `ဓ`, `ဖ`, `သ`). When both readings
+    /// score equally on the DP — common because the structural cost is
+    /// identical — the rarity penalty tips the digraph sibling to the
+    /// top of the panel. See task 02.
     internal static func computeRarityPenalty(_ output: String) -> Int {
         var penalty = 0
-        for scalar in output.unicodeScalars {
-            let v = scalar.value
+        let scalars = Array(output.unicodeScalars)
+        for i in 0..<scalars.count {
+            let v = scalars[i].value
             // Retroflex consonants: ဋ ဌ ဍ ဎ ဏ ဠ
             if v == 0x100B || v == 0x100C || v == 0x100D
                 || v == 0x100E || v == 0x100F || v == 0x1020 {
                 penalty += 1
             }
+            // Aspirated-digraph split: stop + (asat|virama) + ha. Stops
+            // listed are exactly the ones whose `<stop>+h` romanization
+            // forms a single Myanmar consonant (`kh`→ခ, `gh`→ဃ, `th`→သ,
+            // `dh`→ဓ, `ph`→ဖ). Other consonants (`m`, `n`, `l`, `r`,
+            // `y`, `w`) have no such digraph rule, so a closed
+            // <C>+asat+ha there is legitimate spelling and is left
+            // unpenalised.
+            if i + 2 < scalars.count,
+               isAspiratedDigraphSplitStop(v),
+               (scalars[i + 1].value == 0x103A || scalars[i + 1].value == 0x1039),
+               scalars[i + 2].value == 0x101F {
+                penalty += 5
+            }
         }
         return penalty
+    }
+
+    @inline(__always)
+    private static func isAspiratedDigraphSplitStop(_ v: UInt32) -> Bool {
+        // ka(1000) → kha(1001), ga(1002) → gha(1003),
+        // ta(1010) → sa(101E, the `th` digraph),
+        // da(1012) → dha(1013), pa(1015) → pha(1016).
+        return v == 0x1000 || v == 0x1002 || v == 0x1010
+            || v == 0x1012 || v == 0x1015
     }
 
     internal struct NumericMarkerPlacement: Hashable {

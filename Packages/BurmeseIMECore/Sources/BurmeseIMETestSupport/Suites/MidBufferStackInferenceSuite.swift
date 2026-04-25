@@ -186,5 +186,95 @@ public enum MidBufferStackInferenceSuite {
                 )
             }
         },
+
+        // Single-site liberal-only buffers: `<C><V><coda><C>` where
+        // the coda/lower pair is cross-class (liberal-only) and the
+        // rest of the buffer is otherwise plain. The acceptance bar
+        // for task 04 is that the top candidate must NOT carry a
+        // virama at the cross-class position. Buffers whose
+        // transliteration carries an `r` (Pali/Sanskrit hint —
+        // `karma`, `dharma`, `brahma`, `yarpadma`) are the carve-out:
+        // those are intentionally allowed to keep the virama at top.
+        TestCase("liberalOnlySingleSite_noViramaAtTop") { ctx in
+            guard let engine = bundledEngine(ctx) else { return }
+            // Each entry pairs a cross-class coda+lower combination
+            // (different phonetic classes — would only stack via the
+            // liberal rule) with a buffer that would otherwise be a
+            // plain Burmese compound.
+            let cases = [
+                "takmaung",  // velar coda + labial lower (k+m)
+                "pakta",     // velar coda + dental lower (k+t)
+                "satka",     // dental coda + velar lower (t+k)
+                "patma",     // dental coda + labial lower (t+m)
+                "sapna",     // labial coda + dental lower (p+n)
+                "kabna",     // labial coda + dental lower (b+n)
+                "kakna",     // velar coda + dental lower (k+n)
+                "lakta",     // velar coda + dental lower (k+t) under liquid onset
+                "nakpa",     // velar coda + labial lower (k+p)
+            ]
+            for input in cases {
+                let state = engine.update(buffer: input, context: [])
+                let top = state.candidates.first?.surface ?? ""
+                let hasVirama = top.unicodeScalars.contains(where: { $0.value == 0x1039 })
+                ctx.assertFalse(
+                    hasVirama,
+                    input,
+                    detail: "top='\(top)' carries cross-class virama; expected no-stack form"
+                )
+            }
+        },
+
+        // The `kawatta` case from the task spec: the same-class `tt`
+        // stack is strict-valid and must reach the panel. The top
+        // ranking depends on how the parser interprets the `aw`
+        // diphthong vs explicit `wa`, and that choice is outside the
+        // scope of task 04 — what task 04 guarantees is that the
+        // strict-stack form (`ka + wa + tta`, with virama on `tt`)
+        // appears in the panel for the user to pick.
+        TestCase("kawatta_strictStackReachesPanel") { ctx in
+            guard let engine = bundledEngine(ctx) else { return }
+            // ကဝတ္တ = 1000 101D 1010 1039 1010
+            let expectedScalars: [UInt32] = [0x1000, 0x101D, 0x1010, 0x1039, 0x1010]
+            let state = engine.update(buffer: "kawatta", context: [])
+            let found = state.candidates.contains { c in
+                Array(c.surface.unicodeScalars.map(\.value)) == expectedScalars
+            }
+            ctx.assertTrue(
+                found,
+                "kawatta",
+                detail: "ကဝတ္တ missing from panel; got \(state.candidates.prefix(6).map(\.surface))"
+            )
+        },
+
+        // Negative regression for the spec's own example: `mintara`
+        // shows the guard already worked (no liberal cross-class
+        // stack at top). Asserts the top doesn't add one back.
+        TestCase("mintara_noLiberalStack") { ctx in
+            guard let engine = bundledEngine(ctx) else { return }
+            let state = engine.update(buffer: "mintara", context: [])
+            let top = state.candidates.first?.surface ?? ""
+            let hasVirama = top.unicodeScalars.contains(where: { $0.value == 0x1039 })
+            ctx.assertFalse(
+                hasVirama,
+                "mintara",
+                detail: "top='\(top)' acquired a cross-class virama"
+            )
+        },
+
+        // Carve-out: Pali/Sanskrit transliterations carrying `r` keep
+        // their cross-class stack at top via the liberal-inference
+        // path. Verifies the gate isn't over-aggressive.
+        TestCase("paliRTransliterations_keepStackAtTop") { ctx in
+            guard let engine = bundledEngine(ctx) else { return }
+            for input in ["yarpadma", "tarbandana", "mantara"] {
+                let state = engine.update(buffer: input, context: [])
+                let top = state.candidates.first?.surface ?? ""
+                ctx.assertTrue(
+                    top.unicodeScalars.contains(where: { $0.value == 0x1039 }),
+                    input,
+                    detail: "top='\(top)' lost its virama stack"
+                )
+            }
+        },
     ])
 }

@@ -1523,6 +1523,26 @@ public final class BurmeseEngine: @unchecked Sendable {
             let adjustedLegality = parse.legalityScore > 0
                 ? max(1, parse.legalityScore - 100 * insertions)
                 : parse.legalityScore
+            // Bump rarityPenalty per liberal (cross-class) insertion
+            // when the buffer doesn't look like a Pali/Sanskrit
+            // transliteration. Cross-class virama stacks are Pali
+            // loanword territory; ordinary Burmese compounds like
+            // `takmaung`, `pakta`, `kakna` produce the same
+            // liberal-only `+` sites and should *not* render with a
+            // virama at top. The `r` letter is a reliable Pali
+            // transliteration hint — `karma`, `dharma`, `brahma`,
+            // `yarpadma` all carry it; the over-generating Burmese
+            // compounds typically don't. Buffers with no `r` get a
+            // rarity bump that demotes the liberal-stacked form
+            // below the no-stack sibling. The stacked form stays in
+            // the panel as a lower-ranked option, and `padma` /
+            // `vandana` / `ganda`-style Pali loanwords with override
+            // entries are unaffected (they're injected at rank 0
+            // independently of inference). See task 04.
+            let prefixHasPaliR = input.contains("r")
+            let liberalRarityBump = (liberalInsertions > 0 && !prefixHasPaliR)
+                ? 5 * liberalInsertions
+                : 0
             let adjusted = SyllableParse(
                 output: parse.output,
                 reading: parse.reading,
@@ -1531,7 +1551,7 @@ public final class BurmeseEngine: @unchecked Sendable {
                 score: parse.score,
                 structureCost: parse.structureCost + liberalInsertions,
                 syllableCount: adjustedCount,
-                rarityPenalty: parse.rarityPenalty
+                rarityPenalty: parse.rarityPenalty + liberalRarityBump
             )
             if liberalInsertions == 0,
                Self.surfaceHasOnlyNativeViramaStacks(adjusted.output) {

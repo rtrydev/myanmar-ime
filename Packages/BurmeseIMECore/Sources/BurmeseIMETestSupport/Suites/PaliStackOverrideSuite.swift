@@ -37,17 +37,63 @@ public enum PaliStackOverrideSuite {
             }
         },
 
-        // Every override surface must contain a virama (U+1039) that
-        // bridges two distinct consonants — a sanity check that the
-        // table doesn't accumulate typos as it grows.
-        TestCase("paliStackOverrides_surfacesContainCrossClassVirama") { ctx in
+        // Lint: every override surface must contain a virama (U+1039)
+        // sitting between two stackable consonants. Same-class entries
+        // (`ganda`, `vandana`) are intentional rank-promotions over
+        // the asat-closed parser-native rendering; cross-class entries
+        // (`padma`) are the only path to the canonical loanword shape
+        // at all. Both must pass `isValidStackLiberal` — the entry is
+        // a typo if either neighbour isn't in the stackable set
+        // (e.g. ya, wa, sa) or if the virama lands at the surface edge.
+        TestCase("paliStackOverrides_viramaSitsBetweenStackableConsonants") { ctx in
             for (reading, surface) in BurmeseEngine.paliStackOverrides {
                 let scalars = Array(surface.unicodeScalars.map(\.value))
-                let hasVirama = scalars.contains(0x1039)
+                guard let viramaIdx = scalars.firstIndex(of: 0x1039) else {
+                    ctx.assertTrue(
+                        false,
+                        reading,
+                        detail: "override surface '\(surface)' lacks U+1039 (virama)"
+                    )
+                    continue
+                }
                 ctx.assertTrue(
-                    hasVirama,
+                    viramaIdx >= 1 && viramaIdx + 1 < scalars.count,
                     reading,
-                    detail: "override surface '\(surface)' lacks U+1039 (virama)"
+                    detail: "virama at edge of '\(surface)' — needs an upper and a lower consonant"
+                )
+                guard viramaIdx >= 1, viramaIdx + 1 < scalars.count else { continue }
+                let upper = scalars[viramaIdx - 1]
+                let lower = scalars[viramaIdx + 1]
+                guard let upperChar = Unicode.Scalar(upper).map(Character.init),
+                      let lowerChar = Unicode.Scalar(lower).map(Character.init) else {
+                    ctx.assertTrue(false, reading, detail: "non-scalar consonant around virama")
+                    continue
+                }
+                ctx.assertTrue(
+                    Grammar.isValidStackLiberal(upper: upperChar, lower: lowerChar),
+                    reading,
+                    detail: "override '\(surface)' has a non-stackable consonant adjacent to the virama (\(String(format: "%04X", upper)) + 1039 + \(String(format: "%04X", lower)))"
+                )
+                ctx.assertTrue(
+                    upper != lower,
+                    reading,
+                    detail: "override '\(surface)' has identical consonants on both sides of the virama — likely a typo"
+                )
+            }
+        },
+
+        // Lint: every override reading must reduce to a sequence of
+        // recognised romanization syllables. Catches typos that
+        // wouldn't appear in any user-typed buffer (e.g. an `x` or
+        // an unsupported digit) and would silently never trigger.
+        TestCase("paliStackOverrides_readingsAreParseable") { ctx in
+            let parser = SyllableParser()
+            for (reading, _) in BurmeseEngine.paliStackOverrides {
+                let candidates = parser.parseCandidates(reading, maxResults: 1)
+                ctx.assertFalse(
+                    candidates.isEmpty,
+                    reading,
+                    detail: "reading '\(reading)' produces no parser candidates — typo?"
                 )
             }
         },

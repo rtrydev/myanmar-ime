@@ -57,5 +57,45 @@ public enum BareVowelRepetitionSuite {
                 )
             }
         },
+
+        // Sibling reachability: the override flips the canonical
+        // single-vowel form to rank 1, but the parser-native repeated
+        // shape (`ဦဦ` for `uu`, `ယ်ယ်ယ်` for `eee`, `အိုို` for `oo`,
+        // `အီီ` etc. for `ii`) must remain reachable elsewhere in the
+        // panel so the user can still pick the rarer form if they
+        // explicitly want it. `a` repetition has no parser-native
+        // sibling (the inherent vowel collapses every repetition to
+        // a single `အ`), so it's skipped here.
+        TestCase("repeatedBareVowels_parserNativeSiblingReachable") { ctx in
+            // Letter → expected rank-1 override surface (skip-list
+            // for the sibling search). `a` is excluded because the
+            // parser collapses every `a`-only buffer to inherent `အ`
+            // with no distinct sibling.
+            let cases: [(letter: Character, override: String)] = [
+                ("e", "\u{1021}\u{102E}"),
+                ("i", "\u{1024}"),
+                ("o", "\u{1029}"),
+                ("u", "\u{1021}\u{1030}"),
+            ]
+            for entry in cases {
+                for n in 2...4 {
+                    let buffer = String(repeating: String(entry.letter), count: n)
+                    let state = BurmeseEngine().update(buffer: buffer, context: [])
+                    ctx.assertTrue(
+                        state.candidates.count >= 2,
+                        "\(buffer)",
+                        detail: "panel has fewer than two candidates; user can't reach a sibling"
+                    )
+                    let nonOverrideSibling = state.candidates.first {
+                        $0.surface != entry.override
+                    }
+                    ctx.assertTrue(
+                        nonOverrideSibling != nil,
+                        "\(buffer)",
+                        detail: "no parser-native sibling for '\(buffer)'; only override candidate is reachable"
+                    )
+                }
+            }
+        },
     ])
 }
