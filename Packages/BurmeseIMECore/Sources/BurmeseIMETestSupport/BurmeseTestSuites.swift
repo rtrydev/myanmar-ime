@@ -44,5 +44,6 @@ public enum BurmeseTestSuites {
         FuzzSuite.suite,
         ComprehensiveRankingSuite.suite,
         LexiconLMDriftSuite.suite,
+        DiphthongPlusBareNgaSuite.suite,
     ]
 }

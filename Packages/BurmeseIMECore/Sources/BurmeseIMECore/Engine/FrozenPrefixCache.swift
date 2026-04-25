@@ -69,6 +69,7 @@ extension BurmeseEngine {
         var strictInferredStackOutputs: Set<String> = []
         if let inferred = Self.inferImplicitStackMarkers(prefix) {
             let existingOutputs = Set(parses.map(\.output))
+            var liberalKinziOutputs: Set<String> = []
             ingestInferredParses(
                 input: inferred.input,
                 insertions: inferred.insertions,
@@ -76,7 +77,8 @@ extension BurmeseEngine {
                 isFullBuffer: true,
                 grammarParses: &parses,
                 existingOutputs: existingOutputs,
-                strictInferredStackOutputs: &strictInferredStackOutputs
+                strictInferredStackOutputs: &strictInferredStackOutputs,
+                liberalKinziOutputs: &liberalKinziOutputs
             )
             if let strictOnly = inferred.strictOnlyInput {
                 let outputsAfterFull = Set(parses.map(\.output))
@@ -87,9 +89,14 @@ extension BurmeseEngine {
                     isFullBuffer: true,
                     grammarParses: &parses,
                     existingOutputs: outputsAfterFull,
-                    strictInferredStackOutputs: &strictInferredStackOutputs
+                    strictInferredStackOutputs: &strictInferredStackOutputs,
+                    liberalKinziOutputs: &liberalKinziOutputs
                 )
             }
+            // liberalKinziOutputs is intentionally not merged into
+            // strictInferredStackOutputs here — the frozen prefix renders
+            // the open form as its single best surface; liberal kinzi
+            // demotion via rarityPenalty achieves that without promotion.
         }
         let branches: [FrozenPrefixBranch]
         if parses.isEmpty {

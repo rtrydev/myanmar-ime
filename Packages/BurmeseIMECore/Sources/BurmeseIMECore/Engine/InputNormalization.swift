@@ -273,9 +273,63 @@ extension BurmeseEngine {
                 return (collapsed, 1, 0, nil, 1)
             }
         }
+        // Mid-buffer generalisation of the diphthong-coda collapse.
+        // The buffer-leading case above handles `aing<stackable>` at
+        // offset 0. Here we scan for the same `ai + ng` pattern at any
+        // onset-led position (ngStart >= 3, so the `a` of `ai` is not at
+        // index 0). Two outcomes:
+        //  - Stackable lower WITH non-trivial vowel content OR aspirated key:
+        //    collapse — drop the `ng` chars and insert `+` before the
+        //    lower. The `ai` rule's built-in nga-asat already serves as the
+        //    kinzi upper; adding the user's `ng` would double it.
+        //  - No strict-valid lower, or single-char lower followed only by
+        //    bare `a` (inherent vowel): block the regular loop at this `ng`
+        //    position so the open form wins naturally.
+        var blockedLowerIndices: Set<Int> = []
+        if chars.count >= 5 {
+        for ngStart in 3..<(chars.count - 1)
+        where chars[ngStart] == "n" && chars[ngStart + 1] == "g"
+           && chars[ngStart - 2] == "a" && chars[ngStart - 1] == "i" {
+            let stackStart = ngStart + 2
+            let lowers = stackLowerConsonantsStarting(chars: chars, at: stackStart)
+            if lowers.isEmpty {
+                // No consonant after `ng` — user typed a bare-onset ng.
+                // Return a liberal inference so the kinzi form is reachable
+                // at rank ≥ 1 (for panel access) but the liberal rarity
+                // bump keeps the open form at rank 0.
+                let liberalInput = String(chars[..<ngStart]) + "+" + String(chars[ngStart...])
+                return (liberalInput, 1, 1, nil, 0)
+            }
+            guard lowers.contains(where: { Grammar.isValidStack(upper: Myanmar.nga, lower: $0) }) else {
+                // Has a consonant lower but it cannot stack with nga —
+                // block the regular loop here so open form wins naturally.
+                blockedLowerIndices.insert(ngStart)
+                continue
+            }
+            // Determine collapse vs. block. An aspirated lower (next char
+            // is `h`, forming a two-char key like `kh`, `gh`) always
+            // collapses. A single-char lower collapses only when followed
+            // by non-trivial vowel content; bare `a` (inherent vowel) at
+            // the end leaves the open form preferred.
+            let isAspiratedLower = stackStart + 1 < chars.count
+                && chars[stackStart + 1] == "h"
+            if !isAspiratedLower {
+                let afterSingle = stackStart + 1
+                let restIsBareA = afterSingle >= chars.count
+                    || Array(chars[afterSingle...]) == ["a"]
+                if restIsBareA {
+                    blockedLowerIndices.insert(ngStart)
+                    continue
+                }
+            }
+            let collapsed = String(chars[..<ngStart]) + "+" + String(chars[stackStart...])
+            return (collapsed, 1, 0, nil, 1)
+        }
+        } // end if chars.count >= 5
         let medialLetters: Set<Character> = ["y", "r", "w"]
         var insertAt: [(index: Int, isLiberal: Bool, marker: String)] = []
         for lowerIndex in 1..<chars.count {
+            guard !blockedLowerIndices.contains(lowerIndex) else { continue }
             let lowerStart = chars[lowerIndex]
             guard lowerStart.isLetter,
                   !isPaliStackVowelLetter(lowerStart)

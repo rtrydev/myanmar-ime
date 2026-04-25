@@ -741,6 +741,14 @@ public final class BurmeseEngine: @unchecked Sendable {
         // lexicon result is strictly better than anything inference
         // could add here, so bow out.
         var strictInferredStackOutputs: Set<String> = []
+        // Liberal-inferred kinzi surfaces from the diphthong-coda bare-ng
+        // collapse (task 04). These carry a rarity bump so the open form
+        // wins at rank 0, but they must survive LM pruning so the kinzi
+        // sibling is reachable in the panel at rank ≥ 1. They are kept
+        // separate from `strictInferredStackOutputs` so the rank-0
+        // promotion block (bestStrictInferredStackIndex) does not fire on
+        // them.
+        var liberalKinziOutputs: Set<String> = []
         if !hasExactLexiconMatch,
            let inferred = Self.inferImplicitStackMarkers(effectiveParseInput) {
             let existingOutputs = Set(grammarParses.map(\.output))
@@ -752,7 +760,8 @@ public final class BurmeseEngine: @unchecked Sendable {
                 isFullBuffer: !effectiveWindowed,
                 grammarParses: &grammarParses,
                 existingOutputs: existingOutputs,
-                strictInferredStackOutputs: &strictInferredStackOutputs
+                strictInferredStackOutputs: &strictInferredStackOutputs,
+                liberalKinziOutputs: &liberalKinziOutputs
             )
             // When the buffer mixes strict-valid (e.g. kinzi) and
             // liberal-only (cross-class Pali) inference sites, also
@@ -770,7 +779,8 @@ public final class BurmeseEngine: @unchecked Sendable {
                     isFullBuffer: !effectiveWindowed,
                     grammarParses: &grammarParses,
                     existingOutputs: outputsAfterFull,
-                    strictInferredStackOutputs: &strictInferredStackOutputs
+                    strictInferredStackOutputs: &strictInferredStackOutputs,
+                    liberalKinziOutputs: &liberalKinziOutputs
                 )
             }
             // Inferred parses arrive after the orphan-ZWNJ promotion
@@ -1156,12 +1166,13 @@ public final class BurmeseEngine: @unchecked Sendable {
         let appliesYapinPromotion = !effectiveWindowed
             && Self.isYapinPromotionBuffer(effectiveParseInput)
 
+        let combinedPreserveSurfaces = strictInferredStackOutputs.union(liberalKinziOutputs)
         if appliesYapinPromotion,
            let yapinSurface = Self.yapinPromotionPreservedSurface(
                 in: grammarCandidates,
                 userBuffer: effectiveParseInput
            ) {
-            var preservingGrammarSurfaces = strictInferredStackOutputs
+            var preservingGrammarSurfaces = combinedPreserveSurfaces
             preservingGrammarSurfaces.insert(yapinSurface)
             grammarCandidates = pruneGrammarByLmMargin(
                 grammarCandidates,
@@ -1170,7 +1181,7 @@ public final class BurmeseEngine: @unchecked Sendable {
         } else {
             grammarCandidates = pruneGrammarByLmMargin(
                 grammarCandidates,
-                preservingSurfaces: strictInferredStackOutputs
+                preservingSurfaces: combinedPreserveSurfaces
             )
         }
         grammarCandidates = promoteAliasAlternate(grammarCandidates)
@@ -1665,7 +1676,8 @@ public final class BurmeseEngine: @unchecked Sendable {
         isFullBuffer: Bool,
         grammarParses: inout [SyllableParse],
         existingOutputs: Set<String>,
-        strictInferredStackOutputs: inout Set<String>
+        strictInferredStackOutputs: inout Set<String>,
+        liberalKinziOutputs: inout Set<String>
     ) {
         let inferredParses = stackInferenceParses(input, isFullBuffer: isFullBuffer)
         for parse in inferredParses
@@ -1717,6 +1729,15 @@ public final class BurmeseEngine: @unchecked Sendable {
                Self.surfaceHasOnlyNativeViramaStacks(adjusted.output) {
                 strictInferredStackOutputs.insert(adjusted.output)
                 strictInferredStackOutputs.insert(Self.correctAaShape(adjusted.output))
+            } else if liberalInsertions > 0,
+                      Self.surfaceHasOnlyNativeViramaStacks(adjusted.output) {
+                // Liberal-inferred native-stack kinzi (e.g. diphthong-coda
+                // bare-ng collapse): protect from LM pruning so the kinzi
+                // sibling is reachable in the panel, but do NOT add to
+                // strictInferredStackOutputs — that would trigger rank-0
+                // promotion and put kinzi above the open form.
+                liberalKinziOutputs.insert(adjusted.output)
+                liberalKinziOutputs.insert(Self.correctAaShape(adjusted.output))
             }
             if !existingOutputs.contains(adjusted.output) {
                 grammarParses.append(adjusted)
