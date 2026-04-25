@@ -85,6 +85,42 @@ public enum MidBufferDigitStackSplitSuite {
             }
         },
 
+        // ── Splice must not land inside a virama-stack cluster ────────────
+        // `brahm2a`: the cleaned buffer `brahma` parses with an inferred
+        // `h+m` Pali stack (both consonants are on the prefix side of the
+        // digit, so Bug 1's inference-blocking does not apply). The legacy
+        // splice resolved its scalar position from a prefix parse of
+        // `brahm` (4 scalars) which diverged from the full `brahma` parse
+        // (5 scalars including the virama+lower pair). The digit landed
+        // between the virama (1039) and the lower consonant (1019),
+        // shattering the grapheme cluster. The snap-forward guard in
+        // `insertScalars` must push the digit past the lower consonant.
+        TestCase("paliStack_spliceSnapsPastViramaCluster") { ctx in
+            let engine = emptyEngine()
+            let top = topSurface(engine, "brahm2a")
+            let scalars = top.unicodeScalars.map(\.value)
+            // The digit must not appear directly after a virama —
+            // that would mean it's lodged between virama and lower.
+            for i in 1..<scalars.count {
+                let isDigit = (scalars[i] >= 0x30 && scalars[i] <= 0x39)
+                    || (scalars[i] >= 0x1040 && scalars[i] <= 0x1049)
+                if isDigit && scalars[i - 1] == 0x1039 {
+                    ctx.assertTrue(
+                        false,
+                        "brahm2a",
+                        detail: "digit at scalar idx \(i) follows virama; cluster shattered. surface='\(top)'"
+                    )
+                    return
+                }
+            }
+            // And the surface must be orthographically legal end-to-end.
+            ctx.assertTrue(
+                SyllableParser.scanOutputLegality(top),
+                "brahm2a.legality",
+                detail: "top '\(top)' fails scanOutputLegality"
+            )
+        },
+
         // ── Diphthong-coda site interrupted by digit ──────────────────────
         // `aing` diphthong already has a built-in nga-asat coda. A digit
         // between the diphthong and a following consonant must suppress any

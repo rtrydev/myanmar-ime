@@ -146,7 +146,13 @@ extension BurmeseEngine {
 
     /// Insert `scalars[i]` at scalar offset `positions[i]` in `surface`.
     /// Applies splices in descending position order so earlier offsets
-    /// remain valid as later ones shift.
+    /// remain valid as later ones shift. Each position is snapped forward
+    /// past any virama-stack cluster in the candidate surface — the
+    /// prefix parse used to compute splice offsets can disagree with the
+    /// full-buffer parse when stack inference fires (e.g. `brahm` parses
+    /// as 4 scalars in isolation but the full `brahma` parse renders 5
+    /// scalars with an internal virama). Without the snap the digit lands
+    /// between the virama and its lower consonant, shattering the cluster.
     internal static func insertScalars(
         into surface: String,
         scalars: [Unicode.Scalar],
@@ -154,7 +160,8 @@ extension BurmeseEngine {
     ) -> String {
         precondition(scalars.count == positions.count)
         var working = Array(surface.unicodeScalars)
-        let ordered = zip(positions, scalars)
+        let snapped = positions.map { snapSpliceForward(working.map(\.value), position: $0) }
+        let ordered = zip(snapped, scalars)
             .sorted(by: { $0.0 > $1.0 })
         for (pos, scalar) in ordered {
             let clamped = max(0, min(pos, working.count))
@@ -163,6 +170,34 @@ extension BurmeseEngine {
         var view = String.UnicodeScalarView()
         view.append(contentsOf: working)
         return String(view)
+    }
+
+    /// Returns the smallest position ≥ `pos` that does not sit inside a
+    /// Myanmar virama-stack cluster in `scalars`. Snaps past a leading
+    /// virama (and the lower consonant that must follow it), and past any
+    /// consonant whose preceding scalar is a virama (i.e. the lower of a
+    /// stacked pair — inserting before it would leave a dangling virama).
+    /// Other combining marks are NOT snapped: the existing mid-buffer-digit
+    /// design intentionally allows the digit to split a consonant from its
+    /// dependent vowel/medial as a hard syllable break (see
+    /// `RankingSuite.task10_midDigitTop_*`).
+    internal static func snapSpliceForward(_ scalars: [UInt32], position pos: Int) -> Int {
+        var p = max(0, min(pos, scalars.count))
+        while p < scalars.count {
+            let cur = scalars[p]
+            let prev: UInt32 = p > 0 ? scalars[p - 1] : 0
+            if cur == 0x1039 {
+                p += 1
+                if p < scalars.count { p += 1 }
+                continue
+            }
+            if prev == 0x1039 {
+                p += 1
+                continue
+            }
+            break
+        }
+        return p
     }
 
     /// True when the tail begins with an ASCII digit. Digits at the very
