@@ -655,12 +655,23 @@ public enum GrammarSuite {
             }
         },
 
-        TestCase("engine_bareVirama_producesNoCandidate") { ctx in
+        TestCase("engine_bareVirama_producesLiteralPassthrough_task04") { ctx in
+            // Task 04 update: a bare `+` (or any lone composing-modifier
+            // buffer) emits a single literal-passthrough candidate so
+            // the user can commit the typed character. Crucially the
+            // engine still must not synthesise Myanmar (no U+1021 etc.)
+            // — the candidate's surface is the raw `+`.
             let engine = BurmeseEngine()
             let result = engine.update(buffer: "+", context: [])
-            ctx.assertTrue(
-                result.candidates.isEmpty,
-                detail: "bare + must not produce any engine candidate; got \(result.candidates.count)"
+            ctx.assertEqual(
+                result.candidates.count,
+                1,
+                "bare + literal-pass count"
+            )
+            ctx.assertEqual(
+                result.candidates.first?.surface,
+                "+",
+                "bare + literal-pass surface"
             )
         },
 
@@ -709,12 +720,22 @@ public enum GrammarSuite {
                 "*ka: leading asat with no consonant base must not score as legal")
         },
 
-        TestCase("engine_bareAsat_producesNoCandidate") { ctx in
+        TestCase("engine_bareAsat_producesLiteralPassthrough_task04") { ctx in
+            // Task 04 update: a bare `*` emits a literal-passthrough
+            // candidate so the user can commit the typed character.
+            // The engine must not synthesise an asat-only Myanmar
+            // surface (orphan U+103A with no anchor).
             let engine = BurmeseEngine()
             let result = engine.update(buffer: "*", context: [])
-            ctx.assertTrue(
-                result.candidates.isEmpty,
-                detail: "bare * must not produce any engine candidate; got \(result.candidates.count)"
+            ctx.assertEqual(
+                result.candidates.count,
+                1,
+                "bare * literal-pass count"
+            )
+            ctx.assertEqual(
+                result.candidates.first?.surface,
+                "*",
+                "bare * literal-pass surface"
             )
         },
 

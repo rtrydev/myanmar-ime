@@ -244,6 +244,17 @@ public final class BurmeseEngine: @unchecked Sendable {
         return grammarCandidateBudget
     }
 
+    private static let composingPunctOnlyChars: Set<Character> = ["+", "*", "'", ":", "."]
+
+    /// True when every character in `buffer` is a composing-punctuation
+    /// modifier (`'`, `+`, `*`, `:`, `.`). Used to short-circuit the
+    /// pipeline for lone-modifier buffers that the parser collapses to
+    /// empty / no candidates. See task 04.
+    internal static func isComposingPunctOnlyBuffer(_ buffer: String) -> Bool {
+        guard !buffer.isEmpty else { return false }
+        return buffer.allSatisfy { composingPunctOnlyChars.contains($0) }
+    }
+
     /// Update the composition state based on the current buffer and context.
     /// Called on every keystroke that modifies the buffer.
     public func update(buffer: String, context: [String]) -> CompositionState {
@@ -256,6 +267,30 @@ public final class BurmeseEngine: @unchecked Sendable {
             return CompositionState(committedContext: context)
         }
         let displayBuffer = buffer.lowercased()
+        // Task 04: a buffer made up entirely of composing-modifier
+        // punctuation (`'`, `+`, `*`, `.`, `:`, individually or
+        // repeated) has no Myanmar interpretation — the parser strips
+        // leading/trailing `+`, the `'` rule yields empty output, and
+        // `*` / `.` / `:` outside a vowel suffix can't anchor any
+        // legal surface. Emit a literal-passthrough candidate so the
+        // user can commit the typed character verbatim instead of
+        // facing an empty panel or accidentally committing
+        // `Candidate(surface: "")`. Buffers with any letter or digit
+        // fall through to the regular pipeline (the parser handles
+        // `'a`, `'thar`, `+thar` correctly via the connector rules).
+        if Self.isComposingPunctOnlyBuffer(displayBuffer) {
+            return CompositionState(
+                rawBuffer: displayBuffer,
+                selectedCandidateIndex: 0,
+                candidates: [Candidate(
+                    surface: displayBuffer,
+                    reading: displayBuffer,
+                    source: .grammar,
+                    score: 0
+                )],
+                committedContext: context
+            )
+        }
         // Task 10: Peel mid-buffer ASCII digits (letter-digit-letter) off
         // the buffer before the rest of the pipeline runs, then splice
         // them back into each candidate surface at the scalar position
