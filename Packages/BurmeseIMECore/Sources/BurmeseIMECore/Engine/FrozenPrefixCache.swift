@@ -204,12 +204,76 @@ extension BurmeseEngine {
             let prefix = String(chars[0..<split])
             if let parse = parser.parseCandidates(prefix, maxResults: 1).first,
                parse.legalityScore > 0,
-               !Self.isUnsafeFrozenSplit(chars: chars, split: split) {
+               !Self.isUnsafeFrozenSplit(chars: chars, split: split),
+               Self.splitProducesStableMerge(
+                    chars: chars,
+                    split: split,
+                    parser: parser
+               ) {
                 return split
             }
             split -= 1
         }
         return target
+    }
+
+    /// Compose-and-compare safety check (task 05). The local-legality
+    /// probe in `findSyllableSafeSplit` rejects splits where the prefix
+    /// alone fails to parse, but it accepts any locally-legal split —
+    /// including sites that cut a clean `<onset><vowel>` syllable
+    /// (e.g. `parth|ar`) the un-windowed DP would render as a single
+    /// unit. When prefix and tail are then re-merged, the prefix
+    /// renders the partial onset (`...သ`) and the tail re-parses the
+    /// orphaned vowel (`အာ` via ZWNJ promotion), producing surfaces
+    /// like `သအာ` instead of the intended `သာ`.
+    ///
+    /// The check parses a small window around `split` three times:
+    ///   - the prefix slice,
+    ///   - the tail slice,
+    ///   - the full window (prefix + tail).
+    /// The split is "stable" when concatenating the slice parses
+    /// reproduces the full-window parse. Window size is capped at
+    /// `maxOnsetLen + maxVowelLen` on each side so the work is
+    /// constant per split candidate.
+    private static func splitProducesStableMerge(
+        chars: [Character],
+        split: Int,
+        parser: SyllableParser
+    ) -> Bool {
+        let halfWindow = parser.maxOnsetLen + parser.maxVowelLen
+        let lo = max(0, split - halfWindow)
+        let hi = min(chars.count, split + halfWindow)
+        let prefixSlice = String(chars[lo..<split])
+        let tailSlice = String(chars[split..<hi])
+        let full = prefixSlice + tailSlice
+        // `isFullBuffer: false` on the slice parses suppresses the
+        // bare-vowel `အ` orphan-promotion — which is exactly the
+        // post-process that would inject the spurious `အာ` if the
+        // tail starts with a stranded vowel rule. Comparing against
+        // the full-window parse run with the same flag keeps the
+        // comparison meaningful.
+        let fullParse = parser.parseCandidates(
+            full,
+            maxResults: 1,
+            isFullBuffer: false
+        ).first
+        let prefixParse = parser.parseCandidates(
+            prefixSlice,
+            maxResults: 1,
+            isFullBuffer: false
+        ).first
+        let tailParse = parser.parseCandidates(
+            tailSlice,
+            maxResults: 1,
+            isFullBuffer: false
+        ).first
+        guard let fullParse, let prefixParse, let tailParse else {
+            // Any of the three failing means the boundary doesn't
+            // sit inside a parseable region — fall through and let
+            // local legality drive the decision (i.e. accept).
+            return true
+        }
+        return prefixParse.output + tailParse.output == fullParse.output
     }
 
     /// Avoid freezing a connector-like `a` into the prefix when the next

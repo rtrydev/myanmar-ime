@@ -15,6 +15,7 @@ public enum BurmeseTestSuites {
         RepeatedDepVowelSuite.suite,
         MidBufferLiteralPunctSuite.suite,
         LoneComposingPunctSuite.suite,
+        LongBufferWindowingSuite.suite,
         ConsonantDigraphIntegritySuite.suite,
         PaliStackOverrideSuite.suite,
         BareVowelRepetitionSuite.suite,
