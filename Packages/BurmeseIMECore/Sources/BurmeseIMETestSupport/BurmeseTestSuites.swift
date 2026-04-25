@@ -21,6 +21,7 @@ public enum BurmeseTestSuites {
         BareVowelRepetitionSuite.suite,
         AnchorStabilitySuite.suite,
         BareDiphthongSuite.suite,
+        MedialStabilitySuite.suite,
         LoanwordRomanizationSuite.suite,
         ToneVariantMedialConsistencySuite.suite,
         TripleMedialLegalitySuite.suite,
