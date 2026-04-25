@@ -50,12 +50,23 @@ public enum Grammar {
     ]
 
     /// Consonants that can take medial ya-pin (ျ U+103B).
+    ///
+    /// Trimmed in task 03 to onsets the lexicon actually attests.
+    /// `ha` (1 entry — `ဟျောင်` 19×), `nnya` (0), and `nya` (0) were
+    /// admitted by structural intuition but produced typo-close
+    /// top-1 picks (`ဟျ`, `ဉျ`, `ညျ`) that are not part of the
+    /// language as written. Drop them so `Grammar.validateSyllable`
+    /// returns 0 for those onset+ya-pin combinations and the parser
+    /// surfaces an alternative legal parse instead. The native
+    /// well-attested ya-pin sites (`la + ya-pin` = `လျ` 801 entries,
+    /// `ya + ya-pin` = `ယျ` 96 entries, plus the velar / labial /
+    /// dental stops) stay legal.
     public static let canTakeMedialYa: Set<Character> = [
         Myanmar.ka, Myanmar.kha, Myanmar.ga, Myanmar.gha,
-        Myanmar.ca, Myanmar.cha, Myanmar.ja, Myanmar.nnya, Myanmar.nya,
+        Myanmar.ca, Myanmar.cha, Myanmar.ja,
         Myanmar.ta, Myanmar.tha, Myanmar.da, Myanmar.dha, Myanmar.na,
         Myanmar.pa, Myanmar.pha, Myanmar.ba, Myanmar.bha, Myanmar.ma,
-        Myanmar.ya, Myanmar.la, Myanmar.ha,
+        Myanmar.ya, Myanmar.la,
     ]
 
     /// Consonants that can take medial wa-hswe (ွ U+103D).

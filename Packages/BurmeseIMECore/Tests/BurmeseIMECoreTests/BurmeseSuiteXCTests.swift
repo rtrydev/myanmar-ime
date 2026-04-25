@@ -122,6 +122,10 @@ final class MedialHaForbiddenBasesXCTests: XCTestCase {
     func testAll() { runSuite(MedialHaForbiddenBasesSuite.suite, xctest: self) }
 }
 
+final class MedialYaForbiddenBasesXCTests: XCTestCase {
+    func testAll() { runSuite(MedialYaForbiddenBasesSuite.suite, xctest: self) }
+}
+
 final class KinziTallAaXCTests: XCTestCase {
     func testAll() { runSuite(KinziTallAaSuite.suite, xctest: self) }
 }
