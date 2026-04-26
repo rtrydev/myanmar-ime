@@ -210,4 +210,8 @@ final class WindowingKinziPromotionXCTests: XCTestCase {
 final class CrossClassNTStackRankingXCTests: XCTestCase {
     func testAll() { runSuite(CrossClassNTStackRankingSuite.suite, xctest: self) }
 }
+
+final class WindowingKinziAcrossThresholdXCTests: XCTestCase {
+    func testAll() { runSuite(WindowingKinziAcrossThresholdSuite.suite, xctest: self) }
+}
 #endif

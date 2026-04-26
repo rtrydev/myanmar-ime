@@ -62,5 +62,6 @@ public enum BurmeseTestSuites {
         HeavyToneAwSuite.suite,
         WindowingKinziPromotionSuite.suite,
         CrossClassNTStackRankingSuite.suite,
+        WindowingKinziAcrossThresholdSuite.suite,
     ]
 }

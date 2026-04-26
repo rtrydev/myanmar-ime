@@ -234,7 +234,12 @@ extension BurmeseEngine {
     /// the otherwise-clean strict kinzi/native-stack rendering. The
     /// strict-only string is suppressed when all sites are liberal
     /// (it would equal the no-`+` parse) or when all are strict (it
-    /// would equal `input`).
+    /// would equal `input`). `promotableOnlyInput` (TASK-006) carries
+    /// the promotable sites only (kinzi / genuine Pali shapes,
+    /// excluding Burmese-compound-shape vowel-rule sites). It is
+    /// non-nil only when promotable and bug-class sites coexist, so
+    /// the engine can still promote a kinzi sibling on a buffer like
+    /// `thingyantar` even though the full-stack sibling is demoted.
     @_spi(Testing) public static func inferImplicitStackMarkers(
         _ input: String,
         digitBoundaries: Set<Int> = []
@@ -244,7 +249,9 @@ extension BurmeseEngine {
         liberalInsertions: Int,
         vowelRuleLiberalInsertions: Int,
         strictOnlyInput: String?,
-        strictOnlyInsertions: Int
+        strictOnlyInsertions: Int,
+        promotableOnlyInput: String?,
+        promotableOnlyInsertions: Int
     )? {
         guard !input.contains("+") else { return nil }
         // Skip the char-array allocation when there is no plausible
@@ -272,7 +279,7 @@ extension BurmeseEngine {
             let lowers = stackLowerConsonantsStarting(chars: chars, at: 4)
             if lowers.contains(where: { Grammar.isValidStack(upper: Myanmar.nga, lower: $0) }) {
                 let collapsed = "ai+" + String(chars[4...])
-                return (collapsed, 1, 0, 0, nil, 1)
+                return (collapsed, 1, 0, 0, nil, 1, nil, 0)
             }
         }
         // Mid-buffer generalisation of the diphthong-coda collapse.
@@ -315,7 +322,7 @@ extension BurmeseEngine {
                 // upper); count it under vowelRuleLiberalInsertions so
                 // the rarity bump in `ingestInferredParses` keeps the
                 // open form at rank 0 even when the LM is silent.
-                return (liberalInput, 1, 1, 1, nil, 0)
+                return (liberalInput, 1, 1, 1, nil, 0, nil, 0)
             }
             guard lowers.contains(where: { Grammar.isValidStack(upper: Myanmar.nga, lower: $0) }) else {
                 // Has a consonant lower but it cannot stack with nga —
@@ -351,7 +358,7 @@ extension BurmeseEngine {
                 }
             }
             let collapsed = String(chars[..<ngStart]) + "+" + String(chars[stackStart...])
-            return (collapsed, 1, 0, 0, nil, 1)
+            return (collapsed, 1, 0, 0, nil, 1, nil, 0)
         }
         } // end if chars.count >= 5
         let medialLetters: Set<Character> = ["y", "r", "w"]
@@ -546,6 +553,14 @@ extension BurmeseEngine {
             .filter(\.isBurmeseCompoundSite)
             .count
         let strictInsertAt = insertAt.filter { !$0.isLiberal }
+        // Promotable insertions = NOT bug-class. Used to build a
+        // sibling input that excludes the demoted bug-class sites
+        // (TASK-006). For `thingyantar` the `n+g` kinzi site is
+        // promotable but the `n+t` Burmese-compound site is not, so
+        // the promotable-only input is `thin+gyantar` — feeding the
+        // parser the kinzi-bearing sibling without the cross-class
+        // virama that the engine wants to demote.
+        let promotableInsertAt = insertAt.filter { !$0.isBurmeseCompoundSite }
         let result = injectMarkers(input, at: insertAt.map { ($0.index, $0.marker) })
         let strictOnlyResult: String?
         if liberalInsertions > 0, !strictInsertAt.isEmpty {
@@ -556,13 +571,24 @@ extension BurmeseEngine {
         } else {
             strictOnlyResult = nil
         }
+        let promotableOnlyResult: String?
+        if vowelRuleLiberalInsertions > 0, !promotableInsertAt.isEmpty {
+            promotableOnlyResult = injectMarkers(
+                input,
+                at: promotableInsertAt.map { ($0.index, $0.marker) }
+            )
+        } else {
+            promotableOnlyResult = nil
+        }
         return (
             result,
             insertAt.count,
             liberalInsertions,
             vowelRuleLiberalInsertions,
             strictOnlyResult,
-            strictInsertAt.count
+            strictInsertAt.count,
+            promotableOnlyResult,
+            promotableInsertAt.count
         )
     }
 

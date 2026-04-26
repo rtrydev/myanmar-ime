@@ -119,6 +119,25 @@ extension BurmeseEngine {
                     liberalKinziOutputs: &liberalKinziOutputs
                 )
             }
+            // TASK-006: also inject the promotable-only sibling so a
+            // frozen prefix carrying both a kinzi site and a bug-class
+            // N+T site (e.g. `thingyantar...`) keeps the kinzi-bearing
+            // surface in `strictInferredStackOutputs` for downstream
+            // rank-0 promotion.
+            if let promotableOnly = inferred.promotableOnlyInput {
+                let outputsAfterStrict = Set(parses.map(\.output))
+                ingestInferredParses(
+                    input: promotableOnly,
+                    insertions: inferred.promotableOnlyInsertions,
+                    liberalInsertions: 0,
+                    vowelRuleLiberalInsertions: 0,
+                    isFullBuffer: true,
+                    grammarParses: &parses,
+                    existingOutputs: outputsAfterStrict,
+                    strictInferredStackOutputs: &strictInferredStackOutputs,
+                    liberalKinziOutputs: &liberalKinziOutputs
+                )
+            }
             // liberalKinziOutputs is intentionally not merged into
             // strictInferredStackOutputs here — the frozen prefix renders
             // the open form as its single best surface; liberal kinzi
@@ -253,6 +272,34 @@ extension BurmeseEngine {
             parser: parser
         ) {
             return safe
+        }
+        // TASK-005: before walking the split below the floor, try
+        // walking it UP. Backward fallback can land on a split as
+        // shallow as 1 (`m` for `minkyaungtharminkya`), which strands
+        // the kinzi-able pair `min+ky` at the prefix-tail boundary —
+        // the prefix is too short to fire `inferImplicitStackMarkers`
+        // for the boundary syllable, and the tail's inference can't
+        // see the upper consonant in the prefix. Scanning forward
+        // from `target` (capped at one window's worth ahead) looks
+        // for a larger split where the kinzi syllable lands fully
+        // inside the prefix, restoring the kinzi-bearing rendering
+        // for the leading syllables. Take the SMALLEST forward split
+        // that is safe — minimising the active-tail size while still
+        // including the boundary-stranded kinzi pair inside the
+        // prefix keeps a downstream tail-internal kinzi site (e.g.
+        // the second `min+ky` in `minkyaungtharminkya`) intact too.
+        let forwardLimit = min(chars.count - 1, target + maxWalkBack)
+        if forwardLimit > target {
+            for splitCandidate in (target + 1)...forwardLimit {
+                if let safe = scanForSafeSplit(
+                    chars: chars,
+                    from: splitCandidate,
+                    downTo: splitCandidate,
+                    parser: parser
+                ) {
+                    return safe
+                }
+            }
         }
         // No safe split honoured the lowerBound floor. Returning the
         // unsafe `target` would produce a structurally broken windowed
@@ -483,10 +530,27 @@ extension BurmeseEngine {
         // letter and whose standalone parse produces an orphan: `ee`,
         // `oo`, `ow`, `ey`. Each is two letters, the second of which is
         // a vowel that doubles the first or pairs with a glide.
+        //
+        // Closed-vowel rules (`in`, `an`, `on`, `un`, `am`, `im`, `om`,
+        // `um`, `aw`, `ar`, `ay`, `ai`, `aing`, `aung`) are also
+        // orphaning when standalone — the parser emits a leading
+        // ZWNJ + dep-vowel/nga-asat surface, which the engine then
+        // rewrites to `အ + ...` (an independent-vowel anchor wedged
+        // between the prefix's consonant and the dep-vowel cluster
+        // that should attach directly to it). Reject the split so
+        // the windowing path advances forward (or back) until the
+        // active-tail head is a consonant that anchors the vowel
+        // rule. TASK-005: this also keeps the full vowel-rule
+        // syllable inside one of the two slices, so the kinzi
+        // inference (`<vowel>n + <C>`) sees both upper and lower at
+        // the same site.
         if start + 1 < chars.count {
             let pair = String([chars[start], chars[start + 1]])
             switch pair {
             case "ee", "oo", "ow", "ey":
+                return true
+            case "an", "in", "on", "un", "am", "im", "om", "um",
+                 "aw", "ar", "ay", "ai":
                 return true
             default:
                 break

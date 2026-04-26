@@ -808,6 +808,28 @@ public final class BurmeseEngine: @unchecked Sendable {
                     liberalKinziOutputs: &liberalKinziOutputs
                 )
             }
+            // TASK-006: when bug-class N+T sites coexist with promotable
+            // sites (kinzi / native virama-stack), inject a sibling
+            // parse that carries ONLY the promotable `+`s. The parser
+            // surface for this sibling has the kinzi (e.g. `သင်္ဂြ`)
+            // without the cross-class virama (`န္တ`), so the engine's
+            // rank-0 promotion of `strictInferredStackOutputs` lifts
+            // the kinzi-bearing surface even though the full-stack
+            // sibling is demoted by the bug-class rarity bump.
+            if let promotableOnly = inferred.promotableOnlyInput {
+                let outputsAfterStrict = Set(grammarParses.map(\.output))
+                ingestInferredParses(
+                    input: promotableOnly,
+                    insertions: inferred.promotableOnlyInsertions,
+                    liberalInsertions: 0,
+                    vowelRuleLiberalInsertions: 0,
+                    isFullBuffer: !effectiveWindowed,
+                    grammarParses: &grammarParses,
+                    existingOutputs: outputsAfterStrict,
+                    strictInferredStackOutputs: &strictInferredStackOutputs,
+                    liberalKinziOutputs: &liberalKinziOutputs
+                )
+            }
             // Inferred parses arrive after the orphan-ZWNJ promotion
             // pass above, so any inferred surface that materialises a
             // leading ZWNJ + combining mark (the standard parser
@@ -1191,7 +1213,26 @@ public final class BurmeseEngine: @unchecked Sendable {
         let appliesYapinPromotion = !effectiveWindowed
             && Self.isYapinPromotionBuffer(effectiveParseInput)
 
-        let combinedPreserveSurfaces = strictInferredStackOutputs.union(liberalKinziOutputs)
+        // TASK-005: when windowed, the inferred-stack surfaces are the
+        // tail-only outputs but `grammarCandidates[*].surface` are
+        // full `<prefix><tail>` surfaces. Without expanding the
+        // preserve set into windowed-aware form, the LM-margin prune
+        // drops the kinzi-bearing windowed candidate before the
+        // windowed promotion at `bestStrictInferredStackIndex` ever
+        // runs — so the rank-0 lift has nothing to lift. Build the
+        // expanded set by concatenating each frozen-prefix branch's
+        // output with each tail surface in the strict / liberal-kinzi
+        // sets. Also keep the tail-only surfaces for the un-windowed
+        // path's match.
+        var combinedPreserveSurfaces = strictInferredStackOutputs.union(liberalKinziOutputs)
+        if effectiveWindowed, !effectivePrefixBranches.isEmpty {
+            let originalSet = combinedPreserveSurfaces
+            for branch in effectivePrefixBranches {
+                for tailSurface in originalSet {
+                    combinedPreserveSurfaces.insert(branch.output + tailSurface)
+                }
+            }
+        }
         if appliesYapinPromotion,
            let yapinSurface = Self.yapinPromotionPreservedSurface(
                 in: grammarCandidates,
