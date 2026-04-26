@@ -1576,6 +1576,31 @@ public final class BurmeseEngine: @unchecked Sendable {
                         if topLM - candidateLM > Self.lmDominanceThreshold {
                             continue
                         }
+                        // TASK-004: symmetric guard — when the anchor-
+                        // matching candidate has STRONGER LM than the
+                        // comparator-chosen top AND the surfaces differ
+                        // by more than a medial / coda swap (i.e. the
+                        // comparator picked a re-segmentation despite
+                        // worse LM, signalling the structural factors
+                        // it weighs above LM disagree with the
+                        // anchor-extension reading), refuse the
+                        // promotion. The medial-swap and coda-swap
+                        // subcases continue to promote because the
+                        // comparator there is just splitting hairs on
+                        // per-syllable medial / coda choice;
+                        // re-segmentation cases (where the candidate
+                        // has different syllable structure) are the
+                        // ones the comparator's structural factors
+                        // are designed to resolve.
+                        let isCodaSwap = Self.isCodaOnlySingleScalarDifference(
+                            candidateStrippedHere,
+                            topStrippedHere
+                        )
+                        if candidateLM - topLM > Self.lmDominanceThreshold,
+                           !isMedialOnlySwap,
+                           !isCodaSwap {
+                            continue
+                        }
                     }
                     let keeper = merged.remove(at: idx)
                     merged.insert(keeper, at: 0)
@@ -1706,13 +1731,73 @@ public final class BurmeseEngine: @unchecked Sendable {
                 if let last = anchorHistory.last, last.normalized == normalized {
                     anchorHistory.removeLast()
                 }
-                anchorHistory.append(PrefixAnchor(
-                    normalized: normalized,
-                    surface: top.surface,
-                    reading: top.reading
-                ))
-                if anchorHistory.count > Self.maxAnchorHistory {
-                    anchorHistory.removeFirst(anchorHistory.count - Self.maxAnchorHistory)
+                // TASK-004: gate anchor recording on the LM dominance
+                // of the chosen top over its nearest sibling. A weak
+                // top pick (LM gap < `lmDominanceThreshold` nats) at
+                // an intermediate buffer length shouldn't lock in a
+                // transient syllable rendering that the longer buffer
+                // might re-segment (`achitthone` typed
+                // letter-by-letter would otherwise freeze a length-9
+                // anchor `အချစ်သွံ` and resist the length-10
+                // re-segmentation `အချစ်သိုနယ်`).
+                //
+                // Two carve-outs preserve legitimate anchor
+                // stability:
+                //  - `normalized.count < anchorCommitThreshold` (8):
+                //    short anchors don't trigger the post-merge
+                //    promotion path anyway, so the gate is moot.
+                //  - The buffer ends in a word-boundary marker
+                //    (`:`, `.`, `+`): the user has explicitly closed
+                //    a word, and the anchor encodes a complete-word
+                //    lexicon commitment that downstream re-scoring
+                //    must respect (e.g. `kaphyar:` → `ဖျား`). The
+                //    same boundary check governs the existing
+                //    medial-swap exception in the anchor-promotion
+                //    path above.
+                let anchorAtWordBoundary: Bool = {
+                    guard let lastChar = normalized.last else { return false }
+                    return lastChar == ":" || lastChar == "." || lastChar == "+"
+                }()
+                let shortAnchor = normalized.count < anchorCommitThreshold
+                let recordAnchor: Bool
+                if shortAnchor || anchorAtWordBoundary {
+                    recordAnchor = true
+                } else {
+                    let topLMForAnchor = scoreSurfaceCached(
+                        top.surface, context: context, cache: &lmCache
+                    )
+                    var nextSiblingLM: Double = -.infinity
+                    var siblingsScanned = 0
+                    // Cap the sibling scan at 4 — the merged list is
+                    // comparator-sorted, so the strongest competitors
+                    // sit at the head. Looking past the first few
+                    // doesn't change the dominance check materially
+                    // and keeps the per-keystroke cost flat.
+                    for sibling in merged.dropFirst()
+                    where sibling.surface != top.surface
+                        && sibling.source != .history {
+                        let siblingLM = scoreSurfaceCached(
+                            sibling.surface, context: context, cache: &lmCache
+                        )
+                        if siblingLM > nextSiblingLM {
+                            nextSiblingLM = siblingLM
+                        }
+                        if nextSiblingLM >= topLMForAnchor { break }
+                        siblingsScanned += 1
+                        if siblingsScanned >= 4 { break }
+                    }
+                    recordAnchor = nextSiblingLM == -.infinity
+                        || topLMForAnchor - nextSiblingLM >= Self.lmDominanceThreshold
+                }
+                if recordAnchor {
+                    anchorHistory.append(PrefixAnchor(
+                        normalized: normalized,
+                        surface: top.surface,
+                        reading: top.reading
+                    ))
+                    if anchorHistory.count > Self.maxAnchorHistory {
+                        anchorHistory.removeFirst(anchorHistory.count - Self.maxAnchorHistory)
+                    }
                 }
             }
             cacheLock.unlock()

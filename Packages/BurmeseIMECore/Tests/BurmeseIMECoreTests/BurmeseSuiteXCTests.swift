@@ -214,4 +214,8 @@ final class CrossClassNTStackRankingXCTests: XCTestCase {
 final class WindowingKinziAcrossThresholdXCTests: XCTestCase {
     func testAll() { runSuite(WindowingKinziAcrossThresholdSuite.suite, xctest: self) }
 }
+
+final class IncrementalParityXCTests: XCTestCase {
+    func testAll() { runSuite(IncrementalParitySuite.suite, xctest: self) }
+}
 #endif
