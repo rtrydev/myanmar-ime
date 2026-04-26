@@ -222,4 +222,8 @@ final class IncrementalParityXCTests: XCTestCase {
 final class VisargaInherentAXCTests: XCTestCase {
     func testAll() { runSuite(VisargaInherentASuite.suite, xctest: self) }
 }
+
+final class RedundantExplicitAsatXCTests: XCTestCase {
+    func testAll() { runSuite(RedundantExplicitAsatSuite.suite, xctest: self) }
+}
 #endif

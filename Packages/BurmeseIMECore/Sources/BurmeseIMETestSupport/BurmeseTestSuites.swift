@@ -65,5 +65,6 @@ public enum BurmeseTestSuites {
         WindowingKinziAcrossThresholdSuite.suite,
         IncrementalParitySuite.suite,
         VisargaInherentASuite.suite,
+        RedundantExplicitAsatSuite.suite,
     ]
 }

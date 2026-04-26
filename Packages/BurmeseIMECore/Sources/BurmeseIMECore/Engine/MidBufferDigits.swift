@@ -393,8 +393,22 @@ extension BurmeseEngine {
     }
 
     internal func composedLetterRunSurface(_ run: String) -> String {
-        let normalized = Self.normalizeForParser(run)
+        var normalized = Self.normalizeForParser(run)
         guard !normalized.isEmpty else { return run }
+        // Strip leading `*` chars: every `*` is structurally an asat
+        // closer for the previous syllable, but the right-shrink probe
+        // only drops `*` when that previous syllable already terminates
+        // with asat. So a leading `*` in the tail is always a redundant
+        // duplicate and must not synthesise its own `1021` independent-A
+        // anchor (TASK-008). Without this strip the parser emits
+        // `200C 103A` for the leading asat, the orphan-ZWNJ promotion
+        // rewrites it to `1021 103A` (`အ်`), and the affixes-concat
+        // step splices `<closed syllable>1021 103A` into every
+        // candidate — the `103A 1021 103A` injection. After the strip
+        // the remaining run (e.g. `ka` from `*ka`) parses normally,
+        // and an all-`*` tail collapses to an empty string.
+        while normalized.first == "*" { normalized.removeFirst() }
+        guard !normalized.isEmpty else { return "" }
         // The composed run is concatenated onto whatever surviving prefix
         // the right-shrink probe produced — it does not start at the
         // user's buffer origin. Suppress the leading-`အ` promotion so
