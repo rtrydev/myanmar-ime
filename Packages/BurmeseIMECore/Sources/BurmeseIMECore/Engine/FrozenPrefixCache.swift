@@ -244,8 +244,49 @@ extension BurmeseEngine {
         // keep typing. Give up and return the target split unchanged.
         let maxWalkBack = parser.maxOnsetLen + parser.maxVowelLen
         let scanLimit = max(scanFloor, target - maxWalkBack)
-        var split = target
-        while split >= scanLimit {
+        if let safe = scanForSafeSplit(
+            chars: chars,
+            from: target,
+            downTo: scanLimit,
+            parser: parser
+        ) {
+            return safe
+        }
+        // No safe split honoured the lowerBound floor. Returning the
+        // unsafe `target` would produce a structurally broken windowed
+        // surface (e.g. a stray U+1021 between the prefix's trailing
+        // consonant and the active tail's leading dep-vowel — TASK-002).
+        // Prefer a safe split below the floor over a broken one above
+        // it: any cached-prefix re-use that depended on the floor is
+        // already invalid because the chosen split would corrupt the
+        // candidate. Sweep down to split=1 looking for any safe site.
+        if scanLimit > 1,
+           let safe = scanForSafeSplit(
+                chars: chars,
+                from: scanLimit - 1,
+                downTo: 1,
+                parser: parser
+           ) {
+            return safe
+        }
+        return target
+    }
+
+    /// Walk `from` (inclusive) down to `downTo` (inclusive) looking for
+    /// the first split that satisfies all three safety predicates:
+    /// prefix-parses-legally, isn't an unsafe split, and produces a
+    /// stable merge. Returns nil when none in the range qualify. Helper
+    /// used by `findSyllableSafeSplit` so the floor and the
+    /// floor-relaxed sweep share one implementation.
+    private static func scanForSafeSplit(
+        chars: [Character],
+        from: Int,
+        downTo: Int,
+        parser: SyllableParser
+    ) -> Int? {
+        guard from >= downTo, downTo >= 1, from <= chars.count else { return nil }
+        var split = from
+        while split >= downTo {
             let prefix = String(chars[0..<split])
             if let parse = parser.parseCandidates(prefix, maxResults: 1).first,
                parse.legalityScore > 0,
@@ -259,7 +300,7 @@ extension BurmeseEngine {
             }
             split -= 1
         }
-        return target
+        return nil
     }
 
     /// Compose-and-compare safety check (task 05). The local-legality
@@ -331,10 +372,24 @@ extension BurmeseEngine {
     /// forces the prefix to render `မီ` and the tail to render a fresh `င`,
     /// corrupting repeated words like `mingalarpar`.
     ///
-    /// Finally, reject boundaries inside roman onset digraphs / cluster
+    /// Reject boundaries inside roman onset digraphs / cluster
     /// aliases. `...s` parses legally as စ, but when followed by `h` the
     /// intended tail onset may be `sh` → ရှ; freezing after `s` would make
     /// that cluster unreachable.
+    ///
+    /// Finally, reject boundaries that strand a vowel-leading rule at the
+    /// head of the active tail when the prefix's last character is a
+    /// consonant letter. The active-tail parse of e.g. `aungtawkyaw`
+    /// produces a ZWNJ+dep-vowel surface (the standard parser emission
+    /// for a bare vowel rule), which the engine's orphan-ZWNJ promoter
+    /// then rewrites to `အောင်...`. Concatenated onto a prefix ending in
+    /// a consonant, the result is `<consonant>အ<dep-vowel>...` — a
+    /// stray independent vowel `အ` wedged between the consonant and the
+    /// dep-vowel that should attach directly to it (TASK-002). The fix
+    /// is to refuse the split so the windowing path advances the
+    /// boundary forward (or back) until the active tail starts with a
+    /// consonant or with the original buffer head — keeping the
+    /// `<consonant><dep-vowel>` cluster intact through the parse.
     internal static func isUnsafeFrozenSplit(chars: [Character], split: Int) -> Bool {
         guard split > 0, split < chars.count else { return false }
         if chars[split - 1] == "a", chars[split].isLetter {
@@ -343,7 +398,99 @@ extension BurmeseEngine {
         if isOnsetDigraphSplit(chars: chars, split: split) {
             return true
         }
-        return isImplicitNCodaSplit(chars: chars, split: split)
+        if isImplicitNCodaSplit(chars: chars, split: split) {
+            return true
+        }
+        return isConsonantVowelSplit(chars: chars, split: split)
+    }
+
+    /// True when the prefix ends with a consonant letter and the active
+    /// tail starts with a multi-letter vowel rule that the parser can
+    /// only render via a leading ZWNJ + dep-vowel sign (the standard
+    /// orphan-mark emission for a bare-vowel run). The engine's
+    /// orphan-promoter then rewrites the ZWNJ to `အ`, producing a
+    /// `<consonant>U+1021<dep-vowel>` triple — a stray independent vowel
+    /// wedged between the prefix's trailing consonant and the
+    /// dep-vowel that should attach directly to it (TASK-002).
+    ///
+    /// The set of triggering prefixes is the subset of vowel rules in
+    /// `Romanization.swift` whose surface output is a dep-vowel sign
+    /// (U+102B–U+1032 / U+1036–U+1038) without an inherent base — i.e.
+    /// rules that would orphan-promote when parsed standalone. A
+    /// single bare `a` is excluded because the parser maps it to the
+    /// inherent vowel (no surface emission) and lets it merge with the
+    /// next consonant; only multi-letter vowel-onset rules (`au-`,
+    /// `aw-`, `ai-`, `ay-`, `ee`, `oo`, `ow-`, `ey`, etc.) actually
+    /// trigger the orphan-promotion path.
+    private static func isConsonantVowelSplit(chars: [Character], split: Int) -> Bool {
+        guard split > 0, split < chars.count else { return false }
+        let prev = chars[split - 1]
+        guard prev.isLetter, !isVowelLetter(prev) else { return false }
+        return startsWithOrphaningVowelRule(chars: chars, at: split)
+    }
+
+    private static func isVowelLetter(_ c: Character) -> Bool {
+        switch c {
+        case "a", "e", "i", "o", "u":
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// True when the substring starting at `chars[at...]` begins with a
+    /// multi-letter Romanization vowel rule that, when parsed in
+    /// isolation, would emit a leading orphan dep-vowel sign (which the
+    /// engine then rewrites to `အ`). The check does not need to be
+    /// exhaustive for the entire vowel-rule table — the bug only fires
+    /// for tail prefixes that produce the ZWNJ-orphan parse, and those
+    /// all start with `a` followed by a non-vowel letter (`au-`, `aw-`,
+    /// `ai-`, `ay-`, `an-`, `ar-`, `at-`) or with one of the long-vowel
+    /// rules (`ee`, `oo`, `ow-`, `ey-`). A single `a<vowel>` prefix
+    /// (e.g. `alarpar`) is parsed as inherent + next consonant and is
+    /// safe.
+    private static func startsWithOrphaningVowelRule(chars: [Character], at start: Int) -> Bool {
+        guard start < chars.count else { return false }
+        let c0 = chars[start]
+        guard isVowelLetter(c0) else { return false }
+        // Single-letter `a` followed by another vowel letter (`alar`,
+        // `aerial`) parses as inherent + next syllable; safe.
+        if c0 == "a" {
+            guard start + 1 < chars.count else { return false }
+            let c1 = chars[start + 1]
+            // `a<vowel>` is safe because the parser merges the leading
+            // `a` as inherent into the next consonant cluster.
+            if isVowelLetter(c1) { return false }
+            // `a` followed by a non-letter (`+`, digit, `'`) is also
+            // safe — the parser will treat them as connectors.
+            guard c1.isLetter else { return false }
+            // `a<consonant>` (e.g. `alarpar`, `apyar`) is safe — the `a`
+            // is inherent on the next consonant.
+            // Only `a` followed by a multi-letter VOWEL-RULE prefix
+            // triggers the orphan parse. Those start with `u`, `w`, `y`,
+            // `i` after `a` — the diphthong/finals (`au`, `aw`, `ay`,
+            // `ai`).
+            switch c1 {
+            case "u", "w", "y", "i":
+                return true
+            default:
+                return false
+            }
+        }
+        // Long-vowel rules whose first scalar is themselves a vowel
+        // letter and whose standalone parse produces an orphan: `ee`,
+        // `oo`, `ow`, `ey`. Each is two letters, the second of which is
+        // a vowel that doubles the first or pairs with a glide.
+        if start + 1 < chars.count {
+            let pair = String([chars[start], chars[start + 1]])
+            switch pair {
+            case "ee", "oo", "ow", "ey":
+                return true
+            default:
+                break
+            }
+        }
+        return false
     }
 
     private static func isOnsetDigraphSplit(chars: [Character], split: Int) -> Bool {
