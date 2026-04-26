@@ -202,8 +202,12 @@ final class LiteralPunctRecursionReadingXCTests: XCTestCase {
 final class HeavyToneAwXCTests: XCTestCase {
     func testAll() { runSuite(HeavyToneAwSuite.suite, xctest: self) }
 }
-#endif
 
 final class WindowingKinziPromotionXCTests: XCTestCase {
     func testAll() { runSuite(WindowingKinziPromotionSuite.suite, xctest: self) }
 }
+
+final class CrossClassNTStackRankingXCTests: XCTestCase {
+    func testAll() { runSuite(CrossClassNTStackRankingSuite.suite, xctest: self) }
+}
+#endif

@@ -242,6 +242,7 @@ extension BurmeseEngine {
         input: String,
         insertions: Int,
         liberalInsertions: Int,
+        vowelRuleLiberalInsertions: Int,
         strictOnlyInput: String?,
         strictOnlyInsertions: Int
     )? {
@@ -271,7 +272,7 @@ extension BurmeseEngine {
             let lowers = stackLowerConsonantsStarting(chars: chars, at: 4)
             if lowers.contains(where: { Grammar.isValidStack(upper: Myanmar.nga, lower: $0) }) {
                 let collapsed = "ai+" + String(chars[4...])
-                return (collapsed, 1, 0, nil, 1)
+                return (collapsed, 1, 0, 0, nil, 1)
             }
         }
         // Mid-buffer generalisation of the diphthong-coda collapse.
@@ -309,7 +310,12 @@ extension BurmeseEngine {
                 // at rank ≥ 1 (for panel access) but the liberal rarity
                 // bump keeps the open form at rank 0.
                 let liberalInput = String(chars[..<ngStart]) + "+" + String(chars[ngStart...])
-                return (liberalInput, 1, 1, nil, 0)
+                // The mid-buffer `ai+ng` liberal collapse is structurally
+                // a vowel-rule path (the `ai` produces a kinzi-anchor
+                // upper); count it under vowelRuleLiberalInsertions so
+                // the rarity bump in `ingestInferredParses` keeps the
+                // open form at rank 0 even when the LM is silent.
+                return (liberalInput, 1, 1, 1, nil, 0)
             }
             guard lowers.contains(where: { Grammar.isValidStack(upper: Myanmar.nga, lower: $0) }) else {
                 // Has a consonant lower but it cannot stack with nga —
@@ -345,11 +351,35 @@ extension BurmeseEngine {
                 }
             }
             let collapsed = String(chars[..<ngStart]) + "+" + String(chars[stackStart...])
-            return (collapsed, 1, 0, nil, 1)
+            return (collapsed, 1, 0, 0, nil, 1)
         }
         } // end if chars.count >= 5
         let medialLetters: Set<Character> = ["y", "r", "w"]
-        var insertAt: [(index: Int, isLiberal: Bool, marker: String)] = []
+        // `isBurmeseCompoundSite` flags TASK-006 bug-class inference
+        // sites: vowel-rule upper that is NOT the nga consonant AND
+        // the post-stack syllable is closed (carries a coda/closing
+        // letter). These are the cross-class / same-class N+T/D/P
+        // patterns where the user clearly typed a native Burmese
+        // compound (`kantar`, `pantar`, `tantaw`, `ngantawthi`, ...);
+        // the engine demotes them via a rarity bump in
+        // `ingestInferredParses` so the asat-closed sibling wins rank 0.
+        //
+        // Excluded:
+        //  - Kinzi sites (`nga` upper from `in`/`ain`/`aing`/`aung`
+        //    rules, paired with a velar lower) — canonical Burmese,
+        //    must continue to promote.
+        //  - Open post-stack sites (`atta`, `sanda`, `vandanar`,
+        //    `mantara`, `tarbandana`, `dhamma`, `kappa`, `ratna`,
+        //    `padma`, ...) — recognised Pali transliteration shapes,
+        //    canonical stacked surface stays at top.
+        //  - Coda-branch sites (`pakta`, `karma`, `brahma`, ...) —
+        //    Pali shape; existing `r`-heuristic bump still applies.
+        var insertAt: [(
+            index: Int,
+            isLiberal: Bool,
+            marker: String,
+            isBurmeseCompoundSite: Bool
+        )] = []
         for lowerIndex in 1..<chars.count {
             guard !blockedLowerIndices.contains(lowerIndex) else { continue }
             // A digit at this position explicitly separates syllables — the
@@ -417,6 +447,36 @@ extension BurmeseEngine {
                     .contains(where: { medialLetters.contains(chars[$0]) })
             let precedingCoda = lowerIndex >= 1 ? chars[lowerIndex - 1] : "\0"
             guard !onsetHasMedial || precedingCoda == "h" else { continue }
+            // Diphthong-coda subclass (TASK-006): the user closed the
+            // previous syllable with a nga-asat coda from a diphthong
+            // vowel rule (`ai`/`aing`/`in`-family/`aung`), so the next
+            // letter is the start of a new syllable — there is no
+            // "stack site" to fire. Two patterns:
+            //
+            //  1. Liberal cross-class with `upperIsNga`: the matched
+            //     vowel rule directly emits `1004 103A` (`mintara` →
+            //     `in+t`, `pyaingtaw` → `aing+t`). Inserting a virama
+            //     stack across the diphthong's nga-asat coda produces
+            //     malformed dual-coda surfaces.
+            //  2. `hasNgaAsatShorterAlternate`: the longest matched
+            //     rule is `ain` (upper=na, strict same-class with the
+            //     dental lower) but the shorter `in` rule (upper=nga)
+            //     also matches. The parser typically segments the
+            //     buffer using the shorter rule (`<...>i` with
+            //     nga-asat coda + `n` as next onset + virama-stack
+            //     with `t`), producing the malformed shape regardless
+            //     of strict/liberal classification (`naintaw`,
+            //     `saintaw`, `naindar`).
+            //
+            // Reject the site outright in both cases.
+            if inferred.isFromVowelRule {
+                if inferred.hasNgaAsatShorterAlternate {
+                    continue
+                }
+                if inferred.isLiberal, inferred.upperIsNga {
+                    continue
+                }
+            }
             // Bare-onset nga sites need an asat-then-virama injection
             // (`*+`) so the parser materialises kinzi (`ng + asat +
             // virama + <C>`) instead of a bare virama stack
@@ -424,7 +484,36 @@ extension BurmeseEngine {
             // asat in the preceding vowel rule's output, so a plain
             // `+` is enough.
             let marker = inferred.isBareNga ? "*+" : "+"
-            insertAt.append((lowerIndex, inferred.isLiberal, marker))
+            // Vowel-rule-upper inference sites with non-nga upper
+            // AND a post-stack closed syllable (TASK-006: `kantar`,
+            // `pantar`, `tantaw`, `tantar`, `ngantar`, `kantawpar`,
+            // `ngantawthi`, `thingyantaw`, ...) are the bug class.
+            // The upper consonant (`na` from `an`/`on`/`ain` etc.) is
+            // already asat-closed by the preceding vowel rule, and
+            // the next syllable's vowel structure carries its own
+            // closing consonant (`ar`, `aw`, `ay`, etc.) — clear
+            // signals of a native Burmese compound. Replacing the
+            // asat with a virama stack is a Pali override that should
+            // require a curated `paliStackOverrides` entry, not
+            // implicit inference.
+            //
+            // Sites with `nga` upper (kinzi: `min+ga`, `tin+ga`,
+            // `pyaing+ga`-style) are excluded — those are canonical
+            // Burmese and must continue to promote.
+            //
+            // Sites where the post-stack syllable is OPEN (just
+            // `<C>a`, no closing letter — `atta`, `vandanar`, `sanda`,
+            // `mantara`, `tarbandana`, `dhamma`, `kappa`, `ratna`,
+            // `padma`, etc.) keep the existing inference behaviour:
+            // those are recognised Pali transliteration shapes where
+            // the stacked surface is the canonical rendering.
+            let isVowelRuleNonNgaUpper = inferred.isFromVowelRule && !inferred.upperIsNga
+            let isBugClassClosedPostStack = isVowelRuleNonNgaUpper
+                && Self.postStackSyllableIsClosed(
+                    chars: chars,
+                    insertIndex: lowerIndex
+                )
+            insertAt.append((lowerIndex, inferred.isLiberal, marker, isBugClassClosedPostStack))
         }
         // When a bare-nga site fires at lowerIndex K, the bare nga
         // upper occupies chars[K-2..K-1] ("ng"). Any earlier site
@@ -447,6 +536,15 @@ extension BurmeseEngine {
         }
         guard !insertAt.isEmpty else { return nil }
         let liberalInsertions = insertAt.lazy.filter(\.isLiberal).count
+        // `vowelRuleLiberalInsertions` (kept for public tuple shape;
+        // semantically it's "Burmese-compound-shape vowel-rule
+        // inference sites that the engine should demote") counts the
+        // TASK-006 bug-class sites, including both strict same-class
+        // na+t/d/n and liberal cross-class na+p/k/m where the
+        // post-stack syllable is closed.
+        let vowelRuleLiberalInsertions = insertAt.lazy
+            .filter(\.isBurmeseCompoundSite)
+            .count
         let strictInsertAt = insertAt.filter { !$0.isLiberal }
         let result = injectMarkers(input, at: insertAt.map { ($0.index, $0.marker) })
         let strictOnlyResult: String?
@@ -462,9 +560,92 @@ extension BurmeseEngine {
             result,
             insertAt.count,
             liberalInsertions,
+            vowelRuleLiberalInsertions,
             strictOnlyResult,
             strictInsertAt.count
         )
+    }
+
+    /// True when the syllable starting at `insertIndex` (the lower
+    /// consonant of the inferred stack site) is "closed" — i.e. it
+    /// carries a vowel-rule coda letter (`r`, `w`, `y`, `n`, `g`)
+    /// before the next syllable boundary. Native Burmese compound
+    /// shapes (`kantar`, `pantar`, `tantaw`, `kantawpar`,
+    /// `ngantawthi`, `thingyantaw`) end the post-stack syllable with
+    /// a closing letter that materialises a long-vowel reading
+    /// (`ar`, `aw`, `ay`) or another asat coda (`an`, `in`). Pali
+    /// transliteration shapes (`atta`, `sanda`, `vandanar`,
+    /// `mantara`, `tarbandana`, `dhamma`, `kappa`, `ratna`, `padma`)
+    /// keep the post-stack syllable open (just `<C>a`, no closing
+    /// letter), which is the structural signal that the user typed a
+    /// genuine Pali word where the stacked surface is canonical.
+    ///
+    /// The scan starts at `insertIndex + 1` (one past the lower's
+    /// first letter) to skip the lower consonant itself, then walks
+    /// forward to find the first vowel letter and inspects what
+    /// follows. The check is deliberately simple — a precise
+    /// syllable-boundary detector would re-implement the parser; this
+    /// heuristic only needs to distinguish "Pali shape" from
+    /// "Burmese compound shape" on the immediate post-stack syllable.
+    private static func postStackSyllableIsClosed(
+        chars: [Character],
+        insertIndex: Int
+    ) -> Bool {
+        // Skip the lower consonant. Multi-letter consonant keys
+        // (`kh`, `ph`, `dh`, `bh`, `gh`, `th`, `sh`, `hm`, `hn`, ...)
+        // contribute extra letters before the vowel.
+        var idx = insertIndex + 1
+        // Aspirated digraph: lower starts with a stop and the next
+        // letter is `h` (`kh`, `ph`, `gh`, `bh`, `th`, `dh`, `ch`,
+        // `sh`).
+        if idx < chars.count, chars[idx] == "h" {
+            idx += 1
+        }
+        // Find the first vowel letter for the post-stack syllable.
+        let vowelLetters: Set<Character> = ["a", "e", "i", "o", "u"]
+        while idx < chars.count, !vowelLetters.contains(chars[idx]) {
+            // No vowel before another consonant or end of buffer —
+            // treat as open (degenerate; the parser will fall back).
+            // A consonant cluster after the lower (e.g. `+` or another
+            // stack site's marker) breaks the syllable; default open.
+            if chars[idx] == "+" { return false }
+            idx += 1
+        }
+        guard idx < chars.count else { return false }
+        // `idx` is the vowel letter. Examine what comes after.
+        var after = idx + 1
+        // Skip any second vowel letter (diphthong: `ai`, `aw`, `ay`,
+        // `oo`, `ee`, ...). For our purposes, a closing letter after
+        // a vowel-letter sequence (e.g. `aw`, `ay`) still counts as
+        // closed — the trailing `w`/`y` IS the coda.
+        let codaLetters: Set<Character> = ["r", "w", "y", "n", "g", "t", "m"]
+        // Walk through trailing vowel-extender or coda letters. If
+        // any coda letter is found AND it's NOT followed by another
+        // vowel letter (which would mean it's the onset of the next
+        // syllable), the syllable is closed.
+        while after < chars.count {
+            let ch = chars[after]
+            if codaLetters.contains(ch) {
+                // Coda letter. Check whether it's followed by a vowel
+                // letter (then it's actually an onset of next syllable).
+                if after + 1 < chars.count, vowelLetters.contains(chars[after + 1]) {
+                    // Onset of next syllable — the post-stack syllable
+                    // ended at the previous vowel without a coda.
+                    return false
+                }
+                return true
+            }
+            if vowelLetters.contains(ch) {
+                // Another vowel letter — diphthong continuation,
+                // keep scanning.
+                after += 1
+                continue
+            }
+            // Some other character (digit, `+`, end). Open.
+            return false
+        }
+        // End of buffer reached after just the vowel — bare open.
+        return false
     }
 
     private static func injectMarkers(
@@ -526,7 +707,14 @@ extension BurmeseEngine {
     private static func inferredPaliStackIsLiberal(
         chars: [Character],
         insertIndex: Int
-    ) -> (isLiberal: Bool, vowelStart: Int, isBareNga: Bool)? {
+    ) -> (
+        isLiberal: Bool,
+        vowelStart: Int,
+        isBareNga: Bool,
+        isFromVowelRule: Bool,
+        upperIsNga: Bool,
+        hasNgaAsatShorterAlternate: Bool
+    )? {
         guard insertIndex > 0,
               insertIndex < chars.count
         else { return nil }
@@ -538,6 +726,17 @@ extension BurmeseEngine {
         ) else {
             return nil
         }
+        // Track whether the upper inferred for this site is the nga
+        // consonant. The diphthong-coda subclass (`ai`/`aing`/`in`/
+        // `aung` family) emits an `upper = nga` from `vowelRuleUpperConsonants`
+        // because the vowel rule's surface ends with U+1004 U+103A
+        // (nga-asat). When such an inference site fires liberal
+        // cross-class, the user clearly already has a closed-syllable
+        // boundary from the diphthong's nga-asat — adding a virama
+        // stack inside the next syllable produces the malformed
+        // `<diphthong-with-nga-asat> + <na-virama-ta>` shape (see
+        // task TASK-006 / `naintaw`, `saintaw`).
+        let upperIsNga = upperMatch.uppers.contains(Myanmar.nga)
         var sawLiberal = false
         for upper in upperMatch.uppers {
             for lower in lowers {
@@ -545,7 +744,14 @@ extension BurmeseEngine {
                     continue
                 }
                 if Grammar.isValidStack(upper: upper, lower: lower) {
-                    return (false, upperMatch.vowelStart, upperMatch.isBareNga)
+                    return (
+                        false,
+                        upperMatch.vowelStart,
+                        upperMatch.isBareNga,
+                        upperMatch.isFromVowelRule,
+                        upperIsNga,
+                        upperMatch.hasNgaAsatShorterAlternate
+                    )
                 }
                 sawLiberal = true
             }
@@ -556,7 +762,16 @@ extension BurmeseEngine {
         if upperMatch.isBareNga {
             return nil
         }
-        return sawLiberal ? (true, upperMatch.vowelStart, false) : nil
+        return sawLiberal
+            ? (
+                true,
+                upperMatch.vowelStart,
+                false,
+                upperMatch.isFromVowelRule,
+                upperIsNga,
+                upperMatch.hasNgaAsatShorterAlternate
+            )
+            : nil
     }
 
     private static let stackLowerRomanKeys: [String] = {
@@ -689,16 +904,28 @@ extension BurmeseEngine {
     private static func stackUpperConsonantsEndingBeforeLower(
         chars: [Character],
         insertIndex: Int
-    ) -> (uppers: [Character], vowelStart: Int, isBareNga: Bool)? {
+    ) -> (
+        uppers: [Character],
+        vowelStart: Int,
+        isBareNga: Bool,
+        isFromVowelRule: Bool,
+        hasNgaAsatShorterAlternate: Bool
+    )? {
         if let matchedVowels = vowelRuleUpperConsonants(chars: chars, insertIndex: insertIndex) {
-            return (matchedVowels.uppers, matchedVowels.vowelStart, false)
+            return (
+                matchedVowels.uppers,
+                matchedVowels.vowelStart,
+                false,
+                true,
+                matchedVowels.hasNgaAsatShorterAlternate
+            )
         }
         let codaIndex = insertIndex - 1
         if codaIndex > 0,
            isPaliStackCodaLetter(chars[codaIndex]),
            isPaliStackVowelLetter(chars[codaIndex - 1]),
            let upper = Romanization.romanToConsonant[String(chars[codaIndex])] {
-            return ([upper], codaIndex - 1, false)
+            return ([upper], codaIndex - 1, false, false, false)
         }
         // Task 03: leading independent vowel + bare-onset `nga` +
         // stackable consonant. The parser consumes `ng` as a bare
@@ -718,7 +945,7 @@ extension BurmeseEngine {
            chars[codaIndex] == "g",
            chars[codaIndex - 1] == "n",
            isPaliStackVowelLetter(chars[0]) {
-            return ([Myanmar.nga], 0, true)
+            return ([Myanmar.nga], 0, true, false, false)
         }
         return nil
     }
@@ -748,7 +975,23 @@ extension BurmeseEngine {
     private static func vowelRuleUpperConsonants(
         chars: [Character],
         insertIndex: Int
-    ) -> (uppers: [Character], vowelStart: Int)? {
+    ) -> (
+        uppers: [Character],
+        vowelStart: Int,
+        hasNgaAsatShorterAlternate: Bool
+    )? {
+        var primary: (uppers: [Character], vowelStart: Int, length: Int)?
+        // `stackVowelUpperRules` is sorted longest-first, so the first
+        // match is the longest. We collect it as `primary`, then keep
+        // scanning for any shorter rule that also matches at the same
+        // end position and emits the nga-asat coda (`1004 103A` —
+        // produced by the `in`/`ai`/`aing`/`aung` family). When such a
+        // shorter alternate exists, the inference site is in the
+        // diphthong-coda subclass: the parser may segment the buffer
+        // using the shorter rule (`<...>i + n + <C>` → `<...>` with
+        // nga-asat coda + `n` as next onset + virama-stack with `t`),
+        // producing a malformed dual-coda surface. Callers reject the
+        // site outright when this flag is true. See TASK-006.
         for rule in stackVowelUpperRules {
             let length = rule.key.count
             guard length <= insertIndex else { continue }
@@ -758,11 +1001,20 @@ extension BurmeseEngine {
                 matches = false
                 break
             }
-            if matches {
-                return (rule.uppers, start)
+            guard matches else { continue }
+            if primary == nil {
+                primary = (rule.uppers, start, length)
+                continue
+            }
+            // Already have a longer primary match; check whether this
+            // shorter rule emits nga-asat (upper == nga). If so, the
+            // site is ambiguous between the two segmentations.
+            if length < primary!.length, rule.uppers.contains(Myanmar.nga) {
+                return (primary!.uppers, primary!.vowelStart, true)
             }
         }
-        return nil
+        guard let pick = primary else { return nil }
+        return (pick.uppers, pick.vowelStart, false)
     }
 
     private static func stackUpperConsonant(fromVowelOutput output: String) -> Character? {

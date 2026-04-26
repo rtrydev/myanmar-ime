@@ -780,6 +780,7 @@ public final class BurmeseEngine: @unchecked Sendable {
                 input: inferred.input,
                 insertions: inferred.insertions,
                 liberalInsertions: inferred.liberalInsertions,
+                vowelRuleLiberalInsertions: inferred.vowelRuleLiberalInsertions,
                 isFullBuffer: !effectiveWindowed,
                 grammarParses: &grammarParses,
                 existingOutputs: existingOutputs,
@@ -799,6 +800,7 @@ public final class BurmeseEngine: @unchecked Sendable {
                     input: strictOnly,
                     insertions: inferred.strictOnlyInsertions,
                     liberalInsertions: 0,
+                    vowelRuleLiberalInsertions: 0,
                     isFullBuffer: !effectiveWindowed,
                     grammarParses: &grammarParses,
                     existingOutputs: outputsAfterFull,
@@ -1784,6 +1786,7 @@ public final class BurmeseEngine: @unchecked Sendable {
         input: String,
         insertions: Int,
         liberalInsertions: Int,
+        vowelRuleLiberalInsertions: Int = 0,
         isFullBuffer: Bool,
         grammarParses: inout [SyllableParse],
         existingOutputs: Set<String>,
@@ -1823,9 +1826,49 @@ public final class BurmeseEngine: @unchecked Sendable {
             // entries are unaffected (they're injected at rank 0
             // independently of inference). See task 04.
             let prefixHasPaliR = input.contains("r")
-            let liberalRarityBump = (liberalInsertions > 0 && !prefixHasPaliR)
-                ? 5 * liberalInsertions
+            // Coda-branch liberal sites (e.g. `pakta`, `karma`) — the
+            // upper consonant comes from a `<vowel><coda><lower>` shape
+            // where the coda is a bare consonant before the vowel
+            // letter — get the existing +5/site bump only when there's
+            // no Pali `r` hint. The `r` heuristic correctly flags
+            // genuine Pali/Sanskrit transliterations (`karma`,
+            // `dharma`, `brahma`) where the user wants the stack form.
+            // `vowelRuleLiberalInsertions` covers the disjoint
+            // "Pali-shape vowel-rule" sites, so we cleanly subtract.
+            let codaLiberalInsertions = max(0, liberalInsertions - vowelRuleLiberalInsertions)
+            let codaLiberalBump = (codaLiberalInsertions > 0 && !prefixHasPaliR)
+                ? 5 * codaLiberalInsertions
                 : 0
+            // Vowel-rule-upper inference sites in the TASK-006
+            // bug class (`kantar`, `pantar`, `tantaw`, `tantar`,
+            // `ngantar`, `kantawpar`, `ngantawthi`, `thingyantaw`,
+            // ...). The upper consonant (`na` from `an`/`on`/`ain`
+            // etc.) was already closed with asat by the preceding
+            // vowel rule AND the next syllable carries its own
+            // closing letter — clear signals of a native Burmese
+            // compound where the asat-closed rendering is canonical.
+            //
+            // The bug-class detection happens upstream in
+            // `inferImplicitStackMarkers` (`isBurmeseCompoundSite`):
+            // open post-stack syllables (`atta`, `sanda`, `vandanar`,
+            // `mantara`, `tarbandana`, `ratna`, `padma`, ...) are
+            // recognised Pali transliteration shapes and are NOT
+            // counted toward `vowelRuleLiberalInsertions`. Kinzi
+            // sites (nga upper) are also excluded.
+            //
+            // The Pali-shape demotion is achieved primarily by NOT
+            // inserting the stack surface into `strictInferredStackOutputs`
+            // (so `bestStrictInferredStackIndex` doesn't lift it to
+            // rank 0); the +1/site rarity bump is a secondary
+            // tiebreaker that ensures the stacked sibling sorts after
+            // the asat-closed rendering when their parser scores
+            // happen to align. The bump is small enough to keep the
+            // stacked sibling within the candidate panel for users
+            // who want to pick it manually.
+            let vowelRulePaliShapeBump = vowelRuleLiberalInsertions > 0
+                ? 1 * vowelRuleLiberalInsertions
+                : 0
+            let liberalRarityBump = codaLiberalBump + vowelRulePaliShapeBump
             let adjusted = SyllableParse(
                 output: parse.output,
                 reading: parse.reading,
@@ -1836,11 +1879,25 @@ public final class BurmeseEngine: @unchecked Sendable {
                 syllableCount: adjustedCount,
                 rarityPenalty: parse.rarityPenalty + liberalRarityBump
             )
-            if liberalInsertions == 0,
+            // TASK-006: Pali-shape vowel-rule sites (`kantar`, `pantar`,
+            // `tantaw`, `tantar`, `mantara`, `tarbandana`, `ngantar`,
+            // ...) produce a stacked surface that is structurally a
+            // valid native virama stack (e.g. `ကန္တာ` = `1000 1014
+            // 1039 1010 102C` passes `surfaceHasOnlyNativeViramaStacks`
+            // because na+ta is class-3 same-class). Without this guard,
+            // the rank-0 promotion at `bestStrictInferredStackIndex`
+            // would lift the stacked form to top despite the +12 rarity
+            // bump applied below — promotion bypasses the comparator
+            // entirely. Treat these the same as the kinzi-from-bare-ng
+            // liberal path (`liberalKinziOutputs`): keep them
+            // discoverable in the panel but not promoted.
+            let isPaliShapeVowelRule = vowelRuleLiberalInsertions > 0
+            if !isPaliShapeVowelRule,
+               liberalInsertions == 0,
                Self.surfaceHasOnlyNativeViramaStacks(adjusted.output) {
                 strictInferredStackOutputs.insert(adjusted.output)
                 strictInferredStackOutputs.insert(Self.correctAaShape(adjusted.output))
-            } else if liberalInsertions > 0,
+            } else if (liberalInsertions > 0 || isPaliShapeVowelRule),
                       Self.surfaceHasOnlyNativeViramaStacks(adjusted.output) {
                 // Liberal-inferred native-stack kinzi (e.g. diphthong-coda
                 // bare-ng collapse): protect from LM pruning so the kinzi
