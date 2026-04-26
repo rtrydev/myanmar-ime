@@ -169,4 +169,8 @@ final class UnparseableTailFallbackXCTests: XCTestCase {
 final class StandaloneCodaVowelXCTests: XCTestCase {
     func testAll() { runSuite(StandaloneCodaVowelSuite.suite, xctest: self) }
 }
+
+final class MidBufferDigitMedialSplitXCTests: XCTestCase {
+    func testAll() { runSuite(MidBufferDigitMedialSplitSuite.suite, xctest: self) }
+}
 #endif

@@ -173,13 +173,22 @@ extension BurmeseEngine {
     }
 
     /// Returns the smallest position ≥ `pos` that does not sit inside a
-    /// Myanmar virama-stack cluster in `scalars`. Snaps past a leading
-    /// virama (and the lower consonant that must follow it), and past any
-    /// consonant whose preceding scalar is a virama (i.e. the lower of a
-    /// stacked pair — inserting before it would leave a dangling virama).
-    /// Other combining marks are NOT snapped: the existing mid-buffer-digit
-    /// design intentionally allows the digit to split a consonant from its
-    /// dependent vowel/medial as a hard syllable break (see
+    /// Myanmar virama-stack cluster or between a consonant base and one
+    /// of its medial scalars. Snaps past:
+    ///
+    /// - A leading virama (and the lower consonant that must follow it).
+    /// - Any consonant whose preceding scalar is a virama (i.e. the lower
+    ///   of a stacked pair — inserting before it would leave a dangling
+    ///   virama).
+    /// - Any medial scalar (U+103B–U+103E) that follows a consonant base
+    ///   on the left side of the splice. Medials physically attach to the
+    ///   base in Unicode storage order; no romanization rule emits an
+    ///   isolated medial without a preceding consonant, so the user
+    ///   cannot have meaningfully intended a digit between them.
+    ///
+    /// Dependent vowels (U+102B–U+1032) and tone marks are NOT snapped:
+    /// the mid-buffer-digit design intentionally allows the digit to act
+    /// as a hard syllable break across those (see
     /// `RankingSuite.task10_midDigitTop_*`).
     internal static func snapSpliceForward(_ scalars: [UInt32], position pos: Int) -> Int {
         var p = max(0, min(pos, scalars.count))
@@ -192,6 +201,11 @@ extension BurmeseEngine {
                 continue
             }
             if prev == 0x1039 {
+                p += 1
+                continue
+            }
+            if cur >= 0x103B && cur <= 0x103E,
+               (prev >= 0x1000 && prev <= 0x1021) || (prev >= 0x103B && prev <= 0x103E) {
                 p += 1
                 continue
             }

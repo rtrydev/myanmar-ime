@@ -990,13 +990,12 @@ public enum RankingSuite {
 
         // Digit between an onset consonant and a medial letter (rarer
         // shape from the task spec). The medial must stay attached to
-        // the onset rather than promoting to a standalone consonant.
+        // the onset; the splice point is snapped past the medial cluster
+        // so the digit acts as a hard syllable break *after* the
+        // `<onset><medial>` cluster, not inside it (task 04).
         for (buffer, expectedTop) in [
-            // `k2yun` strips the mid-buffer digit and re-parses `kyun`,
-            // which falls under the ya-pin cluster preference (task 02);
-            // the digit splices back at its typed position.
-            ("k2yun",  "က၂ျူန"),
-            ("l2wann", "လ၂ွန်န"),
+            ("k2yun",  "ကျ၂ူန"),
+            ("l2wann", "လွ၂န်န"),
         ] {
             cases.append(TestCase("task10_digitBetweenMedial_\(buffer)") { ctx in
                 let engine = BurmeseEngine()
