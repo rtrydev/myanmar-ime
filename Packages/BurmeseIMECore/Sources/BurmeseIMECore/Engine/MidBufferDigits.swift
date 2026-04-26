@@ -145,14 +145,22 @@ extension BurmeseEngine {
     }
 
     /// Insert `scalars[i]` at scalar offset `positions[i]` in `surface`.
-    /// Applies splices in descending position order so earlier offsets
-    /// remain valid as later ones shift. Each position is snapped forward
-    /// past any virama-stack cluster in the candidate surface — the
-    /// prefix parse used to compute splice offsets can disagree with the
-    /// full-buffer parse when stack inference fires (e.g. `brahm` parses
-    /// as 4 scalars in isolation but the full `brahma` parse renders 5
-    /// scalars with an internal virama). Without the snap the digit lands
-    /// between the virama and its lower consonant, shattering the cluster.
+    /// Each position is snapped forward past any virama-stack cluster in
+    /// the candidate surface — the prefix parse used to compute splice
+    /// offsets can disagree with the full-buffer parse when stack
+    /// inference fires (e.g. `brahm` parses as 4 scalars in isolation but
+    /// the full `brahma` parse renders 5 scalars with an internal virama).
+    /// Without the snap the digit lands between the virama and its lower
+    /// consonant, shattering the cluster.
+    ///
+    /// Adjacent digits in a single mid-buffer run share the same splice
+    /// offset (e.g. all four insertions for `kar1234kar` carry the same
+    /// `position`). Inserting them one at a time at a fixed position
+    /// reverses the run — each new insertion at `p` pushes the previously
+    /// inserted scalar to `p+1`, so the first inserted ends up rightmost.
+    /// Group insertions by snapped position and splice each group with a
+    /// single `insert(contentsOf:)` call, preserving the within-group
+    /// typed order without depending on sort stability (TASK-001).
     internal static func insertScalars(
         into surface: String,
         scalars: [Unicode.Scalar],
@@ -161,11 +169,23 @@ extension BurmeseEngine {
         precondition(scalars.count == positions.count)
         var working = Array(surface.unicodeScalars)
         let snapped = positions.map { snapSpliceForward(working.map(\.value), position: $0) }
-        let ordered = zip(snapped, scalars)
-            .sorted(by: { $0.0 > $1.0 })
-        for (pos, scalar) in ordered {
+        // Bucket scalars by splice position, preserving the original
+        // order within each bucket. Then walk distinct positions in
+        // descending order so earlier offsets remain valid as later
+        // splices shift the array right.
+        var groups: [Int: [Unicode.Scalar]] = [:]
+        var positionOrder: [Int] = []
+        for (pos, scalar) in zip(snapped, scalars) {
+            if groups[pos] == nil {
+                groups[pos] = [scalar]
+                positionOrder.append(pos)
+            } else {
+                groups[pos]!.append(scalar)
+            }
+        }
+        for pos in positionOrder.sorted(by: >) {
             let clamped = max(0, min(pos, working.count))
-            working.insert(scalar, at: clamped)
+            working.insert(contentsOf: groups[pos]!, at: clamped)
         }
         var view = String.UnicodeScalarView()
         view.append(contentsOf: working)

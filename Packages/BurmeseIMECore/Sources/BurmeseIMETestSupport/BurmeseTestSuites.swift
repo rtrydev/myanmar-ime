@@ -54,6 +54,7 @@ public enum BurmeseTestSuites {
         StandaloneCodaVowelSuite.suite,
         MidBufferDigitMedialSplitSuite.suite,
         MidBufferDigitAsatSplitSuite.suite,
+        MidBufferDigitOrderSuite.suite,
         WindowingClusterIntegritySuite.suite,
         LiteralPunctRecursionReadingSuite.suite,
         HeavyToneAwSuite.suite,
