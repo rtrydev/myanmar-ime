@@ -314,11 +314,29 @@ public final class BurmeseEngine: @unchecked Sendable {
             var state = update(buffer: midCleanedBuffer, context: context)
             midDigitBoundaries = []
             state.rawBuffer = displayBuffer
-            state.candidates = spliceMidBufferDigits(
+            let spliced = spliceMidBufferDigits(
                 into: state.candidates,
                 cleaned: midCleanedBuffer,
                 insertions: midInsertions
             )
+            // The inner `update` was keyed on the digit-stripped buffer;
+            // its candidate readings cover only the letters and its
+            // `lastHistoryKey` was set from the same active alias. Carry
+            // the user's full buffer through both so `recordSelection`
+            // doesn't store the spliced surface under a truncated key
+            // (task 05 follow-up — the original fix only patched the
+            // punct-split recursion paths).
+            state.candidates = spliced.map { cand in
+                Candidate(
+                    surface: cand.surface,
+                    reading: displayBuffer,
+                    source: cand.source,
+                    score: cand.score
+                )
+            }
+            cacheLock.lock()
+            lastHistoryKey = Romanization.aliasReading(displayBuffer)
+            cacheLock.unlock()
             return state
         }
         // Composing punctuation (`.`, `:`, `*`, `'`) can appear inside
@@ -1681,12 +1699,22 @@ public final class BurmeseEngine: @unchecked Sendable {
                     }
                     continue
                 }
+                // Affixes (leading literal, digit prefix, literal tail)
+                // are concatenated onto the surface but never reach the
+                // parser — the inner `candidate.reading` only covers the
+                // composable middle. Replace it with the full display
+                // buffer so `recordSelection` keys history on what the
+                // user actually typed, not the truncated middle (task 05
+                // follow-up — the original fix only patched the punct-
+                // split recursion paths). Mirrors the override pattern
+                // used at lines 339-346 / 382-389.
+                let fullReading = displayBuffer
                 if hasDigitAffixes {
                     let primary = leadingLiteral + burmesePrefix + candidate.surface + Self.arabicToBurmeseDigits(candidateTail)
                     if seen.insert(primary).inserted {
                         expanded.append(Candidate(
                             surface: primary,
-                            reading: candidate.reading,
+                            reading: fullReading,
                             source: candidate.source,
                             score: candidate.score
                         ))
@@ -1695,7 +1723,7 @@ public final class BurmeseEngine: @unchecked Sendable {
                     if secondary != primary, seen.insert(secondary).inserted {
                         expanded.append(Candidate(
                             surface: secondary,
-                            reading: candidate.reading,
+                            reading: fullReading,
                             source: candidate.source,
                             score: candidate.score
                         ))
@@ -1705,7 +1733,7 @@ public final class BurmeseEngine: @unchecked Sendable {
                     if seen.insert(surface).inserted {
                         expanded.append(Candidate(
                             surface: surface,
-                            reading: candidate.reading,
+                            reading: fullReading,
                             source: candidate.source,
                             score: candidate.score
                         ))
@@ -1713,6 +1741,13 @@ public final class BurmeseEngine: @unchecked Sendable {
                 }
             }
             mergedWithAffixes = expanded
+            // The DP-side path at line ~1302 set `lastHistoryKey` to the
+            // composable middle's alias; rewrite it to the full-buffer
+            // alias so commits from the affixes branch don't pollute
+            // history with the truncated key (task 05 follow-up).
+            cacheLock.lock()
+            lastHistoryKey = Romanization.aliasReading(displayBuffer)
+            cacheLock.unlock()
         }
 
         let sanitizedWithAffixes = Self.sanitizeMalformedMyanmarMarks(mergedWithAffixes)

@@ -135,5 +135,99 @@ public enum LiteralPunctRecursionReadingSuite {
                 )
             }
         },
+
+        // Affixes path: digit prefix, digit suffix, and literal-tail
+        // affixes are concatenated onto candidate surfaces but the
+        // inner parser only saw the composable middle. Every
+        // candidate `reading` must equal the full display buffer so
+        // `recordSelection` doesn't store the spliced surface under
+        // a truncated key. Covers the original task's reproduction
+        // entry `123abc456` (which takes the digit-prefix/suffix
+        // path, not the punct-split recursion paths).
+        TestCase("affixesBuffer_topReadingEqualsDisplayBuffer") { ctx in
+            let engine = emptyEngine()
+            let cases = [
+                "123abc456", "123abc", "abc456", "12abc", "abc12",
+                "min:123", "123min:", "kar:5", "5kar:", "min:la3",
+                "min:3la",
+            ]
+            for buffer in cases {
+                let state = engine.update(buffer: buffer, context: [])
+                guard let topReading = state.candidates.first?.reading else {
+                    ctx.assertTrue(false, buffer, detail: "no candidate")
+                    continue
+                }
+                ctx.assertTrue(
+                    topReading == buffer,
+                    buffer,
+                    detail: "topReading='\(topReading)' expected '\(buffer)'"
+                )
+            }
+        },
+
+        // Mid-buffer digit splice path (letter-digit-letter): the
+        // inner update strips digits and parses the cleaned letters.
+        // `spliceMidBufferDigits` re-attaches the digits to the
+        // surface; the candidate `reading` must reflect the user's
+        // full digit-bearing buffer, not just the cleaned letters.
+        TestCase("midBufferDigitSplice_topReadingEqualsDisplayBuffer") { ctx in
+            let engine = emptyEngine()
+            let cases = [
+                "t1ote", "k1ya", "min2gala", "t2ote", "h1ma",
+            ]
+            for buffer in cases {
+                let state = engine.update(buffer: buffer, context: [])
+                guard let topReading = state.candidates.first?.reading else {
+                    ctx.assertTrue(false, buffer, detail: "no candidate")
+                    continue
+                }
+                ctx.assertTrue(
+                    topReading == buffer,
+                    buffer,
+                    detail: "topReading='\(topReading)' expected '\(buffer)'"
+                )
+            }
+        },
+
+        // History pollution sibling: commit a digit-affixed buffer
+        // (`123abc`) and assert its surface does not leak into a
+        // later short-prefix lookup (`a`). Same shape as the
+        // existing punct-split test but covers the affixes path.
+        // The stored key passes through `Romanization.aliasReading`
+        // which strips `2`/`3` (internal variant markers), so the
+        // exact key for `123abc` is `1abc` — but the assertion is
+        // about *not* being the truncated `a` and about covering
+        // the letter portion, mirroring the punct-split test.
+        TestCase("historyPollution_affixesPath_keyCoversFullBuffer") { ctx in
+            let store = PrefixOnlyHistoryStore()
+            let engine = BurmeseEngine(
+                candidateStore: EmptyCandidateStore(),
+                historyStore: store,
+                languageModel: NullLanguageModel()
+            )
+            var state = engine.update(buffer: "123abc", context: [])
+            engine.recordSelection(state: state)
+            let storedReading = store.rows.first?.reading ?? ""
+            ctx.assertFalse(
+                storedReading == "a" || storedReading == "abc",
+                "stored_reading_not_truncated",
+                detail: "history was keyed on truncated active suffix: stored='\(storedReading)'"
+            )
+            ctx.assertTrue(
+                storedReading.contains("1") && storedReading.contains("abc"),
+                "stored_reading_includes_affixes",
+                detail: "stored='\(storedReading)' missing digit-prefix or letter content"
+            )
+            // Type only `a`. The recorded long surface must not
+            // surface under that short reading — it was keyed on the
+            // full buffer's alias, not on `a`.
+            state = engine.update(buffer: "a", context: [])
+            let polluted = state.candidates.contains { $0.surface == "၁၂၃အဘc" }
+            ctx.assertFalse(
+                polluted,
+                "no_pollution_for_a",
+                detail: "long surface leaked into 'a' panel"
+            )
+        },
     ])
 }
