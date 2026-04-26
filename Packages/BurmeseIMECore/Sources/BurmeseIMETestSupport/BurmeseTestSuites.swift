@@ -56,5 +56,6 @@ public enum BurmeseTestSuites {
         MidBufferDigitAsatSplitSuite.suite,
         WindowingClusterIntegritySuite.suite,
         LiteralPunctRecursionReadingSuite.suite,
+        HeavyToneAwSuite.suite,
     ]
 }

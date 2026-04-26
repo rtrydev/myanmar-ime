@@ -686,7 +686,7 @@ public enum EngineSuite {
         },
 
         TestCase("leadingVowel_awColon") { ctx in
-            ctx.assertEqual(parseTop("aw:"), "\u{200C}\u{1031}\u{102C}")
+            ctx.assertEqual(parseTop("aw:"), "\u{200C}\u{1031}\u{102C}\u{103A}\u{1038}")
         },
 
         TestCase("leadingVowel_own") { ctx in

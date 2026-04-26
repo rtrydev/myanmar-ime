@@ -514,7 +514,7 @@ public enum RankingSuite {
         cases.append(TestCase("task11_pyawColon_shortAaAfterPaYaYitEkar") { ctx in
             // ပြော — ပ + ya-yit + e-kar + short-aa (canonical "say").
             assertTopScalars(ctx, "pyaw:",
-                [0x1015, 0x103C, 0x1031, 0x102C],
+                [0x1015, 0x103C, 0x1031, 0x102C, 0x103A, 0x1038],
                 "pyawColon_shortAa")
         })
 
@@ -553,20 +553,20 @@ public enum RankingSuite {
             // preservation rule still applies — the medial keeps the
             // round bottom from colliding with ာ.
             assertTopScalars(ctx, "gyaw:",
-                [0x1002, 0x103B, 0x1031, 0x102C],
+                [0x1002, 0x103B, 0x1031, 0x102C, 0x103A, 0x1038],
                 "gyawColon_shortAa")
         })
 
         cases.append(TestCase("task11_khyawColon_shortAaAfterKhaYaPinEkar") { ctx in
             // Cluster `khy` defaults to ya-pin (task 02).
             assertTopScalars(ctx, "khyaw:",
-                [0x1001, 0x103B, 0x1031, 0x102C],
+                [0x1001, 0x103B, 0x1031, 0x102C, 0x103A, 0x1038],
                 "khyawColon_shortAa")
         })
 
         cases.append(TestCase("task11_dyawColon_shortAaAfterDaYaYitEkar") { ctx in
             assertTopScalars(ctx, "dyaw:",
-                [0x1012, 0x103C, 0x1031, 0x102C],
+                [0x1012, 0x103C, 0x1031, 0x102C, 0x103A, 0x1038],
                 "dyawColon_shortAa")
         })
 
@@ -574,7 +574,7 @@ public enum RankingSuite {
 
         cases.append(TestCase("task11_pawColon_tallAaPreservedWithoutMedial") { ctx in
             assertTopScalars(ctx, "paw:",
-                [0x1015, 0x1031, 0x102B],
+                [0x1015, 0x1031, 0x102B, 0x103A, 0x1038],
                 "pawColon_tallAa")
         })
 
@@ -591,7 +591,7 @@ public enum RankingSuite {
         // choice — `ka` itself is not a descender.)
         cases.append(TestCase("task11_kyawColon_shortAaPreservedOnNonDescender") { ctx in
             assertTopScalars(ctx, "kyaw:",
-                [0x1000, 0x103B, 0x1031, 0x102C],
+                [0x1000, 0x103B, 0x1031, 0x102C, 0x103A, 0x1038],
                 "kyawColon_shortAa")
         })
 

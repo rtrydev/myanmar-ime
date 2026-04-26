@@ -186,4 +186,8 @@ final class WindowingClusterIntegrityXCTests: XCTestCase {
 final class LiteralPunctRecursionReadingXCTests: XCTestCase {
     func testAll() { runSuite(LiteralPunctRecursionReadingSuite.suite, xctest: self) }
 }
+
+final class HeavyToneAwXCTests: XCTestCase {
+    func testAll() { runSuite(HeavyToneAwSuite.suite, xctest: self) }
+}
 #endif
