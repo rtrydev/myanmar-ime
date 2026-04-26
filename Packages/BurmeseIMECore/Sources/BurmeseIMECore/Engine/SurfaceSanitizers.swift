@@ -413,6 +413,7 @@ extension BurmeseEngine {
     private static func attachableMarkHasAnchor(scalars: [Unicode.Scalar], at i: Int) -> Bool {
         let current = scalars[i].value
         let currentIsToneMark = current >= 0x1036 && current <= 0x1038
+        let currentCategory = depVowelCategory(current)
         var j = i - 1
         while j >= 0 {
             let w = scalars[j].value
@@ -435,10 +436,39 @@ extension BurmeseEngine {
                 }
                 return false
             }
+            // Mirrors the parser's scanOutputLegality (task 01):
+            // U+1031 (e-kar) must be the first dep-vowel scalar on
+            // its base; closing tone markers (1037 creaky / 1038
+            // visarga) end the syllable; same-category dep-vowels
+            // never stack.
+            if current == 0x1031, w >= 0x102B, w <= 0x1032, w != 0x1031 {
+                return false
+            }
+            if w == 0x1037 || w == 0x1038 {
+                return false
+            }
             if current == 0x1031 && w == 0x1031 { return false }
+            let wCategory = depVowelCategory(w)
+            if currentCategory != 0,
+               wCategory == currentCategory,
+               w >= 0x102B, w <= 0x1032 {
+                return false
+            }
             if isAttachableMarkValue(w) { j -= 1; continue }
             return false
         }
         return false
+    }
+
+    @inline(__always)
+    private static func depVowelCategory(_ v: UInt32) -> Int {
+        switch v {
+        case 0x102B, 0x102C: return 1
+        case 0x102D, 0x102E: return 2
+        case 0x102F, 0x1030: return 3
+        case 0x1031:        return 4
+        case 0x1032:        return 5
+        default:            return 0
+        }
     }
 }

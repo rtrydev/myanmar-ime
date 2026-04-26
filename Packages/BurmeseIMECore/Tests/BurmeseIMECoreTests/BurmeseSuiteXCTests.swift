@@ -153,4 +153,8 @@ final class KinziTallAaXCTests: XCTestCase {
 final class ClusterMedialPreferenceXCTests: XCTestCase {
     func testAll() { runSuite(ClusterMedialPreferenceSuite.suite, xctest: self) }
 }
+
+final class OrphanLeadingVowelXCTests: XCTestCase {
+    func testAll() { runSuite(OrphanLeadingVowelSuite.suite, xctest: self) }
+}
 #endif

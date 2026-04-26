@@ -265,6 +265,27 @@ extension SyllableParser {
                     }
                     return false
                 }
+                // U+1031 (e-kar) must be the first dependent-vowel scalar
+                // on its base — Unicode TUS storage order places it
+                // immediately after the base (and any medials), before
+                // every other dependent vowel. Walking back from a `1031`
+                // and crossing any other dep-vowel scalar means the
+                // e-kar is misplaced (e.g. `iaung` → `အီောင်` puts
+                // `1031` after `102E`, making it an orphan with no base
+                // of its own). Task 01.
+                if current == 0x1031, isDependentVowel(w), w != 0x1031 {
+                    return false
+                }
+                // U+1037 (creaky tone) and U+1038 (visarga / heavy tone)
+                // close the syllable. Any attachable mark walked back
+                // across them has no anchor in the syllable that
+                // produced the tone marker — the user has typed a
+                // following onset-less syllable whose dep-vowel /
+                // medial would land on the previous base, producing
+                // shapes like `သားီ` / `သားောင်`. Task 01.
+                if w == 0x1037 || w == 0x1038 {
+                    return false
+                }
                 if current == 0x1031 && w == 0x1031 {
                     return false
                 }

@@ -883,10 +883,50 @@ extension BurmeseEngine {
         guard parse.legalityScore > 0 || hasOnlyCleanViramaStacks(parse) else { return false }
         guard !hasInterleavedLatin(parse.output) else { return false }
         guard !hasTripleViramaStack(parse.output) else { return false }
+        // The parser's per-transition `isLegal` flag is computed before
+        // the materialised surface is scanned, so a parse can pass the
+        // DP-time legality check yet still emit a structurally
+        // malformed surface (e.g. orphan e-kar after a closing tone
+        // marker — see task 01). Applying `scanOutputLegality` here
+        // means the right-shrink probe in
+        // `parseLongestAcceptablePrefix` correctly backs off to a
+        // length whose top parse renders cleanly, so the engine can
+        // then compose the dropped tail with an explicit `အ` base.
+        //
+        // Parses whose surface starts with U+200C (orphan ZWNJ) — or
+        // whose mid-surface carries an unanchored mark — are still
+        // acceptable when the engine's `promoteOrphanZwnjToImplicitA`
+        // / `promoteOrphanInternalMarks` post-processing would
+        // produce a legal sibling, since the engine adds those
+        // siblings to the candidate pool downstream.
+        guard SyllableParser.scanOutputLegality(parse.output)
+                || canBePromotedToLegal(parse)
+        else { return false }
         for reading in standaloneTallAaReadings where parse.reading.hasPrefix(reading) {
             return false
         }
         return true
+    }
+
+    /// Returns `true` when the orphan-promotion post-processing the
+    /// engine runs on the parser's output would yield a parse whose
+    /// surface passes `scanOutputLegality`. Mirrors the chain in
+    /// `update(buffer:context:)`: leading-ZWNJ promotion first, then
+    /// mid-surface orphan-mark promotion on either the original or the
+    /// ZWNJ-promoted sibling.
+    private static func canBePromotedToLegal(_ parse: SyllableParse) -> Bool {
+        if let zwnjPromoted = promoteOrphanZwnjToImplicitA(parse) {
+            if SyllableParser.scanOutputLegality(zwnjPromoted.output) { return true }
+            if let internalPromoted = promoteOrphanInternalMarks(zwnjPromoted),
+               SyllableParser.scanOutputLegality(internalPromoted.output) {
+                return true
+            }
+        }
+        if let internalPromoted = promoteOrphanInternalMarks(parse),
+           SyllableParser.scanOutputLegality(internalPromoted.output) {
+            return true
+        }
+        return false
     }
 
     /// Strip zero-width spaces (U+200B) so surfaces from the lexicon

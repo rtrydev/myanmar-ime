@@ -48,5 +48,6 @@ public enum BurmeseTestSuites {
         MidBufferDigitStackSplitSuite.suite,
         CreakyToneOnsetlessFollowupSuite.suite,
         ApostropheLiteralSuite.suite,
+        OrphanLeadingVowelSuite.suite,
     ]
 }
