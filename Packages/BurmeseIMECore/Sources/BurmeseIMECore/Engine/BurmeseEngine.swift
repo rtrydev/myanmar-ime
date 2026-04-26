@@ -339,12 +339,20 @@ public final class BurmeseEngine: @unchecked Sendable {
                 state.candidates = state.candidates.map { cand in
                     Candidate(
                         surface: split.renderedPrefix + cand.surface,
-                        reading: cand.reading,
+                        reading: displayBuffer,
                         source: cand.source,
                         score: cand.score
                     )
                 }
             }
+            // The inner update set lastHistoryKey to the active suffix's
+            // alias (e.g. `la` for `ka.la`) — overwriting it here with
+            // the full-buffer alias keeps `recordSelection` from
+            // writing a truncated key that pollutes future short-prefix
+            // lookups. See task 05.
+            cacheLock.lock()
+            lastHistoryKey = Romanization.aliasReading(displayBuffer)
+            cacheLock.unlock()
             return state
         }
         // Mid-buffer literal punctuation (task 03): when ANY non-composable
@@ -374,12 +382,19 @@ public final class BurmeseEngine: @unchecked Sendable {
                 state.candidates = state.candidates.map { cand in
                     Candidate(
                         surface: split.renderedPrefix + cand.surface,
-                        reading: cand.reading,
+                        reading: displayBuffer,
                         source: cand.source,
                         score: cand.score
                     )
                 }
             }
+            // See the matching block above — the inner update keyed
+            // lastHistoryKey on the active suffix; we restore the
+            // full-buffer alias here so commits don't pollute the
+            // history table with truncated keys (task 05).
+            cacheLock.lock()
+            lastHistoryKey = Romanization.aliasReading(displayBuffer)
+            cacheLock.unlock()
             return state
         }
         // Peel a leading literal head (punctuation, brackets, quotes, …)

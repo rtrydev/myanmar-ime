@@ -173,4 +173,8 @@ final class StandaloneCodaVowelXCTests: XCTestCase {
 final class MidBufferDigitMedialSplitXCTests: XCTestCase {
     func testAll() { runSuite(MidBufferDigitMedialSplitSuite.suite, xctest: self) }
 }
+
+final class LiteralPunctRecursionReadingXCTests: XCTestCase {
+    func testAll() { runSuite(LiteralPunctRecursionReadingSuite.suite, xctest: self) }
+}
 #endif
