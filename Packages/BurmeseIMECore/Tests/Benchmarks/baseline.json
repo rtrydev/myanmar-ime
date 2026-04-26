@@ -3,61 +3,60 @@
       {
     "scenario": "short",
     "iterations": 1000,
-    "p50_us": 84.04,
-    "p95_us": 96.25,
-    "p99_us": 108.75,
-    "max_us": 145.17,
+    "p50_us": 99.75,
+    "p95_us": 117.83,
+    "p99_us": 159.96,
+    "max_us": 210.54,
     "allocations": 0
   },
           {
     "scenario": "medium",
     "iterations": 1000,
-    "p50_us": 456.75,
-    "p95_us": 492.92,
-    "p99_us": 525.75,
-    "max_us": 640.29,
+    "p50_us": 329.33,
+    "p95_us": 418.17,
+    "p99_us": 680.38,
+    "max_us": 1755.29,
     "allocations": 0
   },
           {
     "scenario": "long",
     "iterations": 500,
-    "p50_us": 1877.38,
-    "p95_us": 1924.29,
-    "p99_us": 1959.83,
-    "max_us": 2106.50,
+    "p50_us": 1381.79,
+    "p95_us": 1705.92,
+    "p99_us": 2689.33,
+    "max_us": 3664.00,
     "allocations": 0
   },
           {
     "scenario": "incremental",
     "iterations": 481,
-    "p50_us": 396.46,
-    "p95_us": 1328.79,
-    "p99_us": 1383.50,
-    "max_us": 1447.29,
+    "p50_us": 767.04,
+    "p95_us": 2044.42,
+    "p99_us": 3027.75,
+    "max_us": 3420.08,
     "allocations": 0
   },
           {
     "scenario": "garbage",
     "iterations": 200,
-    "p50_us": 354.88,
-    "p95_us": 375.67,
-    "p99_us": 385.21,
-    "max_us": 418.96,
+    "p50_us": 271.33,
+    "p95_us": 328.12,
+    "p99_us": 360.83,
+    "max_us": 386.67,
     "allocations": 0
   },
           {
     "scenario": "garbage_incremental",
     "iterations": 496,
-    "p50_us": 200.12,
-    "p95_us": 349.25,
-    "p99_us": 363.38,
-    "max_us": 381.50,
+    "p50_us": 190.21,
+    "p95_us": 269.96,
+    "p99_us": 325.46,
+    "max_us": 352.71,
     "allocations": 0
   }
   ],
   "meta": {
-    "commit": "fefd248",
-    "date": "2026-04-22T14:41:13Z",
-    "note": "Task 14 landed: onset trie now stores only canonical-order medial entries (629 terminals / 406 nodes, down from 1654 / 1071). The ~1025 init-time permuted entries are gone; the DP canonicalizes the medial run at lookup time instead. Net improvement across all scenarios (e.g. long p95 2187us -> 1924us, short p95 112us -> 96us) because narrower per-node terminal ranges mean fewer DP transitions to score at each onset match. Behavioral parity verified byte-identical against a 6272-case probe that enumerates every base x medial-order x vowel combo supported pre-refactor."
+    "commit": "193a6d8",
+    "date": "2026-04-26T19:58:58Z"
   }
 }
