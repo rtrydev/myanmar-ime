@@ -1468,11 +1468,43 @@ public final class BurmeseEngine: @unchecked Sendable {
                     // LM-best surface lead. The anchor remains in history
                     // so a future keystroke whose LM evidence does match
                     // it can still resurrect it.
-                    let candidateLM = scoreSurfaceCached(
-                        merged[idx].surface, context: context, cache: &lmCache
-                    )
-                    if topLM - candidateLM > Self.lmDominanceThreshold {
-                        continue
+                    //
+                    // Exception (task 02 long-sentence regression): when
+                    // the anchor was committed AT a word boundary (its
+                    // recorded buffer ends in punctuation `.` / `:` /
+                    // `+`) AND the candidate differs from the current
+                    // top only in ya-pin / ya-yit medial choice, bypass
+                    // the LM-margin guard. A boundary-aligned anchor
+                    // carries a complete-word lexicon commitment
+                    // (`phyar:` → `ဖျား`); re-scoring the trigram LM at
+                    // longer buffer fragments can flip the medial against
+                    // that lexicon evidence (`narn` after `kaphyar:nar`
+                    // sits outside `ဖျား`'s bigram cache and the LM
+                    // floor flips). A mid-word anchor (typed `b` in
+                    // `kywantawkalaungb` before the user reveals which
+                    // word) is unstable by construction — no lexicon
+                    // evidence locked in the medial yet — so the LM
+                    // guard remains in effect.
+                    let candidateStrippedHere = Self.stripZWSP(merged[idx].surface)
+                    let topStrippedHere = Self.stripZWSP(merged[0].surface)
+                    let isMedialOnlySwap = candidateStrippedHere.count == topStrippedHere.count
+                        && Self.normalizeYaPinYaYit(topStrippedHere)
+                            == Self.normalizeYaPinYaYit(candidateStrippedHere)
+                    let anchorAtWordBoundary: Bool = {
+                        guard let lastChar = anchor.normalized.last else { return false }
+                        // Composing-punctuation suffixes that the engine
+                        // treats as syllable / word terminators in the
+                        // user's typed buffer: visarga `:`, creaky-tone
+                        // `.`, and explicit cluster marker `+`.
+                        return lastChar == ":" || lastChar == "." || lastChar == "+"
+                    }()
+                    if !(isMedialOnlySwap && anchorAtWordBoundary) {
+                        let candidateLM = scoreSurfaceCached(
+                            merged[idx].surface, context: context, cache: &lmCache
+                        )
+                        if topLM - candidateLM > Self.lmDominanceThreshold {
+                            continue
+                        }
                     }
                     let keeper = merged.remove(at: idx)
                     merged.insert(keeper, at: 0)
