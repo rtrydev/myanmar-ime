@@ -64,5 +64,6 @@ public enum BurmeseTestSuites {
         CrossClassNTStackRankingSuite.suite,
         WindowingKinziAcrossThresholdSuite.suite,
         IncrementalParitySuite.suite,
+        VisargaInherentASuite.suite,
     ]
 }

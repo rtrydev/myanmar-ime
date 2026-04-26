@@ -55,6 +55,22 @@ extension BurmeseEngine {
         }
     }()
 
+    /// Subset of `vowelSuffixesWithTrailingColon` whose Myanmar output does NOT
+    /// end in U+103A (asat). Visarga `1038` itself does not provide a
+    /// structural break in the next-syllable parse, so the colon-vowel
+    /// modifier is "open" by the same definition as the dot-vowel modifier:
+    /// when followed by an onset-less syllable, the suffix would fuse onto
+    /// the preceding vowel cluster unless the engine forces a split at the
+    /// colon (TASK-009). "Closed" colon forms (e.g. `aw:` → `ော်း` ending
+    /// in `103A`) provide a structural break and do not need the split.
+    internal static let openColonVowelSuffixes: Set<String> = {
+        Set(Romanization.vowels.compactMap { entry -> String? in
+            guard entry.roman.hasSuffix(":") else { return nil }
+            guard entry.myanmar.unicodeScalars.last?.value != 0x103A else { return nil }
+            return entry.roman
+        })
+    }()
+
     internal static func dotActsAsVowelModifier(prefixEndingAtDot prefix: Substring) -> Bool {
         vowelSuffixesWithTrailingDot.contains(where: { prefix.hasSuffix($0) })
     }
@@ -131,6 +147,22 @@ extension BurmeseEngine {
         }
         if c == ":",
            Self.colonActsAsVowelModifier(prefixEndingAtColon: buffer[...idx]) {
+            // Mirror the open-dot vowel-modifier branch above: when an OPEN
+            // colon vowel-modifier (whose Myanmar output ends in `1038`
+            // visarga, not in asat) is immediately followed by a vowel-
+            // starting letter, the suffix begins an onset-less syllable.
+            // Without a split, the inherent-`a` arc gets silently absorbed
+            // and the user's `အ` syllable boundary is lost (TASK-009).
+            // Closed colon forms (e.g. `aw:` → `ော်း`) already end in asat
+            // and provide a structural break; they must not trigger the
+            // split.
+            let after = buffer.index(after: idx)
+            if after < buffer.endIndex,
+               Self.isVowelStartChar(buffer[after]),
+               Self.openColonVowelSuffixes.contains(where: { buffer[...idx].hasSuffix($0) }),
+               Self.hasOnlyComposableLettersBefore(buffer, dotAt: idx) {
+                return true
+            }
             return false
         }
         if c == "." || c == ":" {
@@ -208,7 +240,17 @@ extension BurmeseEngine {
             }
             if c == ":",
                Self.colonActsAsVowelModifier(prefixEndingAtColon: buffer[...idx]) {
-                continue
+                let after = buffer.index(after: idx)
+                if after < buffer.endIndex,
+                   Self.isVowelStartChar(buffer[after]),
+                   Self.openColonVowelSuffixes.contains(where: { buffer[...idx].hasSuffix($0) }),
+                   Self.hasOnlyComposableLettersBefore(buffer, dotAt: idx) {
+                    // Open colon vowel-modifier followed by an onset-less syllable,
+                    // with a pure composable prefix: fall through to split logic
+                    // (mirror of the open-dot branch above; TASK-009).
+                } else {
+                    continue
+                }
             }
             let after = buffer.index(after: idx)
             guard after != buffer.endIndex else { continue }
@@ -401,6 +443,12 @@ extension BurmeseEngine {
            let promoted = Self.promoteOrphanZwnjToImplicitA(parse) {
             output = promoted.output
         }
+        // Mirror `expandAaVariants` — the parser emits short ာ; the
+        // descender consonants (kh, g, ng, d, p, w) take tall ါ. Without
+        // this the frozen-prefix render of `khaung:` would carry short
+        // 102C and the concatenated split surface (e.g. `khaung:athit`)
+        // would never reach the engine-level `correctAaShape` pass.
+        output = Self.correctAaShape(output)
         return digitPart + output + dropped + literal
     }
 

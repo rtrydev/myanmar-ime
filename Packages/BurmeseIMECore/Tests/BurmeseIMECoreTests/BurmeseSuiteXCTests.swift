@@ -218,4 +218,8 @@ final class WindowingKinziAcrossThresholdXCTests: XCTestCase {
 final class IncrementalParityXCTests: XCTestCase {
     func testAll() { runSuite(IncrementalParitySuite.suite, xctest: self) }
 }
+
+final class VisargaInherentAXCTests: XCTestCase {
+    func testAll() { runSuite(VisargaInherentASuite.suite, xctest: self) }
+}
 #endif
