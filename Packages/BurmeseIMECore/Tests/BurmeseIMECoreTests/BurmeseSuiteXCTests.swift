@@ -186,6 +186,10 @@ final class MidBufferDigitVowelSplitXCTests: XCTestCase {
     func testAll() { runSuite(MidBufferDigitVowelSplitSuite.suite, xctest: self) }
 }
 
+final class TrailingDigitPunctXCTests: XCTestCase {
+    func testAll() { runSuite(TrailingDigitPunctSuite.suite, xctest: self) }
+}
+
 final class WindowingClusterIntegrityXCTests: XCTestCase {
     func testAll() { runSuite(WindowingClusterIntegritySuite.suite, xctest: self) }
 }

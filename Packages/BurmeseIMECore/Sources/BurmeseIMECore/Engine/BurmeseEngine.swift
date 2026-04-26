@@ -187,7 +187,7 @@ public final class BurmeseEngine: @unchecked Sendable {
     /// instance is supplied.
     public static let candidatePageSizeDefault = 9
 
-    private let settings: IMESettings?
+    internal let settings: IMESettings?
     internal let tuning: RankingTuning
     /// Digit boundaries passed inward from `extractMidBufferDigits` so
     /// that `inferImplicitStackMarkers` can avoid inserting `+` across a
@@ -461,58 +461,12 @@ public final class BurmeseEngine: @unchecked Sendable {
         guard !initialNormalized.isEmpty else {
             // No composable text: if digits or literal text are present,
             // offer Burmese and Arabic digit candidates directly.
-            let rawFullLiteral = leadingLiteral + digitPrefix + literalTail
-            let mappedTail = burmesePunctuationEnabled
-                ? Self.mapPunctuation(literalTail)
-                : literalTail
-            let fullLiteral = leadingLiteral + digitPrefix + mappedTail
-            if Self.containsDigit(fullLiteral) {
-                let burmese = leadingLiteral
-                    + Self.arabicToBurmeseDigits(digitPrefix + mappedTail)
-                var candidates = [Candidate(
-                    surface: burmese,
-                    reading: rawFullLiteral,
-                    source: .grammar,
-                    score: 0
-                )]
-                // Measure-word expansions apply only when the buffer is pure
-                // ASCII digits (no tail content at all). Cap to 2 suffixes per
-                // buffer so the plain-digit candidate stays the default pick.
-                if settings?.numberMeasureWordsEnabled == true,
-                   literalTail.isEmpty,
-                   leadingLiteral.isEmpty,
-                   !digitPrefix.isEmpty {
-                    for entry in NumberMeasureWords.shared.candidates(
-                        forDigits: digitPrefix, limit: 2
-                    ) {
-                        candidates.append(Candidate(
-                            surface: "\(burmese) \(entry.measureWord)",
-                            reading: rawFullLiteral,
-                            source: .grammar,
-                            score: 0
-                        ))
-                    }
-                }
-                if burmese != rawFullLiteral {
-                    candidates.append(Candidate(
-                        surface: rawFullLiteral,
-                        reading: rawFullLiteral,
-                        source: .grammar,
-                        score: 0
-                    ))
-                }
-                return CompositionState(
-                    rawBuffer: displayBuffer,
-                    selectedCandidateIndex: 0,
-                    candidates: candidates,
-                    committedContext: context
-                )
-            }
-            return CompositionState(
-                rawBuffer: displayBuffer,
-                selectedCandidateIndex: 0,
-                candidates: [],
-                committedContext: context
+            return digitOrLiteralFallback(
+                leadingLiteral: leadingLiteral,
+                digitPrefix: digitPrefix,
+                literalTail: literalTail,
+                displayBuffer: displayBuffer,
+                context: context
             )
         }
 
@@ -540,11 +494,20 @@ public final class BurmeseEngine: @unchecked Sendable {
         let droppedTail = String(initialChars.suffix(initialChars.count - acceptableLen))
 
         guard !normalized.isEmpty else {
-            return CompositionState(
-                rawBuffer: displayBuffer,
-                selectedCandidateIndex: 0,
-                candidates: [],
-                committedContext: context
+            // Right-shrink probe consumed the entire composable run as
+            // unparseable (e.g. lone `.` / `:` after a digit prefix).
+            // Route through the same digit/literal fallback the
+            // empty-`initialNormalized` branch uses so a `<digits><.|:>`
+            // buffer still emits Myanmar-digit + ASCII-digit candidates
+            // instead of an empty panel (TASK-003). The dropped tail
+            // joins the literal tail since neither portion contributed
+            // to a valid Myanmar parse.
+            return digitOrLiteralFallback(
+                leadingLiteral: leadingLiteral,
+                digitPrefix: digitPrefix,
+                literalTail: droppedTail + literalTail,
+                displayBuffer: displayBuffer,
+                context: context
             )
         }
 

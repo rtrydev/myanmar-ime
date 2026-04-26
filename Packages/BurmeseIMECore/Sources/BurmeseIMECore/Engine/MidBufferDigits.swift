@@ -445,6 +445,80 @@ extension BurmeseEngine {
         })
     }
 
+    /// Shared fallback emitter for buffers whose composable portion
+    /// produces no Myanmar parse but that still carry digits or literal
+    /// content. Used by both the empty-`initialNormalized` early-return
+    /// and the right-shrink-to-empty branch (TASK-003) so a buffer like
+    /// `1.` or `12:` always yields Myanmar-digit + ASCII-digit
+    /// candidates instead of an empty panel.
+    ///
+    /// Mapped punctuation (when `burmesePunctuationEnabled` is on) is
+    /// applied to the Myanmar-digit primary's tail; the ASCII-digit
+    /// secondary keeps the raw tail to match the existing convention.
+    /// Measure-word expansions still apply only when the buffer is
+    /// pure ASCII digits (no leading literal, no tail).
+    internal func digitOrLiteralFallback(
+        leadingLiteral: String,
+        digitPrefix: String,
+        literalTail: String,
+        displayBuffer: String,
+        context: [String]
+    ) -> CompositionState {
+        let rawFullLiteral = leadingLiteral + digitPrefix + literalTail
+        let mappedTail = burmesePunctuationEnabled
+            ? Self.mapPunctuation(literalTail)
+            : literalTail
+        let fullLiteral = leadingLiteral + digitPrefix + mappedTail
+        guard Self.containsDigit(fullLiteral) else {
+            return CompositionState(
+                rawBuffer: displayBuffer,
+                selectedCandidateIndex: 0,
+                candidates: [],
+                committedContext: context
+            )
+        }
+        let burmese = leadingLiteral
+            + Self.arabicToBurmeseDigits(digitPrefix + mappedTail)
+        var candidates = [Candidate(
+            surface: burmese,
+            reading: rawFullLiteral,
+            source: .grammar,
+            score: 0
+        )]
+        // Measure-word expansions apply only when the buffer is pure
+        // ASCII digits (no tail content at all). Cap to 2 suffixes per
+        // buffer so the plain-digit candidate stays the default pick.
+        if settings?.numberMeasureWordsEnabled == true,
+           literalTail.isEmpty,
+           leadingLiteral.isEmpty,
+           !digitPrefix.isEmpty {
+            for entry in NumberMeasureWords.shared.candidates(
+                forDigits: digitPrefix, limit: 2
+            ) {
+                candidates.append(Candidate(
+                    surface: "\(burmese) \(entry.measureWord)",
+                    reading: rawFullLiteral,
+                    source: .grammar,
+                    score: 0
+                ))
+            }
+        }
+        if burmese != rawFullLiteral {
+            candidates.append(Candidate(
+                surface: rawFullLiteral,
+                reading: rawFullLiteral,
+                source: .grammar,
+                score: 0
+            ))
+        }
+        return CompositionState(
+            rawBuffer: displayBuffer,
+            selectedCandidateIndex: 0,
+            candidates: candidates,
+            committedContext: context
+        )
+    }
+
     /// Split a leading run of ASCII digits from the rest of the buffer.
     internal static func splitLeadingDigits(_ buffer: String) -> (digits: String, remainder: String) {
         if let firstNonDigit = buffer.firstIndex(where: {
