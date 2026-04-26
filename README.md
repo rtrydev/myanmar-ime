@@ -410,6 +410,21 @@ plain SPM toolchain where `swift test` may fail with *no such module
 'XCTest'*. If you have the full Xcode toolchain, `swift test` runs the
 XCTest targets too.
 
+Cases run in parallel (`DispatchQueue.concurrentPerform`) and output
+streams as they complete: `.` for each passing case (no name printed)
+and `F` for each failure. After the stream finishes, failing cases are
+listed by qualified name (`Suite.case`) with each failed assertion's
+label, detail, and source location, followed by a summary block. A
+clean run looks like:
+
+```
+.................................................
+=== Summary ===
+  Cases: 312/312 passed
+  Assertions: 4187/4187 passed
+ALL 4187 TESTS PASSED
+```
+
 ### Lexicon and LM data rebuild
 
 The TSV word list, compiled SQLite lexicon, and trigram LM binary are
@@ -533,7 +548,11 @@ Then remove the input source in System Settings → Keyboard → Text Input.
 Every case is defined once in `Sources/BurmeseIMETestSupport/Suites/` and
 exposed via `BurmeseTestSuites.all`. Two runners iterate that shared list:
 
-- `swift run TestRunner` — CLI driver (works without XCTest)
+- `swift run TestRunner` — CLI driver (works without XCTest). Runs every
+  case in parallel via `DispatchQueue.concurrentPerform` and streams a
+  `.` per pass / `F` per failure as cases complete; only failing cases
+  are named in the post-run report (qualified `Suite.case` plus each
+  assertion's label and source location).
 - `swift test` / Xcode Test navigator — `BurmeseSuiteXCTests.swift`
   drives every suite through a single thin XCTest wrapper
 

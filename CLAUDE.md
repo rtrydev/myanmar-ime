@@ -48,11 +48,23 @@ swift run TestRunner    # ← use this, not `swift test`
 `TestRunner` is a hand-rolled CLI that exercises the same cases and prints
 `ALL N TESTS PASSED`; prefer it for quick iteration.
 
+Cases run in parallel via `DispatchQueue.concurrentPerform`. Output streams
+one character per case as it completes — `.` for a pass (no name printed)
+and `F` for a failure — so a healthy run looks like a wall of dots. After
+the stream finishes, any failing cases are listed by qualified name
+(`Suite.case`) with each failed assertion's label, detail, and source
+location, followed by a `=== Summary ===` block. Only failures get named —
+keep the signal-to-noise high by not adding chatty logging to passing
+cases.
+
 Every test case lives under `Sources/BurmeseIMETestSupport/Suites/` and
 is exposed via the `BurmeseTestSuites.all` index. Both `TestRunner` and
 the XCTest drivers iterate that same list — when adding a case, edit the
-matching suite file and both runners pick it up. `FUZZ_BUDGET_MS` caps
-the fuzz suite's wall-clock time (default 1000 ms).
+matching suite file and both runners pick it up. Cases must be safe to
+run concurrently: use fresh `BurmeseEngine` instances and UUID-distinct
+`IMESettings(suiteName:)` / tmp directories instead of shared mutable
+state. `FUZZ_BUDGET_MS` caps the fuzz suite's wall-clock time (default
+1000 ms).
 
 ### Behavioral probes
 
