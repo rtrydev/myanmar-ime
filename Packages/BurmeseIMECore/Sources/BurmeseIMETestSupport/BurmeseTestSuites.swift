@@ -49,5 +49,6 @@ public enum BurmeseTestSuites {
         CreakyToneOnsetlessFollowupSuite.suite,
         ApostropheLiteralSuite.suite,
         OrphanLeadingVowelSuite.suite,
+        BareAingDiphthongSuite.suite,
     ]
 }

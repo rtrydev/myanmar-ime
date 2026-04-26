@@ -338,6 +338,17 @@ public enum Romanization {
 
         // -ite, -ai family
         .init("ite", "\u{102D}\u{102F}\u{1000}\u{103A}"),    // ိုက်
+        // `aing` family: natural English-style romanization of the
+        // diphthong (`ိုင်` / `ိုင်း` / `ိုင့်`). Stored as longer
+        // aliases of `ai*` so the parser consumes the entire `aing`
+        // substring as one vowel rule — the trailing `ng` is the
+        // diphthong's existing nga-asat coda, not a separate
+        // consonant. Without these, typing `aing<X>` strands the
+        // `ng` as a bare nga onset and produces a doubled-nga
+        // surface (task 02).
+        .init("aing:", "\u{102D}\u{102F}\u{1004}\u{103A}\u{1038}"), // ိုင်း
+        .init("aing.", "\u{102D}\u{102F}\u{1004}\u{1037}\u{103A}"), // ိုင့်
+        .init("aing",  "\u{102D}\u{102F}\u{1004}\u{103A}"),         // ိုင်
         .init("ai:", "\u{102D}\u{102F}\u{1004}\u{103A}\u{1038}"),  // ိုင်း
         .init("ai.", "\u{102D}\u{102F}\u{1004}\u{1037}\u{103A}"),  // ိုင့်
         .init("ai", "\u{102D}\u{102F}\u{1004}\u{103A}"),           // ိုင်

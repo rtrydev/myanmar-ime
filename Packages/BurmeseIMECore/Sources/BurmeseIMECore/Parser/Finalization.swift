@@ -393,6 +393,29 @@ extension SyllableParser {
                scalars[i + 2].value == 0x101F {
                 penalty += 5
             }
+            // Doubled-nga artifact (task 02): `1004 103A 1004` (င် င)
+            // appears when the parser splits a user's `aing<X>` into
+            // `ai`-rule (which already supplies the nga-asat coda)
+            // plus a stranded bare nga consonant from the trailing
+            // `ng`. Real Burmese never spells two nga in succession
+            // like this — the second nga is always either part of a
+            // kinzi stack (1039 1004) or absent. Demote so the
+            // diphthong-anchored sibling wins the rank-0 spot. Only
+            // applies when the trailing nga is followed by a vowel
+            // sign or end-of-string (so genuine 2-syllable shapes
+            // like `<...>င် င<rest of word>` aren't penalised).
+            if i + 2 < scalars.count,
+               v == 0x1004,
+               scalars[i + 1].value == 0x103A,
+               scalars[i + 2].value == 0x1004 {
+                let after = i + 3
+                let nextValue: UInt32 = after < scalars.count ? scalars[after].value : 0
+                let nextIsAttachableMark =
+                    (nextValue >= 0x102B && nextValue <= 0x103E)
+                if after >= scalars.count || nextIsAttachableMark {
+                    penalty += 5
+                }
+            }
         }
         return penalty
     }

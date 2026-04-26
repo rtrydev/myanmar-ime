@@ -315,6 +315,10 @@ extension BurmeseEngine {
                 // Has a consonant lower but it cannot stack with nga —
                 // block the regular loop here so open form wins naturally.
                 blockedLowerIndices.insert(ngStart)
+                // Same `aing` vowel-rule guard as below (task 02): also
+                // block stackStart so a liberal cross-class inference at
+                // that position doesn't fire via the new vowel rule.
+                blockedLowerIndices.insert(stackStart)
                 continue
             }
             // Determine collapse vs. block. An aspirated lower (next char
@@ -330,6 +334,13 @@ extension BurmeseEngine {
                     || Array(chars[afterSingle...]) == ["a"]
                 if restIsBareA {
                     blockedLowerIndices.insert(ngStart)
+                    // Task 02: the new `aing` vowel rule lets
+                    // `vowelRuleUpperConsonants` recognise `<...>aing|<C>`
+                    // as an inference site at lowerIndex = stackStart, so
+                    // we must also block that position. Without this, an
+                    // earlier blocked ngStart still produces a kinzi
+                    // through the regular loop's vowel-rule path.
+                    blockedLowerIndices.insert(stackStart)
                     continue
                 }
             }

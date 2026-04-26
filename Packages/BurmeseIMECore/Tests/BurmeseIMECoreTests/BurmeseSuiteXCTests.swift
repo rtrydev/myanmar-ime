@@ -157,4 +157,8 @@ final class ClusterMedialPreferenceXCTests: XCTestCase {
 final class OrphanLeadingVowelXCTests: XCTestCase {
     func testAll() { runSuite(OrphanLeadingVowelSuite.suite, xctest: self) }
 }
+
+final class BareAingDiphthongXCTests: XCTestCase {
+    func testAll() { runSuite(BareAingDiphthongSuite.suite, xctest: self) }
+}
 #endif

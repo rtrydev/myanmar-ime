@@ -45,7 +45,11 @@ public enum PropertySuite {
     /// future task 04 / anchor-reconciliation fix can restore
     /// convergence and promote these back to the whitelist.
     private static let slidingWindowKnownDivergent: [String] = [
-        "kyawnainglay2",
+        // `kyawnainglay2` previously diverged because the incremental
+        // engine committed to a non-kinzi rendering of the prefix
+        // before `g` arrived; the new `aing` vowel rule (task 02
+        // dir/) collapses `nainglay` into a single diphthong, so the
+        // single-shot and incremental tops now agree.
         "pyaepyaemingalarpar",
         "shinbyarmingalarpar",
         // task 02: full-pass parser N-best drops the ya-pin sibling
