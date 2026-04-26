@@ -191,3 +191,7 @@ final class HeavyToneAwXCTests: XCTestCase {
     func testAll() { runSuite(HeavyToneAwSuite.suite, xctest: self) }
 }
 #endif
+
+final class WindowingKinziPromotionXCTests: XCTestCase {
+    func testAll() { runSuite(WindowingKinziPromotionSuite.suite, xctest: self) }
+}

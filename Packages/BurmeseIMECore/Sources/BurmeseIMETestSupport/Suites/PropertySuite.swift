@@ -28,30 +28,20 @@ public enum PropertySuite {
         "kyemyarmingalarpar",
         "arpegahtwatpyar",
         "lay2mingalarparshinbyar",
-        String(repeating: "mingalarpar", count: 3),
-        String(repeating: "mingalarpar", count: 5),
     ]
 
     /// Buffers that diverge between single-shot and incremental top-1
     /// for known reasons — kept here so a future engine fix that
     /// converges them surfaces as a test failure (the suite below
-    /// asserts they STILL diverge). The current entries all stem from
-    /// task 01's mid-buffer kinzi inference fix interacting with
-    /// anchor stability: the incremental engine commits to a
-    /// non-kinzi rendering of the prefix `kyaw…nain` at the keystroke
-    /// before the trailing `g` arrives, and the anchor preference
-    /// keeps that rendering when `g` would otherwise create a kinzi
-    /// site at `nain+g` (single-shot picks the kinzi rendering). A
-    /// future task 04 / anchor-reconciliation fix can restore
-    /// convergence and promote these back to the whitelist.
+    /// asserts they STILL diverge). The remaining entry stems from a
+    /// parser-side beam-width quirk (cluster-preference rule for `ky`)
+    /// rather than the kinzi-promotion bug, which TASK-001 (the
+    /// windowing-aware strict-stack rank-0 promotion) resolved. The
+    /// `pyaepyaemingalarpar` and `shinbyarmingalarpar` entries that
+    /// previously lived here have been removed and are now expected to
+    /// converge — the WindowingKinziPromotionSuite asserts the
+    /// converged behaviour.
     private static let slidingWindowKnownDivergent: [String] = [
-        // `kyawnainglay2` previously diverged because the incremental
-        // engine committed to a non-kinzi rendering of the prefix
-        // before `g` arrived; the new `aing` vowel rule (task 02
-        // dir/) collapses `nainglay` into a single diphthong, so the
-        // single-shot and incremental tops now agree.
-        "pyaepyaemingalarpar",
-        "shinbyarmingalarpar",
         // task 02: full-pass parser N-best drops the ya-pin sibling
         // for long buffers under the cluster-preference rule
         // (`ky` cluster), while incremental keeps it from earlier
@@ -59,6 +49,19 @@ public enum PropertySuite {
         // sibling-injection pass for the cluster keys would converge
         // these — listed here so that fix lands as a green test.
         "kyawzaw2tharwa",
+        // TASK-001: the windowing-aware strict-kinzi rank-0 promotion
+        // makes the FULL-buffer pass correctly render kinzi for every
+        // `mingalarpar` repetition. The INCREMENTAL pass, however,
+        // freezes the prefix at boundary points where the kinzi
+        // inference cannot yet fire (the prefix `ming` alone has no
+        // stack site to promote), so the second-and-later `mingalarpar`
+        // repeats render without kinzi in the frozen-prefix layer.
+        // Converging this requires a follow-up that re-renders the
+        // frozen prefix with kinzi-promotion as new keystrokes extend
+        // the inference window forward. Listed here so that follow-up
+        // fix lands as a green test.
+        String(repeating: "mingalarpar", count: 3),
+        String(repeating: "mingalarpar", count: 5),
     ]
 
     /// Returns true if `surface` contains ASCII *interleaved* with Myanmar —

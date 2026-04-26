@@ -1405,6 +1405,38 @@ public final class BurmeseEngine: @unchecked Sendable {
             merged.insert(keeper, at: 0)
         }
 
+        // Windowed-buffer counterpart of the promotion above (TASK-001).
+        // `strictInferredStackOutputs` carries the tail-only surface
+        // produced by the inferred parse (e.g. `မင်္ဂလာပါ`); the
+        // windowed candidates in `merged` are full surfaces of the form
+        // `<frozen prefix><tail>`. Build the windowed-aware set of full
+        // surfaces by concatenating each frozen branch's output with
+        // every tail-only strict-stack surface, then promote the best
+        // matching merged candidate to rank 0. Frozen-prefix-resident
+        // inference sites are excluded by construction: the strict set
+        // only ever contains tail-derived outputs.
+        if !effectiveParseInput.contains("+"),
+           effectiveWindowed,
+           !effectivePrefixBranches.isEmpty,
+           !strictInferredStackOutputs.isEmpty {
+            var windowedStrictOutputs: Set<String> = []
+            windowedStrictOutputs.reserveCapacity(
+                effectivePrefixBranches.count * strictInferredStackOutputs.count
+            )
+            for branch in effectivePrefixBranches {
+                for tailSurface in strictInferredStackOutputs {
+                    windowedStrictOutputs.insert(branch.output + tailSurface)
+                }
+            }
+            if let idx = Self.bestStrictInferredStackIndex(
+                in: merged,
+                strictInferredStackOutputs: windowedStrictOutputs
+            ) {
+                let keeper = merged.remove(at: idx)
+                merged.insert(keeper, at: 0)
+            }
+        }
+
         // Pali loanword fallback: cross-class virama stacks like
         // ပဒ္မ / ဗန္ဒန / ဂန္ဒ are not produced by Grammar.isValidStack
         // (which is restricted to native same-class pairs) and are not
