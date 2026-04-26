@@ -113,6 +113,17 @@ public final class SyllableParser: Sendable {
     /// stack contexts with an integer compare rather than a string compare.
     internal let viramaVowelId: Int32
 
+    /// Per-vowel: true when the entry is a `standalone: true` rule
+    /// whose Myanmar output begins with an independent-vowel scalar
+    /// (U+1023..U+102A) or a free-standing-particle scalar (U+104D
+    /// `ywe`, U+104F `ei`). These rules represent characters that
+    /// never appear inside a multi-syllable Burmese word; mid-buffer
+    /// matches between two consonants produce orthographically
+    /// nonsense surfaces (TASK-007). The DP charges a structural
+    /// penalty when such an entry fires at a non-seed position so
+    /// competing onset+vowel parses outrank it.
+    internal let vowelIsMidBufferPenalised: [Bool]
+
     /// `VowelMatchEntry.id` of the empty-emission `+` fallback — a "soft
     /// syllable boundary" emitted in two disjoint cases:
     ///
@@ -329,6 +340,7 @@ public final class SyllableParser: Sendable {
         var foundSoftBoundaryId: Int32 = -1
         var vowelEndsAsat = [Bool](repeating: false, count: builtVowelTrie.terminals.count)
         var vowelPreAsat = [UInt32](repeating: 0, count: builtVowelTrie.terminals.count)
+        var vowelMidBufPen = [Bool](repeating: false, count: builtVowelTrie.terminals.count)
         for (idx, entry) in builtVowelTrie.terminals.enumerated() {
             vowelOnlyLegalities[idx] = Grammar.validateSyllable(
                 onset: nil,
@@ -349,12 +361,39 @@ public final class SyllableParser: Sendable {
                     vowelPreAsat[idx] = scalars[scalars.count - 2].value
                 }
             }
+            // TASK-007: tag standalone vowel rules whose Myanmar output
+            // begins with an independent-vowel scalar (U+1023..U+102A)
+            // or a free-standing particle (U+104D, U+104F) AND whose
+            // canonical roman contains no numeric disambiguator. These
+            // characters are valid only at syllable boundaries / word
+            // starts; mid-buffer matches produce orthographically
+            // nonsense surfaces.
+            //
+            // Digit-bearing standalone keys (`u2`, `u2.`, `u2:`, `ay2`)
+            // are USER-EXPLICIT — typing the `2` is the canonical
+            // disambiguator that says "I want the independent-vowel
+            // variant". Penalising those would suppress legitimate
+            // surfaces like `သီဥ` (thi + u2.) where the user spelled
+            // out the standalone explicitly. Non-digit standalone keys
+            // (`oo`, `ii`, `ei`, `ywe`) carry no such signal and are
+            // the actual TASK-007 bug shape.
+            if entry.isStandalone,
+               let first = scalars.first,
+               !entry.canonicalRoman.contains(where: Romanization.isNumericAliasMarker) {
+                let v = first.value
+                let isIndependentVowel = v >= 0x1023 && v <= 0x102A
+                let isFreeParticle = v == 0x104D || v == 0x104F
+                if isIndependentVowel || isFreeParticle {
+                    vowelMidBufPen[Int(entry.id)] = true
+                }
+            }
         }
         self.vowelOnlyLegality = vowelOnlyLegalities
         self.viramaVowelId = foundViramaId
         self.softBoundaryViramaVowelId = foundSoftBoundaryId
         self.vowelEndsWithAsat = vowelEndsAsat
         self.vowelPreAsatScalar = vowelPreAsat
+        self.vowelIsMidBufferPenalised = vowelMidBufPen
 
         var onsetLast = [UInt32](repeating: 0, count: builtOnsetTrie.terminals.count)
         for (idx, entry) in builtOnsetTrie.terminals.enumerated() {

@@ -226,4 +226,8 @@ final class VisargaInherentAXCTests: XCTestCase {
 final class RedundantExplicitAsatXCTests: XCTestCase {
     func testAll() { runSuite(RedundantExplicitAsatSuite.suite, xctest: self) }
 }
+
+final class StandaloneParticleMidBufferXCTests: XCTestCase {
+    func testAll() { runSuite(StandaloneParticleMidBufferSuite.suite, xctest: self) }
+}
 #endif

@@ -177,6 +177,28 @@ extension SyllableParser {
                             pairLegality[key] = pairLegalityRaw
                         }
                         let legality = stackLegal ? pairLegalityRaw : 0
+                        // TASK-007 (paired-arc branch): the same standalone
+                        // particle / independent-vowel rules that the
+                        // standalone-vowel loop guards against can also
+                        // fire as the vowel half of an `onsetVowel(X, ei)`
+                        // /`onsetVowel(X, oo)` paired arc — the parser's
+                        // primary path for `monein` / `kein` / `phei`
+                        // etc. The paired arc emits BOTH the consonant
+                        // base AND the standalone-particle scalar in a
+                        // single transition, so the surface always has
+                        // the polluting structural shape `<consonant>
+                        // <standalone>` which is structurally invalid
+                        // Burmese (independent vowels and free-standing
+                        // particles never sit immediately after a
+                        // consonant base inside a syllable). Skip the
+                        // transition entirely. The bare-standalone
+                        // fallback (`ei` typed alone) reaches the
+                        // panel through the standalone-vowel loop with
+                        // `previous = seed`, not through this paired-
+                        // arc branch.
+                        if vowelIsMidBufferPenalised[Int(vowelEntry.id)] {
+                            continue
+                        }
                         let pairState = ParseState(
                             parentIdx: prevIdx,
                             matchRef: .onsetVowel(onsetId: onsetEntry.id, vowelId: vowelEntry.id),
@@ -341,7 +363,31 @@ extension SyllableParser {
                         !vowelEntry.isStandalone
                         && previousEndedWithVowel
                         && vowelEnd == n
-                    let aliasCostAdj = vowelEntry.aliasCost + (stackedFinal ? 2 : 0)
+                    // TASK-007: skip the transition entirely when a
+                    // standalone vowel rule whose Myanmar output begins
+                    // with an independent-vowel scalar (U+1023..U+102A)
+                    // or a free-standing particle (U+104D / U+104F)
+                    // would land between consonant bases. Two trigger
+                    // shapes: (a) the previous state is non-seed
+                    // (already-emitted Burmese context), or (b) more
+                    // buffer follows so the standalone scalar will sit
+                    // mid-surface once subsequent onsets land. Skipping
+                    // the transition (rather than charging an alias-
+                    // cost or zeroing legality) avoids both DP bucket
+                    // pressure and the materialized `isBetter`
+                    // comparator's syllable-count override that would
+                    // otherwise float a polluted parse to rank 0. Bare
+                    // standalone usage (`ei`, `ywe`, `oo` typed alone)
+                    // is unaffected because both gates fail.
+                    if vowelIsMidBufferPenalised[Int(vowelEntry.id)] {
+                        let previousIsSeed: Bool = {
+                            if case .seed = previous.matchRef { return true }
+                            return false
+                        }()
+                        if !previousIsSeed || vowelEnd < n { continue }
+                    }
+                    let aliasCostAdj = vowelEntry.aliasCost
+                        + (stackedFinal ? 2 : 0)
                     let newState = ParseState(
                         parentIdx: prevIdx,
                         matchRef: .vowelOnly(vowelId: vowelEntry.id),
