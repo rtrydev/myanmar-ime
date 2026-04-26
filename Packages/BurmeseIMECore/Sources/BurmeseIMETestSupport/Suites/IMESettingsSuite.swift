@@ -86,7 +86,7 @@ public enum IMESettingsSuite {
             let sem = DispatchSemaphore(value: 0)
             let observer = NotificationCenter.default.addObserver(
                 forName: IMESettings.didChangeNotification,
-                object: nil,
+                object: settings,
                 queue: nil
             ) { note in
                 box.value = note.userInfo?[IMESettings.changedKeyUserInfoKey] as? String
