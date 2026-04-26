@@ -59,6 +59,25 @@ public struct SyllableParse: Sendable, Equatable {
     public let structureCost: Int
     public let syllableCount: Int
     public let rarityPenalty: Int
+    /// Cumulative arc-boundary map for this parse's segmentation.
+    /// `arcBoundaries[i] = (charEnd, scalarOffset)` says: after the i-th
+    /// non-skip arc consumed `chars[0..<charEnd]` of the normalized
+    /// reading, the parse's `output` had emitted `scalarOffset` scalars.
+    /// `arcBoundaries[0]` is always `(0, 0)`. The terminal entry covers
+    /// the entire reading. Used by mid-buffer-digit splicing to map a
+    /// digit's input-character offset to the matching scalar splice
+    /// offset in `output` (TASK-002). Empty for parses constructed
+    /// outside the parser's materializer (e.g. engine fallbacks).
+    public let arcBoundaries: [ArcBoundary]
+
+    public struct ArcBoundary: Sendable, Equatable {
+        public let charEnd: Int
+        public let scalarOffset: Int
+        public init(charEnd: Int, scalarOffset: Int) {
+            self.charEnd = charEnd
+            self.scalarOffset = scalarOffset
+        }
+    }
 
     public init(
         output: String,
@@ -68,7 +87,8 @@ public struct SyllableParse: Sendable, Equatable {
         score: Int = 0,
         structureCost: Int = 0,
         syllableCount: Int = 0,
-        rarityPenalty: Int = 0
+        rarityPenalty: Int = 0,
+        arcBoundaries: [ArcBoundary] = []
     ) {
         self.output = output
         self.reading = reading
@@ -78,5 +98,6 @@ public struct SyllableParse: Sendable, Equatable {
         self.structureCost = structureCost
         self.syllableCount = syllableCount
         self.rarityPenalty = rarityPenalty
+        self.arcBoundaries = arcBoundaries
     }
 }

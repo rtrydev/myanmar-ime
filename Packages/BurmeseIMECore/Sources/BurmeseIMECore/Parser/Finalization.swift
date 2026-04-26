@@ -20,6 +20,10 @@ extension SyllableParser {
         /// Cached marker penalty so the dedup pass and the final sort can
         /// skip the dictionary lookup per comparison.
         var markerPenalty: Int
+        /// Per-arc cumulative `(charEnd, scalarOffset)` boundaries from
+        /// the materializer. Used downstream to map digit char offsets to
+        /// scalar splice positions (TASK-002).
+        let arcBoundaries: [SyllableParse.ArcBoundary]
     }
 
     internal func finalizeStates(
@@ -91,13 +95,16 @@ extension SyllableParser {
             return p
         }
         for idx in filteredIndices {
-            let (output, reading) = materialize(stateIdx: idx, arena: arena, promoteLeadingA: isFullBuffer)
+            let (output, reading, boundaries) = materialize(
+                stateIdx: idx, arena: arena, promoteLeadingA: isFullBuffer
+            )
             materialized.append(MaterializedState(
                 state: arena[Int(idx)],
                 output: output,
                 reading: reading,
                 adjustedOutput: adjustLeadingVowel(output),
-                markerPenalty: penalty(for: reading)
+                markerPenalty: penalty(for: reading),
+                arcBoundaries: boundaries
             ))
         }
 
@@ -143,6 +150,18 @@ extension SyllableParser {
         let mapped: [SyllableParse] = sortedFinal.prefix(demotionWindow).map { m in
             let adjusted = Self.remapEmptyToInherent(m.adjustedOutput, reading: m.reading)
             let legal = m.state.isLegal && Self.scanOutputLegality(adjusted)
+            // `adjustLeadingVowel` may prefix a U+200C ZWNJ to the raw
+            // output; if it did, every boundary's scalar offset shifts
+            // by +1 in the adjusted surface. `remapEmptyToInherent` may
+            // turn an empty surface into U+1021 — boundaries stay at 0
+            // since no arc contributed scalars.
+            let leadingShift = m.adjustedOutput.count - m.output.count > 0 ? 1 : 0
+            let shiftedBoundaries = m.arcBoundaries.map {
+                SyllableParse.ArcBoundary(
+                    charEnd: $0.charEnd,
+                    scalarOffset: $0.scalarOffset + leadingShift
+                )
+            }
             return SyllableParse(
                 output: adjusted,
                 reading: m.reading,
@@ -151,7 +170,8 @@ extension SyllableParser {
                 score: m.state.score,
                 structureCost: m.state.structureCost,
                 syllableCount: m.state.syllableCount,
-                rarityPenalty: rarityFor[adjusted] ?? 0
+                rarityPenalty: rarityFor[adjusted] ?? 0,
+                arcBoundaries: shiftedBoundaries
             )
         }
         // Stable re-sort: legal parses (legalityScore > 0) outrank demoted
@@ -450,20 +470,25 @@ extension SyllableParser {
     /// Walk the `parentIdx` chain backward to the seed, collect each
     /// transition's contribution, then concatenate forward into a single
     /// `output`/`reading` pair. Only called for the handful of states that
-    /// survive finalizing pre-filters.
+    /// survive finalizing pre-filters. Also returns the per-arc cumulative
+    /// `(charEnd, scalarOffset)` boundaries so downstream callers can map
+    /// input character offsets to output scalar positions (TASK-002).
     internal func materialize(
         stateIdx: Int32,
         arena: [ParseState],
         promoteLeadingA: Bool = true
-    ) -> (output: String, reading: String) {
+    ) -> (output: String, reading: String, arcBoundaries: [SyllableParse.ArcBoundary]) {
         var refs: [MatchRef] = []
+        var charEnds: [Int] = []
         var cur = stateIdx
         while cur >= 0 {
             let state = arena[Int(cur)]
             refs.append(state.matchRef)
+            charEnds.append(Int(state.charEnd))
             cur = state.parentIdx
         }
         refs.reverse()
+        charEnds.reverse()
 
         var output = ""
         var reading = ""
@@ -483,7 +508,23 @@ extension SyllableParser {
         // mid-output as a spurious independent vowel.
         var sawLeadingA = false
         var promotedLeadingA = false
-        for ref in refs {
+        // Pre-postprocess arc boundaries: tracks `(charEnd, scalarOffset)`
+        // after each contributing arc against the raw `output` string.
+        // Post-processing (`canonicalizeMedialOrder`,
+        // `stripSpuriousAsatBeforeVirama`) is applied at the end and the
+        // scalar offsets are then re-mapped through those passes so the
+        // boundaries align with the returned (post-processed) surface.
+        //
+        // When the leading-A promotion fires inside a non-inherent-A arc,
+        // the prepended U+1021 logically belongs to the *preceding*
+        // inherent-`a` arc (whose empty output left the syllable
+        // visually invisible). Bump the previous boundary's scalarOffset
+        // to include the U+1021 so the user's mental model "char 1
+        // emits `အ`" is preserved (otherwise `a1b` splices the digit at
+        // the start of the surface — TASK-002 follow-up).
+        var rawBoundaries: [SyllableParse.ArcBoundary] = []
+        rawBoundaries.append(SyllableParse.ArcBoundary(charEnd: 0, scalarOffset: 0))
+        for (refIndex, ref) in refs.enumerated() {
             switch ref {
             case .seed, .skip:
                 continue
@@ -492,21 +533,31 @@ extension SyllableParser {
                 if promoteLeadingA && !promotedLeadingA && output.isEmpty && sawLeadingA {
                     output.unicodeScalars.append(Unicode.Scalar(0x1021)!)
                     promotedLeadingA = true
+                    Self.bumpLastInherentABoundary(&rawBoundaries)
                 }
                 output.append(entry.myanmar)
                 reading.append(entry.canonicalRoman)
                 reading.append("a")
+                rawBoundaries.append(SyllableParse.ArcBoundary(
+                    charEnd: charEnds[refIndex],
+                    scalarOffset: output.unicodeScalars.count
+                ))
             case .onsetVowel(let onsetId, let vowelId):
                 let onset = onsetTerminals[Int(onsetId)]
                 let vowel = vowelTerminals[Int(vowelId)]
                 if promoteLeadingA && !promotedLeadingA && output.isEmpty && sawLeadingA {
                     output.unicodeScalars.append(Unicode.Scalar(0x1021)!)
                     promotedLeadingA = true
+                    Self.bumpLastInherentABoundary(&rawBoundaries)
                 }
                 output.append(onset.myanmar)
                 output.append(vowel.myanmar)
                 reading.append(onset.canonicalRoman)
                 reading.append(vowel.canonicalRoman)
+                rawBoundaries.append(SyllableParse.ArcBoundary(
+                    charEnd: charEnds[refIndex],
+                    scalarOffset: output.unicodeScalars.count
+                ))
             case .vowelOnly(let vowelId):
                 let entry = vowelTerminals[Int(vowelId)]
                 let isInherentA = entry.canonicalRoman == "a" && entry.myanmar.isEmpty
@@ -527,6 +578,7 @@ extension SyllableParser {
                     if sawLeadingA || firstScalarIsConsonantBase {
                         output.unicodeScalars.append(Unicode.Scalar(0x1021)!)
                         promotedLeadingA = true
+                        Self.bumpLastInherentABoundary(&rawBoundaries)
                     }
                 }
                 output.append(entry.myanmar)
@@ -534,9 +586,122 @@ extension SyllableParser {
                 if isInherentA {
                     sawLeadingA = true
                 }
+                rawBoundaries.append(SyllableParse.ArcBoundary(
+                    charEnd: charEnds[refIndex],
+                    scalarOffset: output.unicodeScalars.count
+                ))
             }
         }
-        return (Self.stripSpuriousAsatBeforeVirama(Self.canonicalizeMedialOrder(output)), reading)
+        let canonicalized = Self.canonicalizeMedialOrder(output)
+        let canonicalizedBoundaries = Self.remapBoundariesAfterCanonicalize(
+            raw: output, processed: canonicalized, boundaries: rawBoundaries
+        )
+        let stripped = Self.stripSpuriousAsatBeforeVirama(canonicalized)
+        let strippedBoundaries = Self.remapBoundariesAfterStripAsat(
+            raw: canonicalized, processed: stripped, boundaries: canonicalizedBoundaries
+        )
+        return (stripped, reading, strippedBoundaries)
+    }
+
+    /// Used inside `materialize` when leading-A promotion fires: the
+    /// prepended U+1021 belongs to the previous inherent-`a` arc (whose
+    /// empty output rendered the syllable invisible). Bumping that arc's
+    /// boundary scalarOffset by 1 keeps the per-char scalar count
+    /// consistent with the user's mental model "the `a` produces `အ`".
+    /// Walks back to the most recent boundary whose scalarOffset matches
+    /// the previous boundary's (i.e. the empty-emission arc) and
+    /// increments it.
+    private static func bumpLastInherentABoundary(
+        _ boundaries: inout [SyllableParse.ArcBoundary]
+    ) {
+        // The leading-A promotion only fires once. The U+1021 was
+        // appended at the current end of `output`; the most recent
+        // boundary records the scalarOffset *before* this appended
+        // scalar. Increment it so the leading-A is attributed to the
+        // preceding inherent-`a` arc.
+        guard let last = boundaries.last else { return }
+        boundaries[boundaries.count - 1] = SyllableParse.ArcBoundary(
+            charEnd: last.charEnd,
+            scalarOffset: last.scalarOffset + 1
+        )
+    }
+
+    /// `canonicalizeMedialOrder` only re-orders / dedupes scalars within
+    /// medial runs (U+103B..U+103E). It does not move scalars across arc
+    /// boundaries: each arc emits its medials adjacent to its base, so a
+    /// medial run that crosses an arc boundary is rare. The pre-/post-
+    /// scalar-counts within each prefix range can drift by ±1 when a
+    /// duplicate medial collapses, so we translate each boundary's
+    /// scalar offset by tracking how many scalars the canonicalize pass
+    /// dropped at or before that offset in the raw string.
+    internal static func remapBoundariesAfterCanonicalize(
+        raw: String,
+        processed: String,
+        boundaries: [SyllableParse.ArcBoundary]
+    ) -> [SyllableParse.ArcBoundary] {
+        if raw == processed { return boundaries }
+        // The transformation only deletes (de-dupes) within medial runs.
+        // Walk both strings, accumulate the per-prefix delete count, and
+        // adjust each boundary's scalar offset.
+        let rawScalars = Array(raw.unicodeScalars)
+        let processedScalars = Array(processed.unicodeScalars)
+        // Per-raw-offset, the number of scalars dropped at offsets
+        // strictly before that offset. dropMap[i] = scalars dropped in
+        // raw[0..<i]. Length = rawScalars.count + 1.
+        var dropMap: [Int] = Array(repeating: 0, count: rawScalars.count + 1)
+        var processedIdx = 0
+        var dropped = 0
+        for i in 0..<rawScalars.count {
+            dropMap[i] = dropped
+            if processedIdx < processedScalars.count,
+               rawScalars[i] == processedScalars[processedIdx] {
+                processedIdx += 1
+            } else {
+                dropped += 1
+            }
+        }
+        dropMap[rawScalars.count] = dropped
+        return boundaries.map {
+            let offset = max(0, min($0.scalarOffset, rawScalars.count))
+            return SyllableParse.ArcBoundary(
+                charEnd: $0.charEnd,
+                scalarOffset: $0.scalarOffset - dropMap[offset]
+            )
+        }
+    }
+
+    /// `stripSpuriousAsatBeforeVirama` removes asat (U+103A) scalars that
+    /// precede a virama (U+1039) when the asat's base is not nga.
+    /// Mirrors `remapBoundariesAfterCanonicalize` — pure deletion, so
+    /// remapping is an offset-by-drop-count.
+    internal static func remapBoundariesAfterStripAsat(
+        raw: String,
+        processed: String,
+        boundaries: [SyllableParse.ArcBoundary]
+    ) -> [SyllableParse.ArcBoundary] {
+        if raw == processed { return boundaries }
+        let rawScalars = Array(raw.unicodeScalars)
+        let processedScalars = Array(processed.unicodeScalars)
+        var dropMap: [Int] = Array(repeating: 0, count: rawScalars.count + 1)
+        var processedIdx = 0
+        var dropped = 0
+        for i in 0..<rawScalars.count {
+            dropMap[i] = dropped
+            if processedIdx < processedScalars.count,
+               rawScalars[i] == processedScalars[processedIdx] {
+                processedIdx += 1
+            } else {
+                dropped += 1
+            }
+        }
+        dropMap[rawScalars.count] = dropped
+        return boundaries.map {
+            let offset = max(0, min($0.scalarOffset, rawScalars.count))
+            return SyllableParse.ArcBoundary(
+                charEnd: $0.charEnd,
+                scalarOffset: $0.scalarOffset - dropMap[offset]
+            )
+        }
     }
 
     /// Strip U+103A (asat) immediately before U+1039 (virama) when the

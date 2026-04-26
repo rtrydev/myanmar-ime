@@ -72,11 +72,29 @@ extension BurmeseEngine {
     }
 
     /// Splice mid-buffer digits back into candidate surfaces. For each
-    /// insertion, computes a scalar splice position by re-parsing the
-    /// letter prefix (up to that offset in the cleaned buffer) with
-    /// single-best parse and counting scalars in the result. Emits a
-    /// Myanmar-digit primary and ASCII-digit secondary variant per
-    /// candidate, matching trailing-digit behaviour.
+    /// insertion, computes a scalar splice position from the cleaned-
+    /// buffer parse's character-to-scalar provenance map (TASK-002). The
+    /// previous implementation re-parsed only the letter prefix
+    /// `chars[0..<K]` standalone and counted its output scalars — that
+    /// works only when the cleaned-buffer parse leaves the prefix
+    /// unchanged, but breaks when the cleaned-buffer parse re-segments
+    /// the prefix's tail letter with the suffix's head (e.g. `tar1ar`
+    /// where the suffix `ar` makes the cleaned `tarar` parse merge `r`
+    /// into a `ra` consonant: `တရာ`, with the prefix's `တာ` gone).
+    ///
+    /// The new approach: re-parse the full cleaned buffer with N-best,
+    /// inspect each parse's `arcBoundaries`, and prefer parses whose
+    /// char-segmentation has an arc boundary at every digit offset.
+    /// Among the engine's candidates, find one whose surface matches
+    /// such a "boundary-aligned" parse and promote it to rank 0. The
+    /// splice positions for that candidate come from the parse's own
+    /// boundary map, so the digit always lands at the user's intended
+    /// syllable break. Non-aligned candidates keep the legacy
+    /// prefix-only-parse splice with the snap-forward heuristic so
+    /// existing safety nets (kinzi, medial, asat) still apply.
+    ///
+    /// Emits a Myanmar-digit primary and ASCII-digit secondary variant
+    /// per candidate, matching trailing-digit behaviour.
     internal func spliceMidBufferDigits(
         into candidates: [Candidate],
         cleaned: String,
@@ -84,13 +102,68 @@ extension BurmeseEngine {
     ) -> [Candidate] {
         guard !insertions.isEmpty else { return candidates }
         let cleanedChars = Array(cleaned)
-        // Runs of adjacent digits share a splice offset — "t23ote" produces
-        // two insertions both at offset 1. Memoise by offset so the prefix
-        // parse runs once per unique site instead of once per digit.
-        var positionByOffset: [Int: Int] = [:]
-        let splicePositions: [Int] = insertions.map { insertion in
-            if let cached = positionByOffset[insertion.offset] { return cached }
-            let prefixChars = cleanedChars.prefix(insertion.offset)
+        let insertionOffsets = insertions.map(\.offset)
+        let uniqueOffsets = Array(Set(insertionOffsets)).sorted()
+
+        // Pull top-K cleaned-buffer parses with their per-arc boundaries.
+        // Each parser parse is run through the same surface-adjusting
+        // post-processing the engine applies before exposing candidates
+        // (`promoteOrphanZwnjToImplicitA`, `promoteOrphanInternalMarks`,
+        // `correctAaShape`), and the arc boundaries are remapped through
+        // those transformations so the per-(charEnd, scalarOffset)
+        // mapping aligns with the engine's user-visible candidate
+        // surface. We then look up engine candidates by surface and use
+        // the matching parse's provenance map for the splice.
+        let normalizedCleaned = Self.normalizeForParser(cleaned)
+        var boundaryAlignedSurfaces: [String: [Int: Int]] = [:]
+        if !normalizedCleaned.isEmpty {
+            let topParses = parser.parseCandidates(normalizedCleaned, maxResults: 16)
+            for parse in topParses where !parse.arcBoundaries.isEmpty {
+                // Try every surface variant the engine can yield from
+                // this parse: raw, orphan-internal-promoted,
+                // zwnj-promoted, and zwnj-then-internal-promoted. Each
+                // variant carries its own (possibly remapped) boundary
+                // list. We register all of them so a candidate
+                // surface lookup can find the matching variant.
+                var surfaceVariants: [(SyllableParse, [SyllableParse.ArcBoundary])] = []
+                surfaceVariants.append((parse, parse.arcBoundaries))
+                if let zwnj = Self.promoteOrphanZwnjToImplicitA(parse) {
+                    surfaceVariants.append((zwnj, zwnj.arcBoundaries))
+                    if let zwnjThenInternal = Self.promoteOrphanInternalMarks(zwnj) {
+                        surfaceVariants.append((zwnjThenInternal, zwnjThenInternal.arcBoundaries))
+                    }
+                }
+                if let internalOnly = Self.promoteOrphanInternalMarks(parse) {
+                    surfaceVariants.append((internalOnly, internalOnly.arcBoundaries))
+                }
+                for (variant, boundaries) in surfaceVariants {
+                    let boundaryMap = Dictionary(
+                        uniqueKeysWithValues: boundaries.map { ($0.charEnd, $0.scalarOffset) }
+                    )
+                    // A parse is "boundary-aligned" iff every digit char
+                    // offset falls on an arc boundary in this parse.
+                    guard uniqueOffsets.allSatisfy({ boundaryMap[$0] != nil }) else {
+                        continue
+                    }
+                    let surface = Self.correctAaShape(variant.output)
+                    if boundaryAlignedSurfaces[surface] == nil {
+                        var perOffset: [Int: Int] = [:]
+                        for off in uniqueOffsets {
+                            perOffset[off] = boundaryMap[off]!
+                        }
+                        boundaryAlignedSurfaces[surface] = perOffset
+                    }
+                }
+            }
+        }
+
+        // Compute fallback splice positions via the legacy prefix-only
+        // parse. Used for non-aligned candidates and as the splice for
+        // boundary-aligned candidates whose surface dictionary lookup
+        // misses (defensive — should not happen given `correctAaShape`).
+        var fallbackPositionByOffset: [Int: Int] = [:]
+        for offset in uniqueOffsets {
+            let prefixChars = cleanedChars.prefix(offset)
             let prefix = String(prefixChars)
             let normalized = Self.normalizeForParser(prefix)
             let position: Int
@@ -101,9 +174,9 @@ extension BurmeseEngine {
             } else {
                 position = prefix.unicodeScalars.count
             }
-            positionByOffset[insertion.offset] = position
-            return position
+            fallbackPositionByOffset[offset] = position
         }
+
         let burmeseDigits: [Unicode.Scalar] = insertions.map { insertion in
             let raw = insertion.digit.unicodeScalars.first!.value
             return Unicode.Scalar(0x1040 + (raw - 0x30))!
@@ -111,9 +184,36 @@ extension BurmeseEngine {
         let asciiDigits: [Unicode.Scalar] = insertions.map {
             $0.digit.unicodeScalars.first!
         }
+
+        // Promote candidates whose surface matches a boundary-aligned
+        // parse before the rest. Within each tier the original engine
+        // ranking is preserved. When at least one aligned candidate
+        // exists, drop the unaligned ones — their splice would land
+        // mid-cluster and produce a `<digit><dep-vowel>` adjacency that
+        // breaks the prefix syllable (TASK-002 acceptance criteria).
+        // Unaligned candidates are kept only when no aligned sibling
+        // survives.
+        let aligned = candidates.filter {
+            boundaryAlignedSurfaces[$0.surface] != nil
+        }
+        let unaligned = candidates.filter {
+            boundaryAlignedSurfaces[$0.surface] == nil
+        }
+        let orderedCandidates = aligned.isEmpty ? unaligned : aligned
+
         var result: [Candidate] = []
         var seen: Set<String> = []
-        for candidate in candidates {
+        for candidate in orderedCandidates {
+            // Pick splice positions per-candidate: aligned candidates use
+            // their own parse's provenance map; unaligned candidates use
+            // the legacy fallback, with `insertScalars`'s snap-forward
+            // heuristic correcting the worst boundary mistakes.
+            let splicePositions: [Int]
+            if let perOffset = boundaryAlignedSurfaces[candidate.surface] {
+                splicePositions = insertionOffsets.map { perOffset[$0]! }
+            } else {
+                splicePositions = insertionOffsets.map { fallbackPositionByOffset[$0]! }
+            }
             let burmese = Self.insertScalars(
                 into: candidate.surface,
                 scalars: burmeseDigits,

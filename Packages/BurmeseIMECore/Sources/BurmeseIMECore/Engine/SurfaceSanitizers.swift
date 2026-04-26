@@ -339,6 +339,8 @@ extension BurmeseEngine {
         let legalityScore = SyllableParser.scanOutputLegality(output)
             ? max(parse.legalityScore, 1)
             : 0
+        // ZWNJ → U+1021 is a 1-for-1 scalar replacement, so arc-boundary
+        // scalar offsets are unchanged.
         return SyllableParse(
             output: output,
             reading: parse.reading,
@@ -347,7 +349,8 @@ extension BurmeseEngine {
             score: parse.score,
             structureCost: parse.structureCost,
             syllableCount: max(1, parse.syllableCount),
-            rarityPenalty: parse.rarityPenalty
+            rarityPenalty: parse.rarityPenalty,
+            arcBoundaries: parse.arcBoundaries
         )
     }
 
@@ -380,6 +383,22 @@ extension BurmeseEngine {
         }
         let output = String(String.UnicodeScalarView(rebuilt))
         guard SyllableParser.scanOutputLegality(output) else { return nil }
+        // Each orphan-position insertion shifts boundaries that sit
+        // STRICTLY after that scalar offset by +1. A boundary at
+        // exactly the insertion position keeps its scalar offset —
+        // semantically the inserted U+1021 anchor belongs to the arc
+        // whose orphan mark it is anchoring, so the boundary preceding
+        // it stays where it is. The boundary's `charEnd` is unchanged.
+        let sortedInsertPositions = orphanPositions.sorted()
+        let adjustedBoundaries = parse.arcBoundaries.map { boundary -> SyllableParse.ArcBoundary in
+            let inserted = sortedInsertPositions.lazy
+                .filter { $0 < boundary.scalarOffset }
+                .count
+            return SyllableParse.ArcBoundary(
+                charEnd: boundary.charEnd,
+                scalarOffset: boundary.scalarOffset + inserted
+            )
+        }
         return SyllableParse(
             output: output,
             reading: parse.reading,
@@ -388,7 +407,8 @@ extension BurmeseEngine {
             score: parse.score,
             structureCost: parse.structureCost,
             syllableCount: max(1, parse.syllableCount),
-            rarityPenalty: parse.rarityPenalty
+            rarityPenalty: parse.rarityPenalty,
+            arcBoundaries: adjustedBoundaries
         )
     }
 

@@ -42,13 +42,6 @@ public enum PropertySuite {
     /// converge — the WindowingKinziPromotionSuite asserts the
     /// converged behaviour.
     private static let slidingWindowKnownDivergent: [String] = [
-        // task 02: full-pass parser N-best drops the ya-pin sibling
-        // for long buffers under the cluster-preference rule
-        // (`ky` cluster), while incremental keeps it from earlier
-        // shorter-prefix steps. Beam-widening or a parser-side
-        // sibling-injection pass for the cluster keys would converge
-        // these — listed here so that fix lands as a green test.
-        "kyawzaw2tharwa",
         // TASK-001: the windowing-aware strict-kinzi rank-0 promotion
         // makes the FULL-buffer pass correctly render kinzi for every
         // `mingalarpar` repetition. The INCREMENTAL pass, however,

@@ -706,7 +706,7 @@ public final class SyllableParser: Sendable {
             var probeAccepted = false
             for idx in [bestLegal, bestIllegal] where idx >= 0 {
                 let s = arena[Int(idx)]
-                let (output, reading) = materialize(stateIdx: idx, arena: arena)
+                let (output, reading, _) = materialize(stateIdx: idx, arena: arena)
                 let probe = SyllableParse(
                     output: adjustLeadingVowel(output),
                     reading: reading,
