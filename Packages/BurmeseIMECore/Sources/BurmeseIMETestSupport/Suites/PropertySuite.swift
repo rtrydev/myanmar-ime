@@ -360,6 +360,17 @@ public enum PropertySuite {
                         continue
                     }
                     let stripped = stripInvisibles(top)
+                    // Partial-composition surfaces (Myanmar prefix + literal
+                    // ASCII tail, emitted when the right-shrink probe drops
+                    // unparseable trailing letters — see task 01) intentionally
+                    // re-anchor on a shorter parseable prefix. The anchor
+                    // monotonicity guarantee only applies between cleanly-
+                    // composed surfaces.
+                    if Self.hasAsciiSurfaceScalar(stripped) {
+                        prevPrefix = ""
+                        prevTop = ""
+                        continue
+                    }
                     let common = Self.commonPrefix(prevTop, stripped)
                     if common.count + anchorTolerance < prevPrefix.count {
                         failures += 1

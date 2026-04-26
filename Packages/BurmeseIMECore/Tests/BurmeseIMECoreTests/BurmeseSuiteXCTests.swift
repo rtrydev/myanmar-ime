@@ -161,4 +161,8 @@ final class OrphanLeadingVowelXCTests: XCTestCase {
 final class BareAingDiphthongXCTests: XCTestCase {
     func testAll() { runSuite(BareAingDiphthongSuite.suite, xctest: self) }
 }
+
+final class UnparseableTailFallbackXCTests: XCTestCase {
+    func testAll() { runSuite(UnparseableTailFallbackSuite.suite, xctest: self) }
+}
 #endif

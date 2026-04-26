@@ -50,5 +50,6 @@ public enum BurmeseTestSuites {
         ApostropheLiteralSuite.suite,
         OrphanLeadingVowelSuite.suite,
         BareAingDiphthongSuite.suite,
+        UnparseableTailFallbackSuite.suite,
     ]
 }

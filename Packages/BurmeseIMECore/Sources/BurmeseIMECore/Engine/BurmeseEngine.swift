@@ -1706,8 +1706,15 @@ public final class BurmeseEngine: @unchecked Sendable {
            digitPrefix.isEmpty,
            literalTail.isEmpty,
            droppedTailHasAsciiLetters {
+            // The right-shrink probe dropped one or more ASCII letters
+            // that didn't compose into Myanmar; those letters get
+            // re-appended verbatim onto each candidate. We still want
+            // to drop pure-ASCII junk (`fox`, `xyz`), but a surface
+            // that mixes Myanmar with a literal ASCII tail (`အဘc`,
+            // `အောင်c`, `ကားbc`) is a partial composition the user can
+            // act on — leave it in the panel rather than emptying it.
             finalCandidates = sanitizedWithAffixes.filter {
-                !Self.containsAsciiSurfaceScalar($0.surface)
+                Self.containsMyanmarSurfaceScalar($0.surface)
                     && SyllableParser.scanOutputLegality($0.surface)
             }
         } else {

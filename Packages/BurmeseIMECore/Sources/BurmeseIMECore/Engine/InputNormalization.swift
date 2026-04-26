@@ -890,6 +890,12 @@ extension BurmeseEngine {
         }
     }
 
+    internal static func containsMyanmarSurfaceScalar(_ output: String) -> Bool {
+        output.unicodeScalars.contains {
+            $0.value >= 0x1000 && $0.value <= 0x109F
+        }
+    }
+
     internal static func isAcceptableParse(_ parse: SyllableParse) -> Bool {
         guard parse.legalityScore > 0 || hasOnlyCleanViramaStacks(parse) else { return false }
         guard !hasInterleavedLatin(parse.output) else { return false }
