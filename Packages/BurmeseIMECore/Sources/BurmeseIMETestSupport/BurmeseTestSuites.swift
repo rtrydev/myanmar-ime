@@ -53,6 +53,7 @@ public enum BurmeseTestSuites {
         UnparseableTailFallbackSuite.suite,
         StandaloneCodaVowelSuite.suite,
         MidBufferDigitMedialSplitSuite.suite,
+        MidBufferDigitAsatSplitSuite.suite,
         LiteralPunctRecursionReadingSuite.suite,
     ]
 }

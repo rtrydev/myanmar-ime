@@ -174,6 +174,11 @@ final class MidBufferDigitMedialSplitXCTests: XCTestCase {
     func testAll() { runSuite(MidBufferDigitMedialSplitSuite.suite, xctest: self) }
 }
 
+final class MidBufferDigitAsatSplitXCTests: XCTestCase {
+    func testAll() { runSuite(MidBufferDigitAsatSplitSuite.suite, xctest: self) }
+}
+
+
 final class LiteralPunctRecursionReadingXCTests: XCTestCase {
     func testAll() { runSuite(LiteralPunctRecursionReadingSuite.suite, xctest: self) }
 }

@@ -185,11 +185,20 @@ extension BurmeseEngine {
     ///   base in Unicode storage order; no romanization rule emits an
     ///   isolated medial without a preceding consonant, so the user
     ///   cannot have meaningfully intended a digit between them.
+    /// - An asat (U+103A) that closes the cluster on its left side, when
+    ///   the preceding scalar is itself part of the same cluster (a
+    ///   consonant base, medial, dep-vowel sign, or anusvara U+1036).
+    ///   The asat is the syllable terminator — placing a digit between
+    ///   it and the rest of the cluster would split base+vowel from its
+    ///   closing mark, an orthographic-ordering violation. This snap
+    ///   compensates for splice positions computed from a digit-stripped
+    ///   prefix's standalone parse that does not see the kinzi virama
+    ///   the full-buffer parse infers (TASK-001).
     ///
-    /// Dependent vowels (U+102B–U+1032) and tone marks are NOT snapped:
-    /// the mid-buffer-digit design intentionally allows the digit to act
-    /// as a hard syllable break across those (see
-    /// `RankingSuite.task10_midDigitTop_*`).
+    /// Dependent vowels (U+102B–U+1032) and tone marks (U+1037 / U+1038)
+    /// themselves are NOT snapped: the mid-buffer-digit design
+    /// intentionally allows the digit to act as a hard syllable break
+    /// across those (see `RankingSuite.task10_midDigitTop_*`).
     internal static func snapSpliceForward(_ scalars: [UInt32], position pos: Int) -> Int {
         var p = max(0, min(pos, scalars.count))
         while p < scalars.count {
@@ -206,6 +215,19 @@ extension BurmeseEngine {
             }
             if cur >= 0x103B && cur <= 0x103E,
                (prev >= 0x1000 && prev <= 0x1021) || (prev >= 0x103B && prev <= 0x103E) {
+                p += 1
+                continue
+            }
+            // Snap past a closing asat that is bound to the cluster on
+            // its left. `prev` belonging to the cluster means: a
+            // consonant base, medial, dep-vowel sign, or anusvara.
+            // Without this the digit would land between (vowel | medial)
+            // and the asat that closes the same syllable.
+            if cur == 0x103A,
+               (prev >= 0x1000 && prev <= 0x1021)
+                || (prev >= 0x102B && prev <= 0x1032)
+                || (prev >= 0x1036 && prev <= 0x1036)
+                || (prev >= 0x103B && prev <= 0x103E) {
                 p += 1
                 continue
             }
