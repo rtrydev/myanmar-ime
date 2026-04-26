@@ -66,6 +66,30 @@ extension BurmeseEngine {
         cacheLock.unlock()
 
         var parses = parser.parseCandidates(prefix, maxResults: Self.frozenPrefixCandidatePool)
+        // Apply the same orphan-mark promotions the main pipeline runs on
+        // its grammar parses (BurmeseEngine.swift ~700-717). Without this,
+        // a frozen prefix composed entirely of bare-vowel syllables whose
+        // parser surface starts with U+200C (or carries a mid-surface
+        // orphan mark) leaks ZWNJ into every windowed candidate — the
+        // downstream `sanitizeOrphanZwnj` filter is a no-op when no clean
+        // sibling exists, so the promotion has to happen here, before
+        // branches are LM-scored and fanned out across tail parses.
+        // See task 03.
+        let originalCount = parses.count
+        for i in 0..<originalCount {
+            let parent = parses[i]
+            let zwnjPromoted = Self.promoteOrphanZwnjToImplicitA(parent)
+            if let zwnjPromoted {
+                parses.append(zwnjPromoted)
+            }
+            if let promoted = Self.promoteOrphanInternalMarks(parent) {
+                parses.append(promoted)
+            }
+            if let zwnjPromoted,
+               let promoted = Self.promoteOrphanInternalMarks(zwnjPromoted) {
+                parses.append(promoted)
+            }
+        }
         var strictInferredStackOutputs: Set<String> = []
         if let inferred = Self.inferImplicitStackMarkers(prefix) {
             let existingOutputs = Set(parses.map(\.output))
@@ -133,6 +157,20 @@ extension BurmeseEngine {
             // decides — for in-vocab parses it is the real signal, and for
             // OOV parses it just falls through to parser order via the
             // shared floor.
+            // Drop ZWNJ-prefixed branches when at least one anchored
+            // sibling exists (task 03). Mirrors `sanitizeOrphanZwnj` for
+            // the windowed path: with `frozenPrefixBranchCount = 1`
+            // only the top-ranked branch survives, so a higher-LM
+            // orphan would otherwise be the sole branch even though a
+            // legality-positive promoted sibling is present.
+            let hasAnchoredBranch = scored.contains { branch in
+                branch.branch.output.unicodeScalars.first.map { $0.value != 0x200C } ?? false
+            }
+            if hasAnchoredBranch {
+                scored.removeAll { branch in
+                    branch.branch.output.unicodeScalars.first.map { $0.value == 0x200C } ?? false
+                }
+            }
             scored.sort { lhs, rhs in
                 if lhs.isOOV != rhs.isOOV { return !lhs.isOOV }
                 if lhs.isStrictInferredStack != rhs.isStrictInferredStack {

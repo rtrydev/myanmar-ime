@@ -98,5 +98,70 @@ public enum LongBufferWindowingSuite {
                 )
             }
         },
+
+        // Task 03: when the frozen prefix is composed entirely of
+        // bare-vowel syllables whose Myanmar surface starts with a
+        // dependent vowel sign (`aung` → `1031`, `aing` → `1031`,
+        // `aw` → `1031`, `in` → see task 02 for the consonant-base
+        // shape) the parser-emitted output is ZWNJ-prefixed. The
+        // frozen-prefix render must promote that orphan ZWNJ to
+        // U+1021 before fanning out across tail parses, the same
+        // way the non-windowed path does.
+        TestCase("frozenPrefix_promotesOrphanZwnj_acrossWindowedSurface") { ctx in
+            let engine = defaultEngine()
+            // Buffers must exceed the windowing threshold (~18 chars)
+            // to force the frozen-prefix path.
+            let cases = [
+                "aungaungaungaungaung",                  // 20
+                "aungaungaungaungaungaung",              // 24
+                "aungaungaungaungaungaungaung",          // 28
+                "awawawawawawawawawawaw",                // 22
+                "aingaingaingaingaingaing",              // 24
+            ]
+            for buffer in cases {
+                let state = engine.update(buffer: buffer, context: [])
+                ctx.assertFalse(
+                    state.candidates.isEmpty,
+                    buffer,
+                    detail: "panel empty"
+                )
+                let top = state.candidates.first?.surface ?? ""
+                let firstScalar = top.unicodeScalars.first.map(\.value) ?? 0
+                ctx.assertFalse(
+                    firstScalar == 0x200C,
+                    buffer,
+                    detail: "top='\(top)' starts with orphan ZWNJ (\(String(format: "%04X", firstScalar)))"
+                )
+            }
+        },
+
+        // Property: no candidate surface in a long-buffer panel may
+        // start with U+200C as long as at least one Myanmar-anchored
+        // sibling exists. Mirrors the `sanitizeOrphanZwnj` invariant
+        // for the non-windowed path.
+        TestCase("frozenPrefix_noLeadingZwnj_whenAnchoredSiblingExists") { ctx in
+            let engine = defaultEngine()
+            let cases = [
+                "aungaungaungaungaung",
+                "aungaungaungaungaungaung",
+                "inininininininininin",
+            ]
+            for buffer in cases {
+                let state = engine.update(buffer: buffer, context: [])
+                let surfaces = state.candidates.map(\.surface)
+                let hasAnchoredSibling = surfaces.contains { surface in
+                    surface.unicodeScalars.first.map { $0.value != 0x200C } ?? false
+                }
+                guard hasAnchoredSibling else { continue }
+                for cand in state.candidates {
+                    let firstScalar = cand.surface.unicodeScalars.first.map(\.value) ?? 0
+                    ctx.assertFalse(
+                        firstScalar == 0x200C,
+                        buffer,
+                        detail: "candidate '\(cand.surface)' starts with ZWNJ when anchored siblings exist"
+                    )
+                }
+            }
+        },
     ])
 }
