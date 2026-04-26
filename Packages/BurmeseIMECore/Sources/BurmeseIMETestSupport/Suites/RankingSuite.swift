@@ -1183,10 +1183,13 @@ public enum RankingSuite {
         cases.append(TestCase("tasksDir03_bareVowelAlternates_i_retainsNyaCoda") { ctx in
             let state = BurmeseEngine().update(buffer: "i", context: [])
             let surfaces = state.candidates.map(\.surface)
+            // Task 02 anchors the previously-orphan ည် (100A 103A) coda
+            // to U+1021 — the alternate must still be reachable, just
+            // in its anchored form (အည်).
             ctx.assertTrue(
-                surfaces.contains("\u{100A}\u{103A}"),
+                surfaces.contains("\u{1021}\u{100A}\u{103A}"),
                 "tasksDir03_iKeepsCoda",
-                detail: "ည် must remain available for 'i'; got: \(surfaces)"
+                detail: "အည် must remain available for 'i'; got: \(surfaces)"
             )
         })
 

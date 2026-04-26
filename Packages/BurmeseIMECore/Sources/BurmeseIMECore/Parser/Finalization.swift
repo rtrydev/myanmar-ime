@@ -509,14 +509,29 @@ extension SyllableParser {
                 reading.append(vowel.canonicalRoman)
             case .vowelOnly(let vowelId):
                 let entry = vowelTerminals[Int(vowelId)]
-                if promoteLeadingA && !promotedLeadingA && output.isEmpty && sawLeadingA
-                    && !(entry.canonicalRoman == "a" && entry.myanmar.isEmpty) {
-                    output.unicodeScalars.append(Unicode.Scalar(0x1021)!)
-                    promotedLeadingA = true
+                let isInherentA = entry.canonicalRoman == "a" && entry.myanmar.isEmpty
+                if promoteLeadingA && !promotedLeadingA && output.isEmpty && !isInherentA {
+                    // Existing case: a prior inherent-`a` ref ran (e.g.
+                    // `aan`, `aaung`) and the next ref needs an `အ`
+                    // anchor on top of the empty output. Extended case
+                    // (task 02): the buffer enters a vowel-only rule
+                    // directly with no preceding inherent-`a` and the
+                    // rule's Myanmar output starts with a consonant
+                    // base (`an` → `န်`, `in` → `င်`, `e` → `ယ်`).
+                    // Standalone these are stranded codas — Burmese
+                    // spells them with an `အ` base (အန်, အင်, အယ်).
+                    let firstScalarIsConsonantBase = entry.myanmar
+                        .unicodeScalars.first.map {
+                            $0.value >= 0x1000 && $0.value <= 0x1021
+                        } ?? false
+                    if sawLeadingA || firstScalarIsConsonantBase {
+                        output.unicodeScalars.append(Unicode.Scalar(0x1021)!)
+                        promotedLeadingA = true
+                    }
                 }
                 output.append(entry.myanmar)
                 reading.append(entry.canonicalRoman)
-                if entry.canonicalRoman == "a" && entry.myanmar.isEmpty {
+                if isInherentA {
                     sawLeadingA = true
                 }
             }

@@ -239,7 +239,13 @@ extension BurmeseEngine {
     internal func composedLetterRunSurface(_ run: String) -> String {
         let normalized = Self.normalizeForParser(run)
         guard !normalized.isEmpty else { return run }
-        let parses = parser.parseCandidates(normalized, maxResults: 4)
+        // The composed run is concatenated onto whatever surviving prefix
+        // the right-shrink probe produced — it does not start at the
+        // user's buffer origin. Suppress the leading-`အ` promotion so
+        // the tail doesn't double-anchor onto a prefix that already has
+        // its own leading vowel base (`ace` → `အ` + `e`-tail must stay
+        // `အယ်`, not `အအယ်`).
+        let parses = parser.parseCandidates(normalized, maxResults: 4, isFullBuffer: false)
         guard !parses.isEmpty else { return run }
         // Pick the highest-ranked parse whose surface is orthographically
         // clean. We accept legality 0 here (the tail couldn't be DP-legal
