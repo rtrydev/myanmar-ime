@@ -75,6 +75,54 @@ extension BurmeseEngine {
         vowelSuffixesWithTrailingDot.contains(where: { prefix.hasSuffix($0) })
     }
 
+    /// TASK-014: when a candidate surface ends in a bare base
+    /// consonant (its inherent-`a` is unmodified) and the trailing
+    /// literal text starts with `:` or `.`, return a sibling whose
+    /// surface absorbs the leading `:`/`.` as visarga (U+1038) or
+    /// creaky tone (U+1037). The remainder of the tail is returned
+    /// alongside so the caller can re-attach it. Returns nil when the
+    /// tail doesn't start with one of the tone markers, the surface
+    /// doesn't end in a bare consonant, or the next character in the
+    /// tail is itself a letter (mid-buffer position). This deliberately
+    /// only reshapes the simple `<C><tone-marker>` shape — multi-segment
+    /// or English-mid-buffer tails are unaffected.
+    internal static func applyBareConsonantToneFromTail(
+        candidateSurface: String,
+        tail: String
+    ) -> (surface: String, remainder: String)? {
+        guard let first = tail.first else { return nil }
+        let toneScalar: UInt32
+        switch first {
+        case ":": toneScalar = 0x1038
+        case ".": toneScalar = 0x1037
+        default: return nil
+        }
+        // Require the surface's last scalar to be a base consonant
+        // (U+1000..U+1021 or U+103F) with no following dep-vowel,
+        // medial, or other mark — i.e. the syllable is in its bare
+        // inherent-`a` shape.
+        let scalars = Array(candidateSurface.unicodeScalars)
+        guard let last = scalars.last else { return nil }
+        let v = last.value
+        let isBaseConsonant = (v >= 0x1000 && v <= 0x1021) || v == 0x103F
+        guard isBaseConsonant else { return nil }
+        // Reject when the very next character of the tail is an ASCII
+        // letter — that means the user is mid-typing an English word
+        // and the `:`/`.` is intended as ASCII punctuation, not a
+        // Burmese tone marker.
+        let tailChars = Array(tail)
+        if tailChars.count >= 2 {
+            let next = tailChars[1]
+            if next.isLetter && next.isASCII {
+                return nil
+            }
+        }
+        let toneChar = Character(Unicode.Scalar(toneScalar)!)
+        let toned = candidateSurface + String(toneChar)
+        let remainder = String(tailChars.dropFirst())
+        return (toned, remainder)
+    }
+
     internal static func colonActsAsVowelModifier(prefixEndingAtColon prefix: Substring) -> Bool {
         vowelSuffixesWithTrailingColon.contains(where: { prefix.hasSuffix($0) })
     }

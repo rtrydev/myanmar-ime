@@ -1907,6 +1907,30 @@ public final class BurmeseEngine: @unchecked Sendable {
                     }
                 } else {
                     let surface = leadingLiteral + digitPrefix + candidate.surface + candidateTail
+                    // TASK-014: when the candidate surface ends in a
+                    // bare base consonant (no trailing dep-vowel /
+                    // tone marker / asat) and the literal tail begins
+                    // with `:` or `.`, emit a tone-bearing sibling
+                    // (visarga / creaky tone on the consonant's
+                    // inherent-`a`) at rank 0 with the literal-tail
+                    // form retained at rank 1. The user's natural
+                    // typing of `<C>:` / `<C>.` is the heavy / creaky
+                    // tone; the literal fallback stays accessible for
+                    // English-text-mid-buffer cases.
+                    if let toned = Self.applyBareConsonantToneFromTail(
+                        candidateSurface: candidate.surface,
+                        tail: candidateTail
+                    ) {
+                        let tonedSurface = leadingLiteral + digitPrefix + toned.surface + toned.remainder
+                        if seen.insert(tonedSurface).inserted {
+                            expanded.append(Candidate(
+                                surface: tonedSurface,
+                                reading: fullReading,
+                                source: candidate.source,
+                                score: candidate.score
+                            ))
+                        }
+                    }
                     if seen.insert(surface).inserted {
                         expanded.append(Candidate(
                             surface: surface,

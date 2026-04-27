@@ -1048,10 +1048,11 @@ public enum EngineSuite {
             let engine = BurmeseEngine()
             for (buffer, suffix) in [
                 ("thar english", " english"),
-                // `ka.` has no `a.` rule, so `.` stays literal — unlike
-                // `thar.` which now consumes the `.` via the `ar.`
-                // creaky-tone rule (task 01).
-                ("ka.", "."),
+                // TASK-014: `ka.` now consumes the `.` as a creaky-tone
+                // marker (`က့`) at rank 0; the literal-`.` form remains
+                // accessible at rank ≥ 1. Tests for the literal form
+                // moved to `BareConsonantToneSuite`'s panel-reachability
+                // case.
                 ("thar123", "၁၂၃"),
             ] {
                 let top = engine.update(buffer: buffer, context: []).candidates.first?.surface ?? ""
