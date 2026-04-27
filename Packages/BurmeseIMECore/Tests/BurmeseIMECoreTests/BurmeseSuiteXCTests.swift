@@ -274,4 +274,8 @@ final class OrphanMarkClusterAnchorXCTests: XCTestCase {
 final class LeadingAaTrailingVowelXCTests: XCTestCase {
     func testAll() { runSuite(LeadingAaTrailingVowelSuite.suite, xctest: self) }
 }
+
+final class OoSuffixOrphanChainXCTests: XCTestCase {
+    func testAll() { runSuite(OoSuffixOrphanChainSuite.suite, xctest: self) }
+}
 #endif

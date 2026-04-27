@@ -1354,7 +1354,7 @@ extension BurmeseEngine {
         }
     }
 
-    internal static func isAcceptableParse(_ parse: SyllableParse) -> Bool {
+    @_spi(Testing) public static func isAcceptableParse(_ parse: SyllableParse) -> Bool {
         guard parse.legalityScore > 0 || hasOnlyCleanViramaStacks(parse) else { return false }
         guard !hasInterleavedLatin(parse.output) else { return false }
         guard !hasTripleViramaStack(parse.output) else { return false }
@@ -1379,6 +1379,85 @@ extension BurmeseEngine {
         else { return false }
         for reading in standaloneTallAaReadings where parse.reading.hasPrefix(reading) {
             return false
+        }
+        // TASK-017: reject parses whose post-promotion surface carries
+        // a dep-vowel orphan cluster past an asat-closed coda — i.e.
+        // an independent-vowel anchor (`U+1021`) after the closed-
+        // syllable coda followed by ONLY dep-vowel marks (no base
+        // consonant). This is the trailing-`oo` / `ii` / `uu` orphan-
+        // chain pattern (`nyaungoo` → `… 1004 103A 1021 102D 102F`);
+        // the right-shrink probe drops the trailing chars and
+        // `composeLetterRunsInTail` re-renders them as the precomposed
+        // independent-vowel form (`ဩ` / `ဦ` / `ဤ`). Legitimate
+        // two-syllable patterns where the post-anchor cluster ends
+        // with a base + asat coda (`aungout` → `… 1004 103A 1021 1031
+        // 102C 1000 103A`) are NOT rejected because the trailing
+        // region terminates in a base consonant.
+        //
+        // Restricted to the post-asat-coda case so single-syllable
+        // bare-vowel patterns (`iii`, `ee`) and their canonical
+        // bare-vowel-override sibling (`ဤ`, `အီ`) are unaffected.
+        if surfaceHasOrphanAnchorPastAsatCoda(promotedSurface(parse)) {
+            return false
+        }
+        return true
+    }
+
+    /// Best-effort post-promotion surface for `parse`. Mirrors the
+    /// same chain `update(buffer:context:)` runs (leading-ZWNJ
+    /// promotion → mid-surface orphan-mark promotion). Returns the
+    /// parse output unchanged when no promotion applies.
+    private static func promotedSurface(_ parse: SyllableParse) -> String {
+        if let zwnjPromoted = promoteOrphanZwnjToImplicitA(parse) {
+            if let internalPromoted = promoteOrphanInternalMarks(zwnjPromoted) {
+                return internalPromoted.output
+            }
+            return zwnjPromoted.output
+        }
+        if let internalPromoted = promoteOrphanInternalMarks(parse) {
+            return internalPromoted.output
+        }
+        return parse.output
+    }
+
+    /// True when `surface` carries an orphan-vowel anchor past an
+    /// asat-closed coda — i.e. an `U+1021..U+102A` independent-vowel
+    /// anchor after the last `U+103A` asat where the trailing region
+    /// contains no base consonant. This is the trailing-`oo` / `ii`
+    /// / `uu` orphan-chain pattern (`nyaungoo` →
+    /// `… 1004 103A 1021 102D 102F`); the right-shrink probe drops
+    /// the trailing chars and `composeLetterRunsInTail` re-renders
+    /// them as the precomposed independent-vowel form (`ဩ` / `ဦ` /
+    /// `ဤ`). Legitimate two-syllable patterns where the post-anchor
+    /// cluster terminates in a base-consonant + asat coda (`aungout`
+    /// → `… 1004 103A 1021 1031 102C 1000 103A`) are NOT rejected.
+    /// TASK-017.
+    private static func surfaceHasOrphanAnchorPastAsatCoda(
+        _ surface: String
+    ) -> Bool {
+        let scalars = Array(surface.unicodeScalars).map(\.value)
+        var lastAsatIdx = -1
+        for i in 0..<scalars.count where scalars[i] == 0x103A {
+            lastAsatIdx = i
+        }
+        guard lastAsatIdx >= 0 else { return false }
+        // Find the first anchor past the asat coda.
+        var anchorIdx = -1
+        for i in (lastAsatIdx + 1)..<scalars.count
+        where (0x1021...0x102A).contains(scalars[i]) {
+            anchorIdx = i
+            break
+        }
+        guard anchorIdx >= 0 else { return false }
+        // Walk forward from the anchor. If we see a base consonant
+        // (U+1000..U+101F or U+103F), it's a legitimate next syllable
+        // — not an orphan chain.
+        for i in (anchorIdx + 1)..<scalars.count {
+            let v = scalars[i]
+            let isBaseConsonant = (v >= 0x1000 && v <= 0x101F) || v == 0x103F
+            if isBaseConsonant {
+                return false
+            }
         }
         return true
     }

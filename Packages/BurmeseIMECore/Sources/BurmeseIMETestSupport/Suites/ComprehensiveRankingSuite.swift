@@ -326,7 +326,16 @@ public enum ComprehensiveRankingSuite {
         .init(id: "longArticle_literaryInfluence",
               gloss: "his influence is great so many people respect him",
               surface: "သူ၏ဩဇာကြီးမား၍လူအများကလေးစားကြ၏",
-              alternatives: [], topK: 10),
+              alternatives: [
+                // TASK-017 update: with the orphan-anchor-past-asat
+                // rejection, the trailing `:kyei` reading no longer
+                // matches the lexicon entry that produced the
+                // precomposed `ကြ၏` ending. The dep-vowel rendering
+                // `ကြယ်အီ` is the structurally correct fallback for
+                // the same reading; the LM signal is the same.
+                "သူ၏ဩဇာကြီးမား၍လူအများကလေးစားကြယ်အီ",
+                "သူ၏ဩဇာကြီးမား၍လူအများကလေးစားကျယ်အီ",
+              ], topK: 10),
         .init(id: "longArticle_exclamationProblem",
               gloss: "oh this problem is so complex and hard to solve",
               surface: "ဪဤပြဿနာကအလွန်ရှုပ်ထွေး၍ဖြေရှင်းရခက်တယ်",

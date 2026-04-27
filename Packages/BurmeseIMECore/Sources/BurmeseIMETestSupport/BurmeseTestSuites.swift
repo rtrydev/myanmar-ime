@@ -78,5 +78,6 @@ public enum BurmeseTestSuites {
         InherentAChainOverflowSuite.suite,
         OrphanMarkClusterAnchorSuite.suite,
         LeadingAaTrailingVowelSuite.suite,
+        OoSuffixOrphanChainSuite.suite,
     ]
 }
