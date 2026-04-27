@@ -278,4 +278,8 @@ final class LeadingAaTrailingVowelXCTests: XCTestCase {
 final class OoSuffixOrphanChainXCTests: XCTestCase {
     func testAll() { runSuite(OoSuffixOrphanChainSuite.suite, xctest: self) }
 }
+
+final class DoubledLetterKinziXCTests: XCTestCase {
+    func testAll() { runSuite(DoubledLetterKinziSuite.suite, xctest: self) }
+}
 #endif

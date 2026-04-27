@@ -1048,6 +1048,27 @@ extension BurmeseEngine {
         isFromVowelRule: Bool,
         hasNgaAsatShorterAlternate: Bool
     )? {
+        // TASK-019: doubled-letter kinzi signal. When the user typed
+        // `<X><X>` (the lower at `insertIndex` matches the immediately
+        // preceding consonant), AND the preceding context is a vowel-
+        // rule with an asat-closed coda, treat the doubled letter as
+        // the kinzi-stack signal — even when the vowel rule's upper
+        // (`na` from `an`/`aung`/etc.) would not strict-stack with
+        // the lower. The kinzi anchor uses the orthographic constant
+        // `nga` (1004), and the inference emits the `*+` marker so
+        // the parser materialises kinzi (`nga + asat + virama +
+        // <lower>`). The doubled letter's first half is consumed by
+        // the kinzi; the second half is the stack lower.
+        if insertIndex >= 1,
+           insertIndex < chars.count,
+           chars[insertIndex] == chars[insertIndex - 1],
+           let lowerConsonant = Romanization.romanToConsonant[String(chars[insertIndex])],
+           Grammar.stackableConsonants.contains(lowerConsonant),
+           Grammar.isValidStack(upper: Myanmar.nga, lower: lowerConsonant),
+           let vowelStartForDoubled = doubledLetterVowelStart(chars: chars, doubledStart: insertIndex - 1)
+        {
+            return ([Myanmar.nga], vowelStartForDoubled, true, false, false)
+        }
         if let matchedVowels = vowelRuleUpperConsonants(chars: chars, insertIndex: insertIndex) {
             return (
                 matchedVowels.uppers,
@@ -1291,6 +1312,34 @@ extension BurmeseEngine {
         default:
             return false
         }
+    }
+
+    /// TASK-019 helper: returns the start index of the asat-closed
+    /// vowel rule that ends at `doubledStart` (the first character of
+    /// the doubled cluster), or nil if no such vowel rule matches.
+    /// The doubled letter `<X><X>` after a recognised vowel-rule with
+    /// an asat-closed coda (`an`, `in`, `aung`, `aing`, …) is the
+    /// kinzi-stack signal — the kinzi anchor uses `nga` regardless of
+    /// the vowel rule's natural upper. Bare `<X><X>` patterns at the
+    /// buffer head (no preceding vowel rule) return nil so the
+    /// existing buffer-leading bare-nga path keeps owning that case.
+    private static func doubledLetterVowelStart(
+        chars: [Character],
+        doubledStart: Int
+    ) -> Int? {
+        guard doubledStart >= 2 else { return nil }
+        for rule in stackVowelUpperRules {
+            let length = rule.key.count
+            guard length <= doubledStart else { continue }
+            let start = doubledStart - length
+            var matches = true
+            for offset in 0..<length where chars[start + offset] != rule.key[offset] {
+                matches = false
+                break
+            }
+            if matches { return start }
+        }
+        return nil
     }
 
     @inline(__always)

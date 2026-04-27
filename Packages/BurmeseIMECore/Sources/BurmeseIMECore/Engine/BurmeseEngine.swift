@@ -1472,6 +1472,22 @@ public final class BurmeseEngine: @unchecked Sendable {
             }
         }
 
+        // TASK-019: ensure strict-inferred kinzi surfaces are always
+        // present in `merged` even when the candidate page size has
+        // already filled up with other parses. Without this, a buffer
+        // with many medial / cluster variants (e.g. `manggyi` →
+        // `မငဂြီ`, `မငဂျီ`, `မန်ဂဂြီ`, …) can crowd out the inferred
+        // kinzi candidate before `bestStrictInferredStackIndex` gets
+        // a chance to promote it. The injection happens in-place;
+        // duplicates are filtered.
+        if !strictInferredStackOutputs.isEmpty {
+            let mergedSurfaces = Set(merged.map(\.surface))
+            for grammarCandidate in grammarCandidates
+            where strictInferredStackOutputs.contains(grammarCandidate.candidate.surface)
+                && !mergedSurfaces.contains(grammarCandidate.candidate.surface) {
+                merged.append(grammarCandidate.candidate)
+            }
+        }
         merged = Self.expandAaVariants(merged)
         merged = Self.sanitizeOrphanZwnj(merged)
         merged = Self.sanitizeMalformedMyanmarMarks(merged)
