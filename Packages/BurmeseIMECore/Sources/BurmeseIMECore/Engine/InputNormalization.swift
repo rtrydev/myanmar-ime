@@ -23,18 +23,29 @@ extension BurmeseEngine {
     }
 
     /// Collapse ill-formed connector sequences before the DP ever sees
-    /// them (task 08). Three transforms, applied in order:
+    /// them (task 08). Four transforms, applied in order:
     ///
     ///   1. Consecutive `+` collapse to a single `+` — virama over
     ///      virama is structurally impossible, so `k++ar` is equivalent
     ///      to `k+ar` for any parse that survives right-shrink.
-    ///   2. `+` immediately before a vowel character is dropped — virama
+    ///   2. TASK-011: `<consonant-letter>a+<consonant-letter>` reshape
+    ///      to `<consonant-letter>+<consonant-letter>a`. The user's
+    ///      explicit `+` between two open `<C>a` syllables is the
+    ///      virama-stack signal — without the reshape the parser
+    ///      treats `+` as a soft-boundary (since the upper carries an
+    ///      inherent vowel that virama cannot stack onto) and the
+    ///      stacked surface never reaches the candidate pool. Moving
+    ///      the inherent `a` from the upper to the lower mirrors
+    ///      exactly what the no-`+` inference loop produces for the
+    ///      doubled-letter form (`kakka` → `kak+ka` →
+    ///      `1000 1000 1039 1000`).
+    ///   3. `+` immediately before a vowel character is dropped — virama
     ///      cannot stack to a dependent vowel sign or standalone vowel,
     ///      so `k+ar` / `k+a+t` degrade to `kar` / `ka+t`. Without this,
     ///      the DP emits illegal virama-before-vowel shapes that the
     ///      right-shrink probe then prunes back to the seed consonant,
     ///      silently losing the user's tail.
-    ///   3. Leading/trailing `+` peel off — a virama with no partner on
+    ///   4. Leading/trailing `+` peel off — a virama with no partner on
     ///      one side has nothing to stack to and only produces the
     ///      illegal hanging-virama shape.
     internal static func collapseConnectorRuns(_ input: String) -> String {
@@ -51,24 +62,84 @@ extension BurmeseEngine {
             }
             collapsed.append(ch)
         }
+        // TASK-011: reshape `<C>a+<C>` → `<C>+<C>a`. The transform
+        // walks left-to-right; whenever it sees a `+` immediately
+        // preceded by `<consonant-letter>a` and immediately followed
+        // by a `<consonant-letter>`, it moves the upper's inherent
+        // `a` past the `+` and the lower's first letter. This is the
+        // mirror of what `inferImplicitStackMarkers` does to the
+        // no-`+` doubled form (`kakka` → `kak+ka`); without the
+        // reshape the parser treats `+` between two open syllables
+        // as a soft boundary (no surface) and the user's stack
+        // signal vanishes silently.
+        var reshapedChars = Array(collapsed)
+        let vowelLeadersSet: Set<Character> = ["a", "e", "i", "o", "u"]
+        var idx = 0
+        while idx < reshapedChars.count {
+            // Match `<C>a+<C>` shape: `+` at idx, `a` at idx-1,
+            // a consonant letter at idx-2 (or a multi-char consonant
+            // key ending at idx-2), and a consonant letter at idx+1.
+            if reshapedChars[idx] == "+",
+               idx >= 2,
+               reshapedChars[idx - 1] == "a",
+               isInherentABearingConsonantLetter(reshapedChars[idx - 2]),
+               idx + 1 < reshapedChars.count,
+               isInherentABearingConsonantLetter(reshapedChars[idx + 1]),
+               !vowelLeadersSet.contains(reshapedChars[idx + 1]) {
+                // Reshape: drop the `a` at idx-1, insert `a` after
+                // the lower's first letter (idx + 1 in the new
+                // array layout, which was idx + 1 originally before
+                // the drop, so we insert at the same position).
+                reshapedChars.remove(at: idx - 1)
+                // Now the array is one shorter; `+` is at idx-1,
+                // lower's first letter at idx, insertion point at
+                // idx+1.
+                let insertAt = idx + 1
+                if insertAt <= reshapedChars.count {
+                    reshapedChars.insert("a", at: insertAt)
+                }
+                // Advance past the just-inserted `a` so we don't
+                // re-trigger on the same site.
+                idx = insertAt + 1
+                continue
+            }
+            idx += 1
+        }
         let vowelLeaders: Set<Character> = ["a", "e", "i", "o", "u"]
         var result = ""
-        result.reserveCapacity(collapsed.count)
-        let chars = Array(collapsed)
+        result.reserveCapacity(reshapedChars.count)
         var i = 0
-        while i < chars.count {
-            if chars[i] == "+",
-               i + 1 < chars.count,
-               vowelLeaders.contains(chars[i + 1]) {
+        while i < reshapedChars.count {
+            if reshapedChars[i] == "+",
+               i + 1 < reshapedChars.count,
+               vowelLeaders.contains(reshapedChars[i + 1]) {
                 i += 1
                 continue
             }
-            result.append(chars[i])
+            result.append(reshapedChars[i])
             i += 1
         }
         while result.first == "+" { result.removeFirst() }
         while result.last == "+" { result.removeLast() }
         return result
+    }
+
+    /// Letters that map to consonants whose inherent vowel is `a`
+    /// (every base consonant in `Romanization.consonants` plus the
+    /// medial-extension `h`/`y`/`r`/`w` that some keys use as their
+    /// trailing letter). Used by the TASK-011 reshape to identify
+    /// the `<C>a+<C>` shape without false-positive matching of vowel
+    /// letters.
+    private static func isInherentABearingConsonantLetter(_ ch: Character) -> Bool {
+        // Single-letter consonant keys from Romanization.consonants:
+        // k, g, n, s, z, t, d, p, v, b, m, y, r, l, w, h.
+        switch ch {
+        case "k", "g", "n", "s", "z", "t", "d", "p", "v", "b",
+             "m", "y", "r", "l", "w", "h":
+            return true
+        default:
+            return false
+        }
     }
 
     /// Split a buffer into its leading run of composing characters and the

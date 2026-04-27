@@ -234,4 +234,8 @@ final class StandaloneParticleMidBufferXCTests: XCTestCase {
 final class BareVowelPaliStackXCTests: XCTestCase {
     func testAll() { runSuite(BareVowelPaliStackSuite.suite, xctest: self) }
 }
+
+final class ExplicitPlusVowelXCTests: XCTestCase {
+    func testAll() { runSuite(ExplicitPlusVowelSuite.suite, xctest: self) }
+}
 #endif
