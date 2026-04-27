@@ -423,6 +423,66 @@ extension SyllableParser {
                        vowelTerminals[Int(prevVowelId)].myanmar.isEmpty {
                         continue
                     }
+                    // TASK-016: reject chained inherent-`a` arcs — i.e.
+                    // a `vowelOnly(inherent-a)` transition after a
+                    // previous arc that already consumed an
+                    // inherent-`a` (either an `onsetVowel` whose vowel
+                    // was inherent-`a`, or another bare inherent-`a`
+                    // `vowelOnly`). The bare-inherent-`a` rule emits
+                    // empty surface, so chaining produces the same
+                    // surface scalar count as the no-chain parse —
+                    // the user's repeated `a` keystrokes silently
+                    // disappear (`kaa` → `က`, `kaaa` → `က`). Rejecting
+                    // forces the right-shrink probe to drop the
+                    // trailing `a`(s) and reattach them as a literal
+                    // tail.
+                    //
+                    // Carve-out: buffer-leading `aa…` chains (no
+                    // consonant onset anywhere in the parent chain)
+                    // are LEGAL — the leading-A promotion converts the
+                    // empty output to `1021`, giving the user a
+                    // visible glyph that represents the typing. Walk
+                    // back through `parentIdx` to verify a consonant
+                    // arc exists before rejecting.
+                    if inherentAVowelId >= 0,
+                       vowelEntry.id == inherentAVowelId {
+                        let previousConsumedInherentA: Bool = {
+                            switch previous.matchRef {
+                            case .onsetVowel(_, let prevVowelId):
+                                return prevVowelId == inherentAVowelId
+                            case .vowelOnly(let prevVowelId):
+                                return prevVowelId == inherentAVowelId
+                            default:
+                                return false
+                            }
+                        }()
+                        if previousConsumedInherentA {
+                            // Walk back to detect a consonant arc.
+                            var ancestor = previous
+                            var hasConsonantAncestor = false
+                            // Cap the walk depth to avoid pathological
+                            // O(n) worst case on every transition; the
+                            // depth in practice is bounded by the
+                            // input length and an inherent-A chain
+                            // can only be a few levels deep before
+                            // this guard fires.
+                            var depth = 0
+                            while ancestor.parentIdx >= 0, depth < 8 {
+                                switch ancestor.matchRef {
+                                case .onsetOnly, .onsetVowel:
+                                    hasConsonantAncestor = true
+                                default:
+                                    break
+                                }
+                                if hasConsonantAncestor { break }
+                                ancestor = arena[Int(ancestor.parentIdx)]
+                                depth += 1
+                            }
+                            if hasConsonantAncestor {
+                                continue
+                            }
+                        }
+                    }
                     let aliasCostAdj = vowelEntry.aliasCost
                         + (stackedFinal ? 2 : 0)
                     let newState = ParseState(

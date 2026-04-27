@@ -62,23 +62,21 @@ extension BurmeseEngine {
             }
             collapsed.append(ch)
         }
-        // TASK-011: reshape `<C>a+<C>` → `<C>+<C>a`. The transform
-        // walks left-to-right; whenever it sees a `+` immediately
-        // preceded by `<consonant-letter>a` and immediately followed
-        // by a `<consonant-letter>`, it moves the upper's inherent
-        // `a` past the `+` and the lower's first letter. This is the
-        // mirror of what `inferImplicitStackMarkers` does to the
-        // no-`+` doubled form (`kakka` → `kak+ka`); without the
-        // reshape the parser treats `+` between two open syllables
-        // as a soft boundary (no surface) and the user's stack
-        // signal vanishes silently.
+        // TASK-011: reshape `<C>a+<C>` → `<C>+<C>` (drop the upper's
+        // inherent `a` so the explicit `+` virama signal survives).
+        // Without this reshape the parser treats `+` between two
+        // open syllables as a soft boundary (no surface) and the
+        // user's stack signal vanishes silently. Dropping (rather
+        // than moving) the upper's `a` keeps the structural shape
+        // identical to a manually typed `<C>+<C>` (e.g. `k+ka`)
+        // while preserving the user's lower vowel; chains like
+        // `ya+p+ga` reshape to `y+p+ga` (one drop per `+`-flanking
+        // `a`) without ever producing the chained-`a` shape that
+        // TASK-016 rejects.
         var reshapedChars = Array(collapsed)
         let vowelLeadersSet: Set<Character> = ["a", "e", "i", "o", "u"]
         var idx = 0
         while idx < reshapedChars.count {
-            // Match `<C>a+<C>` shape: `+` at idx, `a` at idx-1,
-            // a consonant letter at idx-2 (or a multi-char consonant
-            // key ending at idx-2), and a consonant letter at idx+1.
             if reshapedChars[idx] == "+",
                idx >= 2,
                reshapedChars[idx - 1] == "a",
@@ -86,21 +84,16 @@ extension BurmeseEngine {
                idx + 1 < reshapedChars.count,
                isInherentABearingConsonantLetter(reshapedChars[idx + 1]),
                !vowelLeadersSet.contains(reshapedChars[idx + 1]) {
-                // Reshape: drop the `a` at idx-1, insert `a` after
-                // the lower's first letter (idx + 1 in the new
-                // array layout, which was idx + 1 originally before
-                // the drop, so we insert at the same position).
+                // Drop the upper's `a`. The `+` immediately follows
+                // the upper consonant and the parser materialises
+                // the virama-stack reading as `<C>+<C>…`. After the
+                // drop, the array shifts left by one — what was at
+                // idx (`+`) is now at idx-1, and what was at idx+1
+                // (the lower's first letter) is now at idx. Advance
+                // past the lower's first letter so we don't re-check
+                // this site.
                 reshapedChars.remove(at: idx - 1)
-                // Now the array is one shorter; `+` is at idx-1,
-                // lower's first letter at idx, insertion point at
-                // idx+1.
-                let insertAt = idx + 1
-                if insertAt <= reshapedChars.count {
-                    reshapedChars.insert("a", at: insertAt)
-                }
-                // Advance past the just-inserted `a` so we don't
-                // re-trigger on the same site.
-                idx = insertAt + 1
+                idx += 1
                 continue
             }
             idx += 1

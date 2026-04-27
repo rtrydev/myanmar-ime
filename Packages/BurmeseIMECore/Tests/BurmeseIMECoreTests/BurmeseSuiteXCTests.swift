@@ -254,4 +254,8 @@ final class BareConsonantToneXCTests: XCTestCase {
 final class AdjacentIndependentVowelXCTests: XCTestCase {
     func testAll() { runSuite(AdjacentIndependentVowelSuite.suite, xctest: self) }
 }
+
+final class RepeatedVowelLetterXCTests: XCTestCase {
+    func testAll() { runSuite(RepeatedVowelLetterSuite.suite, xctest: self) }
+}
 #endif

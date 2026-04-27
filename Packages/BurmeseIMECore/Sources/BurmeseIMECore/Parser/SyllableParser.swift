@@ -142,6 +142,15 @@ public final class SyllableParser: Sendable {
     /// Only emitted when gating in the DP succeeds.
     internal let softBoundaryViramaVowelId: Int32
 
+    /// `VowelMatchEntry.id` of the bare inherent-`a` rule
+    /// (canonical roman `"a"`, empty Myanmar output, standalone:
+    /// true). Used by the DP to reject chained inherent-`a`
+    /// `vowelOnly` arcs after an `onsetVowel` that already consumed
+    /// an inherent `a` — the second `a` would silently swallow the
+    /// user's keystroke and produce a surface that's identical to
+    /// the no-`a` parse (TASK-016).
+    internal let inherentAVowelId: Int32
+
     /// Per-vowel: non-zero when the vowel's rendered Myanmar ends with
     /// U+103A (asat) and contains at least two scalars; the value is the
     /// scalar immediately preceding the trailing asat. Used by the
@@ -338,6 +347,7 @@ public final class SyllableParser: Sendable {
         var vowelOnlyLegalities = [Int](repeating: 0, count: builtVowelTrie.terminals.count)
         var foundViramaId: Int32 = -1
         var foundSoftBoundaryId: Int32 = -1
+        var foundInherentAId: Int32 = -1
         var vowelEndsAsat = [Bool](repeating: false, count: builtVowelTrie.terminals.count)
         var vowelPreAsat = [UInt32](repeating: 0, count: builtVowelTrie.terminals.count)
         var vowelMidBufPen = [Bool](repeating: false, count: builtVowelTrie.terminals.count)
@@ -353,6 +363,10 @@ public final class SyllableParser: Sendable {
                 } else if foundViramaId < 0 {
                     foundViramaId = entry.id
                 }
+            }
+            if entry.canonicalRoman == "a", entry.myanmar.isEmpty,
+               foundInherentAId < 0 {
+                foundInherentAId = entry.id
             }
             let scalars = Array(entry.myanmar.unicodeScalars)
             if let last = scalars.last, last.value == 0x103A {
@@ -400,6 +414,7 @@ public final class SyllableParser: Sendable {
         self.vowelOnlyLegality = vowelOnlyLegalities
         self.viramaVowelId = foundViramaId
         self.softBoundaryViramaVowelId = foundSoftBoundaryId
+        self.inherentAVowelId = foundInherentAId
         self.vowelEndsWithAsat = vowelEndsAsat
         self.vowelPreAsatScalar = vowelPreAsat
         self.vowelIsMidBufferPenalised = vowelMidBufPen
