@@ -386,6 +386,43 @@ extension SyllableParser {
                         }()
                         if !previousIsSeed || vowelEnd < n { continue }
                     }
+                    // TASK-009: a standalone vowel whose Myanmar output
+                    // begins with an independent-vowel scalar
+                    // (U+1023..U+102A) AND whose canonical bears a
+                    // numeric disambiguator (e.g. the digit-stripped
+                    // alias of `u2 → ဦ` registered under trie key
+                    // `"u"`) is intentionally NOT tagged by the
+                    // TASK-007 gate above — two-syllable shapes like
+                    // `thiu` need it to fire after a real vowel-mark-
+                    // ending arc to produce `သီဦ`. But when the
+                    // previous arc is a `vowelOnly` with empty Myanmar
+                    // emission (the inherent-`a` rule, the only such
+                    // entry today), the standalone rule lands directly
+                    // after an empty position — equivalent to firing
+                    // at the start of a new syllable with no anchor.
+                    // This is the cross-task interaction surfaced by
+                    // TASK-009 where `kar:au` splits into
+                    // `[kar:][au]`, the suffix `au` parses as
+                    // inherent-A + standalone-u, and the materialized
+                    // output is `[1021 1026]` (independent A + 1026)
+                    // — concatenated with the visarga prefix it
+                    // produces `ကားအဦ`. Skipping the standalone here
+                    // forces the dependent-vowel sibling (`u → 1030`)
+                    // to win, giving the expected `ကားအူ`.
+                    //
+                    // Narrowly scoped: only fires when the standalone
+                    // vowel produces an independent-vowel scalar
+                    // (1023..102A) AND the previous arc is `vowelOnly`
+                    // with empty emission. Free-standing particles
+                    // (`104D / 104F`) and any non-empty previous arc
+                    // are unaffected.
+                    if vowelEntry.isStandalone,
+                       let firstOut = vowelEntry.myanmar.unicodeScalars.first,
+                       firstOut.value >= 0x1023 && firstOut.value <= 0x102A,
+                       case .vowelOnly(let prevVowelId) = previous.matchRef,
+                       vowelTerminals[Int(prevVowelId)].myanmar.isEmpty {
+                        continue
+                    }
                     let aliasCostAdj = vowelEntry.aliasCost
                         + (stackedFinal ? 2 : 0)
                     let newState = ParseState(

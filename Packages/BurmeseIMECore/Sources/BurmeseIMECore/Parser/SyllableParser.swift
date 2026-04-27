@@ -361,13 +361,13 @@ public final class SyllableParser: Sendable {
                     vowelPreAsat[idx] = scalars[scalars.count - 2].value
                 }
             }
-            // TASK-007: tag standalone vowel rules whose Myanmar output
-            // begins with an independent-vowel scalar (U+1023..U+102A)
-            // or a free-standing particle (U+104D, U+104F) AND whose
-            // canonical roman contains no numeric disambiguator. These
-            // characters are valid only at syllable boundaries / word
-            // starts; mid-buffer matches produce orthographically
-            // nonsense surfaces.
+            // TASK-007: tag standalone vowel rules whose Myanmar
+            // output begins with an independent-vowel scalar
+            // (U+1023..U+102A) or a free-standing particle (U+104D /
+            // U+104F) AND whose canonical roman contains no numeric
+            // disambiguator. These characters are valid only at
+            // syllable boundaries / word starts; mid-buffer matches
+            // produce orthographically nonsense surfaces.
             //
             // Digit-bearing standalone keys (`u2`, `u2.`, `u2:`, `ay2`)
             // are USER-EXPLICIT — typing the `2` is the canonical
@@ -377,6 +377,15 @@ public final class SyllableParser: Sendable {
             // out the standalone explicitly. Non-digit standalone keys
             // (`oo`, `ii`, `ei`, `ywe`) carry no such signal and are
             // the actual TASK-007 bug shape.
+            //
+            // Note: the digit-stripped *alias* of `u → 1026` (the
+            // entry registered under key "u" but with canonical "u2")
+            // is intentionally NOT tagged here, so two-syllable shapes
+            // like `thiu → သီဦ` keep producing the precomposed
+            // independent vowel. The TASK-009 cross-task case
+            // (`kar:au` suffix `au`) is handled by a separate DP
+            // refinement that targets the inherent-A previous arc
+            // specifically — see the gate in `NBestDP.swift`.
             if entry.isStandalone,
                let first = scalars.first,
                !entry.canonicalRoman.contains(where: Romanization.isNumericAliasMarker) {
