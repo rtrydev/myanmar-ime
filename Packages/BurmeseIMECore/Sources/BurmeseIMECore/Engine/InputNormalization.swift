@@ -454,6 +454,82 @@ extension BurmeseEngine {
             return (collapsed, 1, 0, 0, nil, 1, nil, 0)
         }
         } // end if chars.count >= 5
+        // TASK-019 Bug B follow-up: doubled-letter `<X><X>` immediately
+        // after a vowel rule whose Myanmar surface ends with nga-asat
+        // (`1004 103A` — `in`, `aing`, `aung`, `ai` and their tone-marked
+        // siblings). The vowel rule already provides the kinzi upper
+        // (nga); the user's first `<X>` is a redundant kinzi anchor and
+        // the second `<X>` is the stack lower. Collapse to `<...><vowel>+<X><...>`
+        // so the parser materialises kinzi (`nga + asat + virama + <lower>`)
+        // with exactly one lower scalar — without this collapse the
+        // doubled-letter inference branch in
+        // `stackUpperConsonantsEndingBeforeLower` injects `*+` and the
+        // parser splits the buffer (`<C>i + ng + asat + virama + ga`)
+        // producing a stray `i-kar` (`102E`) before the kinzi. The
+        // existing `ai+ng` buffer-leading and mid-buffer collapses
+        // handle the explicit `<C>aing<gg>` / `aing<gg>` shapes; this
+        // pass covers every other nga-asat-emitting vowel rule.
+        if chars.count >= 4 {
+            for vowelEnd in 2..<(chars.count - 1) {
+                let lower = chars[vowelEnd]
+                guard lower.isLetter, chars[vowelEnd + 1] == lower else { continue }
+                guard let lowerConsonant = Romanization.romanToConsonant[String(lower)],
+                      Grammar.stackableConsonants.contains(lowerConsonant),
+                      Grammar.isValidStack(upper: Myanmar.nga, lower: lowerConsonant)
+                else { continue }
+                // Skip when the prior `ai+ng` collapses already cover
+                // the position (key ends in `ng` AND the letter before
+                // the `ng` is the diphthong's `i`/`a` shape) — they
+                // produce a different rewrite.
+                guard let key = ngaAsatVowelKeyEnding(chars: chars, at: vowelEnd) else {
+                    continue
+                }
+                let vowelStart = vowelEnd - key.count
+                // Skip when a LONGER nga-asat-emitting rule starts
+                // earlier and extends past `vowelEnd` — the parser
+                // would consume the doubled letter as part of the
+                // longer rule, so our shorter-key collapse would
+                // mis-segment the buffer. Concrete case: `maingga`
+                // (`m,a,i,n,g,g,a`) — `in` matches `chars[2..4]` but
+                // `aing` matches `chars[1..5]`, consuming the first
+                // doubled `g` as the rule's nga-asat coda. The
+                // existing `ai+ng` mid-buffer collapse owns this
+                // shape and produces a clean rewrite.
+                if hasLongerNgaAsatRuleOverlapping(
+                    chars: chars,
+                    coveringEnd: vowelEnd,
+                    excluding: key
+                ) {
+                    continue
+                }
+                // Block the collapse when an explicit syllable break
+                // (digit) sits between the vowel start and the doubled
+                // letter — the user opted out of stacking there.
+                if !digitBoundaries.isEmpty,
+                   digitBoundaries.contains(where: { $0 > vowelStart && $0 <= vowelEnd + 1 }) {
+                    continue
+                }
+                // No bare-inherent-a tail guard here. Unlike the
+                // existing `ai+ng` mid-buffer collapse — which
+                // operates on the user's explicit `ng` after `ai` and
+                // can defer to the open form when the next syllable
+                // is just `a` — the doubled-letter signal `<X><X>`
+                // is itself the user's intent marker for kinzi-
+                // stacking. Even when the post-stack syllable is
+                // bare-inherent-a (`kingga`, `maingga`), the user
+                // typing the doubled letter explicitly asked for
+                // the kinzi rendering; without firing here, the
+                // parser falls back to a doubled `1002` open form
+                // (`ကင်ဂဂ`) that no Burmese word ever spells that
+                // way.
+                // Drop the redundant first doubled letter and insert
+                // `+`. The vowel rule's nga-asat plus the inserted
+                // `+` materialises the kinzi (`nga + asat + virama +
+                // <lower>`); the surviving second `<X>` is the lower.
+                let collapsed = String(chars[..<vowelEnd]) + "+" + String(chars[(vowelEnd + 1)...])
+                return (collapsed, 1, 0, 0, nil, 1, nil, 0)
+            }
+        }
         let medialLetters: Set<Character> = ["y", "r", "w"]
         // `isBurmeseCompoundSite` flags TASK-006 bug-class inference
         // sites: vowel-rule upper that is NOT the nga consonant AND
@@ -1318,17 +1394,33 @@ extension BurmeseEngine {
     /// vowel rule that ends at `doubledStart` (the first character of
     /// the doubled cluster), or nil if no such vowel rule matches.
     /// The doubled letter `<X><X>` after a recognised vowel-rule with
-    /// an asat-closed coda (`an`, `in`, `aung`, `aing`, …) is the
-    /// kinzi-stack signal — the kinzi anchor uses `nga` regardless of
-    /// the vowel rule's natural upper. Bare `<X><X>` patterns at the
-    /// buffer head (no preceding vowel rule) return nil so the
-    /// existing buffer-leading bare-nga path keeps owning that case.
+    /// an asat-closed coda (`an`, `aung`, …) is the kinzi-stack signal
+    /// — the kinzi anchor uses `nga` regardless of the vowel rule's
+    /// natural upper. Bare `<X><X>` patterns at the buffer head (no
+    /// preceding vowel rule) return nil so the existing buffer-leading
+    /// bare-nga path keeps owning that case.
+    ///
+    /// Vowel rules whose own Myanmar surface ends with `1004 103A`
+    /// (nga-asat — `in`, `aing`, `ai`, `aung` family) are EXCLUDED
+    /// here. The `*+` injection that this branch enables would add
+    /// a SECOND asat scalar after the rule's existing one and force
+    /// the parser to re-segment the buffer (`<C>i + ng + asat +
+    /// virama + <X>` instead of `<C> + in + virama + <X>`), leaving a
+    /// stray `i-kar` (`102E`) before the kinzi. Those nga-asat-rule
+    /// shapes are handled by the doubled-letter pre-pass at the top
+    /// of `inferImplicitStackMarkers` — when the pre-pass collapses,
+    /// it consumes the position; when its bare-inherent-a guard
+    /// blocks, the open form wins naturally without a polluted
+    /// stray-vowel `*+` rendering.
     private static func doubledLetterVowelStart(
         chars: [Character],
         doubledStart: Int
     ) -> Int? {
         guard doubledStart >= 2 else { return nil }
         for rule in stackVowelUpperRules {
+            // Skip rules whose upper is nga: they are nga-asat-emitting
+            // (`in`, `aing`, `ai`, `aung`); see the doc comment above.
+            if rule.uppers.contains(Myanmar.nga) { continue }
             let length = rule.key.count
             guard length <= doubledStart else { continue }
             let start = doubledStart - length
@@ -1340,6 +1432,98 @@ extension BurmeseEngine {
             if matches { return start }
         }
         return nil
+    }
+
+    /// Romanization keys for vowel rules whose Myanmar surface ends
+    /// with `1004 103A` (nga-asat). These are the rules whose own
+    /// output already contains the kinzi upper, so any user-typed
+    /// doubled-letter `<X><X>` immediately after the rule is the
+    /// signal "stack <X> under the kinzi" — the first `<X>` is a
+    /// redundant kinzi anchor, the second is the stack lower.
+    /// Includes every variant of `in`, `aing`, `ai`, `aung`, etc.,
+    /// with their tone-marker siblings (`:`, `.`). Sorted longest-
+    /// first so the matcher consumes the longest applicable key
+    /// (`aing` before `ai`, `aung2:` before `aung`, …). Excludes
+    /// `ng` / `ngg` (consonant keys, not vowel rules) and the open
+    /// `ai*` rules whose output does NOT end with nga-asat (none in
+    /// the current rule table).
+    @_spi(Testing) public static let ngaAsatVowelKeys: [[Character]] = {
+        var seen: Set<String> = []
+        var keys: [[Character]] = []
+        for entry in Romanization.vowels {
+            let key = Romanization.aliasReading(entry.roman)
+            guard key.count >= 2 else { continue }
+            // Last two scalars must be `1004 103A` (nga + asat) for
+            // the kinzi-anchor signal to apply.
+            let scalars = Array(entry.myanmar.unicodeScalars)
+            guard scalars.count >= 2,
+                  scalars[scalars.count - 2].value == 0x1004,
+                  scalars[scalars.count - 1].value == 0x103A
+            else { continue }
+            guard seen.insert(key).inserted else { continue }
+            keys.append(Array(key))
+        }
+        return keys.sorted { lhs, rhs in lhs.count > rhs.count }
+    }()
+
+    /// Returns the rule-key character array for the longest
+    /// `ngaAsatVowelKeys` entry that ends exactly at `vowelEnd` in
+    /// `chars`, or nil if no such key matches. Used by the doubled-
+    /// letter kinzi pre-pass to decide whether to collapse a
+    /// `<vowel-rule><X><X>` site into `<vowel-rule>+<X>`.
+    private static func ngaAsatVowelKeyEnding(
+        chars: [Character],
+        at vowelEnd: Int
+    ) -> [Character]? {
+        for key in ngaAsatVowelKeys {
+            let length = key.count
+            guard length <= vowelEnd else { continue }
+            let start = vowelEnd - length
+            var matches = true
+            for offset in 0..<length where chars[start + offset] != key[offset] {
+                matches = false
+                break
+            }
+            if matches { return key }
+        }
+        return nil
+    }
+
+    /// True when any nga-asat-emitting vowel rule (other than
+    /// `excluding`) covers a span that strictly extends past
+    /// `coveringEnd`. Used by the doubled-letter pre-pass to bail
+    /// when a longer rule (e.g. `aing`) overlaps a shorter match
+    /// (e.g. `in`) — in that case the parser's natural longest-match
+    /// segmentation would consume the doubled letter as part of the
+    /// longer rule, so the shorter-key collapse would mis-rewrite
+    /// the buffer.
+    private static func hasLongerNgaAsatRuleOverlapping(
+        chars: [Character],
+        coveringEnd: Int,
+        excluding: [Character]
+    ) -> Bool {
+        for key in ngaAsatVowelKeys {
+            // Only consider STRICTLY longer keys.
+            if key.count <= excluding.count { continue }
+            // Try every start position whose end strictly exceeds
+            // coveringEnd — i.e. the key covers chars within
+            // [start, start + key.count) and start + key.count >
+            // coveringEnd. Equivalently, start in
+            // (coveringEnd - key.count, coveringEnd].
+            let lowerBound = max(0, coveringEnd - key.count + 1)
+            let upperBound = min(chars.count - key.count, coveringEnd)
+            guard lowerBound <= upperBound else { continue }
+            for start in lowerBound...upperBound {
+                var matches = true
+                for offset in 0..<key.count
+                where chars[start + offset] != key[offset] {
+                    matches = false
+                    break
+                }
+                if matches { return true }
+            }
+        }
+        return false
     }
 
     @inline(__always)
