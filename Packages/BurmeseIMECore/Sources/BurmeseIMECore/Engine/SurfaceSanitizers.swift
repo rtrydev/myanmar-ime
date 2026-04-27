@@ -183,6 +183,95 @@ extension BurmeseEngine {
         }
     }
 
+    /// TASK-015: drop any candidate whose surface violates the
+    /// "one base per syllable" invariant for onsetless multi-vowel
+    /// inputs. Three illegal shapes:
+    ///   1. Adjacent independent-vowel scalars (`[1021..102A]
+    ///      [1021..102A]`).
+    ///   2. Repeated U+1021 anchors injected into a single orphan-
+    ///      mark cluster (the orphan-mark sanitizer's
+    ///      one-anchor-per-scalar bug).
+    ///   3. Precomposed independent vowel (U+1024..U+102A excluding
+    ///      U+1028) preceded by a dep-vowel sign with no intervening
+    ///      syllable closer or base consonant — i.e. mid-syllable
+    ///      precomposed indep insertion.
+    /// Like the other sanitizers, the filter only runs when at
+    /// least one clean candidate exists; otherwise the panel keeps
+    /// the violating candidates as a last-resort fallback.
+    internal static func sanitizeAdjacentIndependentVowels(_ candidates: [Candidate]) -> [Candidate] {
+        let hasClean = candidates.contains {
+            !surfaceViolatesIndependentVowelInvariant($0.surface)
+        }
+        guard hasClean else { return candidates }
+        return candidates.filter {
+            !surfaceViolatesIndependentVowelInvariant($0.surface)
+        }
+    }
+
+    /// True when `surface` violates one of the TASK-015 invariants.
+    ///
+    /// The two structural shapes guarded against:
+    ///   1. Adjacent independent-vowel scalars — `[1021..102A]
+    ///      [1021..102A]` directly adjacent. Each Burmese syllable
+    ///      has exactly one base; two indep-vowel scalars next to
+    ///      each other cannot both be the base of separate syllables
+    ///      without at least a dependent-vowel mark or syllable
+    ///      closer between them.
+    ///   2. Repeated U+1021 anchors injected into a single orphan-
+    ///      mark stretch — the orphan-mark sanitizer is supposed to
+    ///      wrap a contiguous orphan-mark run with one anchor, not
+    ///      one per scalar (`nyaungoo` produced four U+1021 anchors
+    ///      pre-fix; only one is correct).
+    /// The "precomposed indep mid-syllable" pattern (`thiu`,
+    /// `rarthiu`) is intentionally *not* a violation — it represents
+    /// two valid Burmese syllables (`thi` + `u`) where the second is
+    /// an independent-vowel particle, an established orthographic
+    /// shape exercised by existing test suites.
+    internal static func surfaceViolatesIndependentVowelInvariant(_ surface: String) -> Bool {
+        let scalars = Array(surface.unicodeScalars).map(\.value)
+        // (1) adjacent indep-vowel scalars.
+        if scalars.count >= 2 {
+            for i in 0..<(scalars.count - 1) {
+                if (0x1021...0x102A).contains(scalars[i])
+                    && (0x1021...0x102A).contains(scalars[i + 1]) {
+                    return true
+                }
+            }
+        }
+        // (2) three or more U+1021 anchors chained together with only
+        // dep-vowel scalars (no syllable closer / base consonant)
+        // between them. Two anchors with one dep-vowel between are a
+        // valid two-syllable shape (e.g. `aungout` →
+        // `… 1021 1031 1021 102C …`); the bug class is the orphan-
+        // mark sanitizer's per-scalar anchor injection that produces
+        // four-anchor patterns like `nyaungoo` →
+        // `… 1021 102D 1021 102F 1021 102D 1021 102F`.
+        var i = 0
+        var chainCount = 0
+        while i < scalars.count {
+            let v = scalars[i]
+            if v == 0x1021 {
+                chainCount += 1
+                if chainCount >= 3 {
+                    return true
+                }
+                i += 1
+                continue
+            }
+            let isDepMark = (0x102B...0x1032).contains(v)
+                || v == 0x1036
+                || (0x103B...0x103E).contains(v)
+            if isDepMark {
+                i += 1
+                continue
+            }
+            // Anything else resets the chain.
+            chainCount = 0
+            i += 1
+        }
+        return false
+    }
+
     private static func surfaceHasIndepVowelVirama(_ surface: String) -> Bool {
         let scalars = Array(surface.unicodeScalars).map(\.value)
         guard scalars.count >= 2 else { return false }

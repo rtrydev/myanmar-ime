@@ -60,22 +60,22 @@ public enum BareVowelRepetitionSuite {
 
         // Sibling reachability: the override flips the canonical
         // single-vowel form to rank 1, but the parser-native repeated
-        // shape (`ဦဦ` for `uu`, `ယ်ယ်ယ်` for `eee`, `အိုို` for `oo`,
-        // `အီီ` etc. for `ii`) must remain reachable elsewhere in the
-        // panel so the user can still pick the rarer form if they
-        // explicitly want it. `a` repetition has no parser-native
-        // sibling (the inherent vowel collapses every repetition to
-        // a single `အ`), so it's skipped here.
+        // shape (`ယ်ယ်ယ်` for `eee`, `အိုို` for `oo`, `အီီ` etc.
+        // for `ii`) must remain reachable elsewhere in the panel so
+        // the user can still pick the rarer form if they explicitly
+        // want it.
+        //
+        // `a` repetition has no parser-native sibling (the inherent
+        // vowel collapses every repetition to a single `အ`), and `u`
+        // / `o` repetition's parser-native shape (`ဦဦ` / `ဩဩ`)
+        // violates the TASK-015 "no two adjacent independent-vowel
+        // scalars" invariant and is filtered out at the candidate
+        // sanitizer; the override remains the only legal candidate
+        // for those letters, so they're skipped here.
         TestCase("repeatedBareVowels_parserNativeSiblingReachable") { ctx in
-            // Letter → expected rank-1 override surface (skip-list
-            // for the sibling search). `a` is excluded because the
-            // parser collapses every `a`-only buffer to inherent `အ`
-            // with no distinct sibling.
             let cases: [(letter: Character, override: String)] = [
                 ("e", "\u{1021}\u{102E}"),
                 ("i", "\u{1024}"),
-                ("o", "\u{1029}"),
-                ("u", "\u{1021}\u{1030}"),
             ]
             for entry in cases {
                 for n in 2...4 {

@@ -1453,6 +1453,7 @@ public final class BurmeseEngine: @unchecked Sendable {
         merged = Self.sanitizeOrphanZwnj(merged)
         merged = Self.sanitizeMalformedMyanmarMarks(merged)
         merged = Self.sanitizeIndepVowelVirama(merged)
+        merged = Self.sanitizeAdjacentIndependentVowels(merged)
 
         if !effectiveParseInput.contains("+"),
            !effectiveWindowed,
@@ -1952,7 +1953,8 @@ public final class BurmeseEngine: @unchecked Sendable {
         }
 
         let sanitizedAffixed = Self.sanitizeMalformedMyanmarMarks(mergedWithAffixes)
-        let sanitizedWithAffixes = Self.sanitizeIndepVowelVirama(sanitizedAffixed)
+        let sanitizedAffixed2 = Self.sanitizeIndepVowelVirama(sanitizedAffixed)
+        let sanitizedWithAffixes = Self.sanitizeAdjacentIndependentVowels(sanitizedAffixed2)
         let finalCandidates: [Candidate]
         if leadingLiteral.isEmpty,
            digitPrefix.isEmpty,
