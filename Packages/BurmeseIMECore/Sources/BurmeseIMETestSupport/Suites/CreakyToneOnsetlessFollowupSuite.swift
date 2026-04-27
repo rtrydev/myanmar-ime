@@ -23,6 +23,17 @@ public enum CreakyToneOnsetlessFollowupSuite {
         surface.unicodeScalars.filter { $0.value == implicitAScalar }.count
     }
 
+    /// Count of independent-vowel scalars in the surface (U+1021..U+102A,
+    /// including the precomposed forms `1023`–`102A`). Used by the
+    /// onset-less-split test in place of the literal `1021` count: both
+    /// `အု` (1021 + 102F) and the precomposed `ဥ` (1025) are valid
+    /// "split worked" surfaces — the engine's frozen-segment renderer
+    /// may pick either depending on which sibling the parser ranks
+    /// higher, so the assertion needs to accept both shapes.
+    private static func independentVowelCount(_ surface: String) -> Int {
+        surface.unicodeScalars.filter { (0x1021...0x102A).contains($0.value) }.count
+    }
+
     private static func isLegal(_ surface: String) -> Bool {
         SyllableParser.scanOutputLegality(surface)
     }
@@ -130,17 +141,21 @@ public enum CreakyToneOnsetlessFollowupSuite {
 
         // ── onset-less open-vowel dot + aung ────────────────────────────────
         // `u.aung` and `i.aung` have no base consonant for the first syllable.
-        // Both sides of the split need an explicit U+1021 — so the correct
-        // surface has at least two U+1021 scalars.
+        // Both sides of the split need an independent-vowel anchor (one per
+        // syllable). The first-syllable anchor may surface either as the
+        // generic U+1021 + dependent vowel pair (`အု`) or as the precomposed
+        // independent vowel (`ဥ` = U+1025). Count any independent-vowel
+        // scalar (1021..102A) so both rendering shapes pass — the test
+        // verifies that the split fired, not a particular spelling choice.
         TestCase("onsetlessVowelCreaky_aung") { ctx in
             let engine = emptyEngine()
             for input in ["u.aung", "i.aung"] {
                 let top = topSurface(engine, input)
-                let aCount = implicitACount(top)
+                let independentCount = independentVowelCount(top)
                 ctx.assertTrue(
-                    aCount >= 2,
+                    independentCount >= 2,
                     input,
-                    detail: "top '\(top)' has only \(aCount) U+1021 scalar(s); expected ≥2 (one per split syllable)"
+                    detail: "top '\(top)' has only \(independentCount) independent-vowel scalar(s); expected ≥2 (one per split syllable)"
                 )
             }
         },
