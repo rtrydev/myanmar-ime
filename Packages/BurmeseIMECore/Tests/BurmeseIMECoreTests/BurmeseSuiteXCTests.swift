@@ -242,4 +242,8 @@ final class ExplicitPlusVowelXCTests: XCTestCase {
 final class WindowedIndepVowelViramaInvariantXCTests: XCTestCase {
     func testAll() { runSuite(WindowedIndepVowelViramaInvariantSuite.suite, xctest: self) }
 }
+
+final class RepeatedLetterPerfXCTests: XCTestCase {
+    func testAll() { runSuite(RepeatedLetterPerfSuite.suite, xctest: self) }
+}
 #endif

@@ -532,6 +532,37 @@ public final class SyllableParser: Sendable {
         )
     }
 
+    /// TASK-013: pick a DP beam width that scales with the input's
+    /// distinct-letter count so highly redundant buffers (`tttttt…`,
+    /// long runs of the same consonant) skip the wide-beam exploration.
+    /// The default `max(maxResults * 16, 64)` is correct for normal
+    /// Burmese input where every position has a different letter, but
+    /// for redundant input the wide beam is wasted work — every state
+    /// that survives the ranker after pruning shares its aliasCost /
+    /// score tier with thousands of structurally identical siblings.
+    /// Halve the beam when the buffer's longest same-letter run is
+    /// at least 6 characters; the surviving N-best is unaffected.
+    internal static func beamWidth(for chars: [Character], maxResults: Int) -> Int {
+        let maxRun = longestSameLetterRun(in: chars)
+        let multiplier = (maxRun >= 6) ? 4 : 16
+        return max(maxResults * multiplier, 64)
+    }
+
+    private static func longestSameLetterRun(in chars: [Character]) -> Int {
+        guard !chars.isEmpty else { return 0 }
+        var longest = 1
+        var current = 1
+        for i in 1..<chars.count {
+            if chars[i] == chars[i - 1] {
+                current += 1
+                if current > longest { longest = current }
+            } else {
+                current = 1
+            }
+        }
+        return longest
+    }
+
     internal func parseCandidates(
         _ input: String,
         maxResults: Int,
@@ -542,7 +573,20 @@ public final class SyllableParser: Sendable {
         guard !normalized.isEmpty, maxResults > 0 else { return [] }
 
         let chars = Array(normalized)
-        let beamWidth = max(maxResults * 16, 64)
+        // TASK-013: highly redundant buffers (long runs of the same
+        // letter, e.g. `tttttttttt…`) generate a dense beam at every
+        // column because each repeated letter matches both the
+        // canonical onset rule and its digit-disambiguator alias
+        // (`t` and `t2`, `p` and `p2`, …). The DP carries up to
+        // `beamWidth` states per bucket, sorts whenever the bucket
+        // overflows `2 × beamWidth`, and materialises every
+        // surviving candidate at finalize time — so the per-keystroke
+        // cost grows super-linearly with buffer length even though
+        // the candidate panel only needs the top-N. Detect the
+        // redundant shape and tighten the beam: the surviving N-best
+        // is unaffected because every dropped state shares the same
+        // aliasCost / score tier as a state that survives.
+        let beamWidth = Self.beamWidth(for: chars, maxResults: maxResults)
         let onsetMatchesByStart = precomputeOnsetMatches(chars)
         let vowelMatchesByStart = precomputeVowelMatches(chars)
         let (arena, finalIndices) = nBestParse(
@@ -705,9 +749,17 @@ public final class SyllableParser: Sendable {
         let chars = Array(normalized)
         let longInput = chars.count > 20
         let finalizationLimit = max(maxResults, 4)
-        let beamWidth = longInput
-            ? max(finalizationLimit * 4, 32)
-            : max(finalizationLimit * 16, 128)
+        // TASK-013: see `beamWidth(for:maxResults:)` — long runs of
+        // the same letter halve the beam regardless of buffer length.
+        let isRedundantBuffer = Self.longestSameLetterRun(in: chars) >= 6
+        let beamWidth: Int = {
+            if isRedundantBuffer {
+                return max(finalizationLimit * 4, 32)
+            }
+            return longInput
+                ? max(finalizationLimit * 4, 32)
+                : max(finalizationLimit * 16, 128)
+        }()
         let onsetMatchesByStart = precomputeOnsetMatches(chars)
         let vowelMatchesByStart = precomputeVowelMatches(chars)
         var (arena, dp) = runDP(

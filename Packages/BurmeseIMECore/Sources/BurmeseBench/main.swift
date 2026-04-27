@@ -34,6 +34,24 @@ let scenarios: [Scenario] = [
     Scenario(name: "garbage_incremental",
              kind: .incremental("jeiowfgneiorngieorndmfsoigjeiorngieorjgjerogijeqoprjgpojergpoj"),
              iterations: 500),
+    // TASK-013: pathological repeated-letter buffer. Letters whose
+    // romanization key participates in many onset/vowel rules
+    // (`t`, `k`, `s`, `d`, `m`, `n`, `p`) produce a dense DP beam
+    // at every column when repeated; without aggressive duplicate-
+    // state collapse the per-keystroke latency grows super-linearly
+    // with buffer length. This scenario locks in the budget for
+    // 16-`t` buffers, the worst-case shape from the task's
+    // reproduction table.
+    Scenario(name: "repetition_t16",
+             kind: .fullBuffer(String(repeating: "t", count: 16)),
+             iterations: 200),
+    // TASK-013: long `+`-chain (10 segments × 3 chars = 30 chars).
+    // The TASK-011 reshape collapses each `<C>a+<C>` to `<C>+<C>a`
+    // so the chain rarely materialises a deep DP, but the scenario
+    // still locks in the budget for adversarial input.
+    Scenario(name: "plus_chain_30",
+             kind: .fullBuffer(String(repeating: "ka+", count: 10)),
+             iterations: 200),
 ]
 
 // MARK: - Timing

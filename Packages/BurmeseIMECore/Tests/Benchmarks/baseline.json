@@ -3,60 +3,78 @@
       {
     "scenario": "short",
     "iterations": 1000,
-    "p50_us": 117.33,
-    "p95_us": 123.08,
-    "p99_us": 135.92,
-    "max_us": 184.00,
+    "p50_us": 104.04,
+    "p95_us": 111.42,
+    "p99_us": 120.79,
+    "max_us": 172.62,
     "allocations": 0
   },
           {
     "scenario": "medium",
     "iterations": 1000,
-    "p50_us": 322.46,
-    "p95_us": 335.29,
-    "p99_us": 357.12,
-    "max_us": 411.62,
+    "p50_us": 325.46,
+    "p95_us": 338.54,
+    "p99_us": 348.25,
+    "max_us": 430.12,
     "allocations": 0
   },
           {
     "scenario": "long",
     "iterations": 500,
-    "p50_us": 1380.58,
-    "p95_us": 1430.50,
-    "p99_us": 1479.67,
-    "max_us": 2279.29,
+    "p50_us": 1420.96,
+    "p95_us": 1465.92,
+    "p99_us": 1501.12,
+    "max_us": 2304.50,
     "allocations": 0
   },
           {
     "scenario": "incremental",
     "iterations": 481,
-    "p50_us": 769.83,
-    "p95_us": 2001.12,
-    "p99_us": 2118.12,
-    "max_us": 2203.50,
+    "p50_us": 778.79,
+    "p95_us": 2046.92,
+    "p99_us": 2136.17,
+    "max_us": 2202.75,
     "allocations": 0
   },
           {
     "scenario": "garbage",
     "iterations": 200,
-    "p50_us": 368.12,
-    "p95_us": 393.25,
-    "p99_us": 415.79,
-    "max_us": 452.17,
+    "p50_us": 386.50,
+    "p95_us": 403.50,
+    "p99_us": 419.54,
+    "max_us": 441.88,
     "allocations": 0
   },
           {
     "scenario": "garbage_incremental",
     "iterations": 496,
-    "p50_us": 288.25,
-    "p95_us": 369.88,
-    "p99_us": 379.96,
-    "max_us": 418.04,
+    "p50_us": 299.08,
+    "p95_us": 386.00,
+    "p99_us": 394.33,
+    "max_us": 399.00,
+    "allocations": 0
+  },
+          {
+    "scenario": "repetition_t16",
+    "iterations": 200,
+    "p50_us": 2699.79,
+    "p95_us": 2750.04,
+    "p99_us": 2777.88,
+    "max_us": 2811.96,
+    "allocations": 0
+  },
+          {
+    "scenario": "plus_chain_30",
+    "iterations": 200,
+    "p50_us": 336.33,
+    "p95_us": 349.71,
+    "p99_us": 373.00,
+    "max_us": 397.25,
     "allocations": 0
   }
   ],
   "meta": {
-    "commit": "06e3aae",
-    "date": "2026-04-26T23:12:51Z"
+    "commit": "4a017c8",
+    "date": "2026-04-27T09:54:31Z"
   }
 }
