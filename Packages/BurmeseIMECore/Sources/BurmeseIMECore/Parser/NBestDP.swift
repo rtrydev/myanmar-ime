@@ -416,12 +416,49 @@ extension SyllableParser {
                     // with empty emission. Free-standing particles
                     // (`104D / 104F`) and any non-empty previous arc
                     // are unaffected.
+                    var standaloneAfterEmptyAliasPenalty = 0
+                    var standaloneAfterEmptyForceMin = false
                     if vowelEntry.isStandalone,
                        let firstOut = vowelEntry.myanmar.unicodeScalars.first,
-                       firstOut.value >= 0x1023 && firstOut.value <= 0x102A,
-                       case .vowelOnly(let prevVowelId) = previous.matchRef,
-                       vowelTerminals[Int(prevVowelId)].myanmar.isEmpty {
-                        continue
+                       firstOut.value >= 0x1023 && firstOut.value <= 0x102A {
+                        let predecessorEmptyEmission: Bool = {
+                            switch previous.matchRef {
+                            case .vowelOnly(let prevVowelId):
+                                return vowelTerminals[Int(prevVowelId)].myanmar.isEmpty
+                            case .onsetVowel(_, let prevVowelId):
+                                return vowelTerminals[Int(prevVowelId)].myanmar.isEmpty
+                            default:
+                                return false
+                            }
+                        }()
+                        if predecessorEmptyEmission {
+                            switch previous.matchRef {
+                            case .vowelOnly:
+                                // TASK-009 (original carve-out): skip
+                                // outright. The visarga-prefix path
+                                // doesn't need a panel sibling — the
+                                // user reached the indep-vowel form
+                                // through the bare-vowel input,
+                                // not through `<C>aa<vowel>`.
+                                continue
+                            case .onsetVowel:
+                                // TASK-020: don't skip — demote both
+                                // alias cost AND legality magnitude so
+                                // the dep-vowel sibling wins rank 0
+                                // but the free-standing form remains
+                                // reachable at lower rank for users
+                                // who explicitly want it. The TASK-009
+                                // visarga skip can stay strict because
+                                // there's no buffer-leading bare-vowel
+                                // path to recover the form; the
+                                // `<C>aaY` path needs the panel
+                                // sibling per TASK-020 acceptance.
+                                standaloneAfterEmptyAliasPenalty = 64
+                                standaloneAfterEmptyForceMin = true
+                            default:
+                                break
+                            }
+                        }
                     }
                     // TASK-016: reject chained inherent-`a` arcs — i.e.
                     // a `vowelOnly(inherent-a)` transition after a
@@ -485,6 +522,18 @@ extension SyllableParser {
                     }
                     let aliasCostAdj = vowelEntry.aliasCost
                         + (stackedFinal ? 2 : 0)
+                        + standaloneAfterEmptyAliasPenalty
+                    // TASK-020: cap the legality contribution of a
+                    // post-empty-emission standalone vowel at 1 so the
+                    // engine's grammar comparator (which prefers
+                    // higher legalityScore among equal-syllableCount
+                    // candidates) does not promote it over the dep-
+                    // vowel sibling. Legality stays >0 so the parse
+                    // remains acceptable and the candidate is
+                    // reachable in the panel — just not at rank 0.
+                    let effectiveLegality = standaloneAfterEmptyForceMin
+                        ? min(legality, 1)
+                        : legality
                     let newState = ParseState(
                         parentIdx: prevIdx,
                         matchRef: .vowelOnly(vowelId: vowelEntry.id),
@@ -492,14 +541,14 @@ extension SyllableParser {
                         score: previous.score + scoreMatch(
                             consumed: vowelEnd - i,
                             ruleCount: 1,
-                            legality: legality,
+                            legality: effectiveLegality,
                             aliasCost: aliasCostAdj
                         ),
-                        legalityScore: previous.legalityScore + max(legality, 0),
+                        legalityScore: previous.legalityScore + max(effectiveLegality, 0),
                         aliasCost: previous.aliasCost + aliasCostAdj,
                         syllableCount: previous.syllableCount + 1,
                         structureCost: previous.structureCost,
-                        isLegal: previous.isLegal && legality > 0
+                        isLegal: previous.isLegal && effectiveLegality > 0
                     )
                     insertState(&arena, &dp, at: vowelEnd, state: newState, limit: maxResults)
                     matched = true

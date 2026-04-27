@@ -77,5 +77,6 @@ public enum BurmeseTestSuites {
         ApostropheContractionSuite.suite,
         InherentAChainOverflowSuite.suite,
         OrphanMarkClusterAnchorSuite.suite,
+        LeadingAaTrailingVowelSuite.suite,
     ]
 }

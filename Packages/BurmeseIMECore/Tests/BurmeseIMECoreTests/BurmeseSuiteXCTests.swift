@@ -270,4 +270,8 @@ final class InherentAChainOverflowXCTests: XCTestCase {
 final class OrphanMarkClusterAnchorXCTests: XCTestCase {
     func testAll() { runSuite(OrphanMarkClusterAnchorSuite.suite, xctest: self) }
 }
+
+final class LeadingAaTrailingVowelXCTests: XCTestCase {
+    func testAll() { runSuite(LeadingAaTrailingVowelSuite.suite, xctest: self) }
+}
 #endif
