@@ -1,0 +1,14 @@
+[2026-04-26T15:53:22+0200] Iteration 1/1 complete
+  Tasks created: 2
+  Tasks completed: 2 (TASK-001, TASK-002)
+  Tasks invalidated: 0
+  Commits: 9bd3efc Snap mid-buffer digit splice past closing asat of cluster
+  Commits: 347b080 Reject windowing splits that strand an orphaning vowel rule
+  Test suite: 840/840 cases, 2338/2338 assertions PASS
+  Archive: /Users/rtry/repos/myanmar-ime/tasks/archive/2026-04-26/
+  Outstanding: none
+2026-04-26 iteration 1: 3 tasks created, 3 valid, 3 completed (TASK-001 digit-order, TASK-002 vowel-split, TASK-003 trailing-punct), 0 gaps, 861/861 tests pass, bench no regressions, 3 commits (24f89a5, 6b0c6c0, 48f21a0)
+2026-04-26 iteration 1/1 — TASK-004,TASK-005,TASK-006 completed; 873/873 cases pass; 0 gaps; commits 193a6d8,7c4fc02,c01897b; archived to tasks/archive/2026-04-26/
+2026-04-26 iteration 4/4 — TASK-007,TASK-008,TASK-009 completed; 882/882 cases pass; 1 gap closed in step 5 (TASK-009 kar:au/u:akar/kar:i family); commits 04673b3,06e3aae,7d9d6ee,315aa3b,cffc34e,b53aad1; bench baseline updated; archived to tasks/archive/2026-04-26/
+2026-04-27 iteration 1/1 — TASK-010..TASK-016 completed (7 tasks); 912/912 cases / 2846 assertions pass; 0 gaps (TASK-015 class-3 deliberately scoped out); commits 24ac643,62558db,4a017c8,7073ba9,6442909,be5a0d6,abb4ee6; bench baseline updated with repetition_t16 and plus_chain_30 scenarios; archived to tasks/archive/2026-04-27/
+2026-04-27 iteration 2/2 — TASK-017..TASK-022 completed (6 tasks); 937/937 cases pass; 1 gap closed in step 5 (TASK-019 stray-i-kar prefix in Bug B kinzi surfaces); commits 80bcd23,5cb1d98,3614fa8,a215bb1,00b086b,7dced96,586e029; bench no regressions; archived to tasks/archive/2026-04-27/
