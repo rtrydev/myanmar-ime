@@ -433,7 +433,21 @@ extension BurmeseEngine {
         guard !probe.isEmpty else {
             return digitPart + composable + literal
         }
-        let topParse = parser.parseCandidates(probe, maxResults: 1).first
+        // Ask for top-K parses (not just top-1). A bare vowel-modifier
+        // segment such as `u:` parses with TWO competitive forms: the
+        // ZWNJ-orphan dependent-vowel form (`[200C 1030 1038]`) and
+        // the precomposed independent-vowel form (`[1026 1038]`).
+        // The parser ranks the orphan form first on alias cost, but
+        // it has lower legalityScore — the engine's full path prefers
+        // the precomposed form for standalone inputs. The frozen-
+        // segment render is the engine's parallel path for split
+        // prefixes; without considering siblings, `u:akar` rendered
+        // the orphan form (`အူး` after promotion) instead of the
+        // precomposed form (`ဦး`) that bare `u:` produces. Picking
+        // the highest-legality parse here aligns the split-prefix
+        // surface with the standalone surface (TASK-009 follow-up).
+        let parses = parser.parseCandidates(probe, maxResults: 4)
+        let topParse = Self.preferIndependentVowelLeadParse(parses) ?? parses.first
         var output = topParse?.output ?? probe
         // Apply orphan-ZWNJ promotion so bare-vowel segments (`aung`,
         // `i`, `ee`, …) get an explicit `အ` independent-vowel anchor
@@ -450,6 +464,40 @@ extension BurmeseEngine {
         // would never reach the engine-level `correctAaShape` pass.
         output = Self.correctAaShape(output)
         return digitPart + output + dropped + literal
+    }
+
+    /// When the parser returns multiple competitive parses, prefer
+    /// one whose Myanmar surface begins with an independent-vowel
+    /// scalar (`U+1023..U+102A`) over a sibling whose surface begins
+    /// with `U+200C` (ZWNJ) followed by a dependent vowel. The two
+    /// forms exist in the parser candidate panel for bare-vowel
+    /// suffixes like `u`, `u:`, `u.`, `ay`, `ay:`, `o`, `o:` —
+    /// the orphan-ZWNJ form sorts first on alias cost / score but
+    /// has lower legalityScore. The engine's full ranker prefers
+    /// the precomposed form in those cases; the frozen-segment
+    /// renderer is its parallel path and must match.
+    ///
+    /// Returns `nil` if no candidate begins with an independent
+    /// vowel — caller falls back to the parser's top.
+    private static func preferIndependentVowelLeadParse(
+        _ parses: [SyllableParse]
+    ) -> SyllableParse? {
+        guard parses.count > 1 else { return nil }
+        // Only act when the parser's top would otherwise be promoted
+        // via orphan-ZWNJ — i.e. its surface starts with U+200C.
+        guard let top = parses.first,
+              let firstScalar = top.output.unicodeScalars.first,
+              firstScalar.value == 0x200C else {
+            return nil
+        }
+        for parse in parses.dropFirst() {
+            guard let s = parse.output.unicodeScalars.first else { continue }
+            let v = s.value
+            if v >= 0x1023 && v <= 0x102A {
+                return parse
+            }
+        }
+        return nil
     }
 
     /// Strip trailing mapped-punctuation characters (`.`, `,`, `!`, `?`, `;`)
