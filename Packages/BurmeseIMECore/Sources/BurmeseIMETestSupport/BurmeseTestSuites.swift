@@ -75,5 +75,6 @@ public enum BurmeseTestSuites {
         AdjacentIndependentVowelSuite.suite,
         RepeatedVowelLetterSuite.suite,
         ApostropheContractionSuite.suite,
+        InherentAChainOverflowSuite.suite,
     ]
 }

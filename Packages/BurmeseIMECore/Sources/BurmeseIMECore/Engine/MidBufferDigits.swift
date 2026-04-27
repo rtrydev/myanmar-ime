@@ -367,6 +367,33 @@ extension BurmeseEngine {
         return false
     }
 
+    /// TASK-018: True when the right-shrink probe's dropped tail starts
+    /// with three or more consecutive `a` letters. That shape arises
+    /// when a long inherent-A chain (`<C>aaaaa<...>`) gets peeled by
+    /// the chained-inherent-A guard introduced in TASK-016: the kept
+    /// prefix is the leading consonant + one inherent-A arc, and the
+    /// rest of the chain plus any continuation falls into the dropped
+    /// tail. Routing such tails through `composeLetterRunsInTail`
+    /// re-renders the chain as a clean Myanmar surface (collapsing the
+    /// `a*` chain to a single anchor / inherent vowel), instead of
+    /// leaking raw ASCII letters into the rank-0 candidate when the
+    /// 6-character gate would otherwise hold.
+    ///
+    /// The `a{3,}` prefix shape is the discriminator: arbitrary long
+    /// fuzz buffers (e.g. `ureqnborylahzy`) typically have a
+    /// non-`a`-prefixed dropped tail, so they keep the existing
+    /// literal-tail behaviour and the parser-internal re-segmentation
+    /// inside `composeLetterRunsInTail` does not break anchor
+    /// monotonicity for unrelated inputs.
+    internal func droppedTailHasInherentAChainPrefix(_ tail: String) -> Bool {
+        let chars = Array(tail.unicodeScalars)
+        guard chars.count >= 3 else { return false }
+        for i in 0..<3 {
+            if chars[i].value != 0x61 { return false } // 'a'
+        }
+        return true
+    }
+
     /// Compose any letter-runs embedded in the tail via single-best parse.
     /// Non-letter characters (digits, already-mapped punctuation) pass
     /// through unchanged; the caller handles digit→Myanmar conversion on

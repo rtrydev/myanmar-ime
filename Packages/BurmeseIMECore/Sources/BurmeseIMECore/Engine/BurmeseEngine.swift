@@ -543,9 +543,23 @@ public final class BurmeseEngine: @unchecked Sendable {
         let droppedTailHasAsciiLetters = droppedTail.unicodeScalars.contains {
             $0.value >= 0x61 && $0.value <= 0x7A
         }
+        // TASK-018: when the right-shrink probe peels a long
+        // inherent-A chain (`kaaaaakaa` → kept `k`, dropped
+        // `aaaaakaa`), the resulting dropped tail starts with three
+        // or more `a`s. Without this allowance the 6-character gate
+        // strands the tail as raw ASCII at rank 0, which contradicts
+        // the engine's Roman-only Myanmar pipeline contract.
+        // Restricted to the `a{3,}<rest>` shape so arbitrary
+        // long-letter-only buffers (`ureqnborylahzy`-style fuzz
+        // inputs) keep their existing literal-tail behaviour and the
+        // parser-internal re-segmentation of the dropped tail does
+        // not break anchor monotonicity for unrelated inputs.
+        let droppedTailIsLongInherentAChain = droppedTailHasInherentAChainPrefix(droppedTail)
         let shouldComposeDroppedTail = !droppedTail.isEmpty
             && droppedTailHasComposingChars
-            && (droppedTail.count <= 6 || droppedTailHasComposingPunctuation)
+            && (droppedTail.count <= 6
+                || droppedTailHasComposingPunctuation
+                || droppedTailIsLongInherentAChain)
         if tailStartsWithDigit(literalTail, dropped: droppedTail)
             || shouldComposeDroppedTail {
             effectiveTail = composeLetterRunsInTail(mappedEffectiveTail)

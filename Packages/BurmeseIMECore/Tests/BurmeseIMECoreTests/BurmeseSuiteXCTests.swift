@@ -262,4 +262,8 @@ final class RepeatedVowelLetterXCTests: XCTestCase {
 final class ApostropheContractionXCTests: XCTestCase {
     func testAll() { runSuite(ApostropheContractionSuite.suite, xctest: self) }
 }
+
+final class InherentAChainOverflowXCTests: XCTestCase {
+    func testAll() { runSuite(InherentAChainOverflowSuite.suite, xctest: self) }
+}
 #endif
