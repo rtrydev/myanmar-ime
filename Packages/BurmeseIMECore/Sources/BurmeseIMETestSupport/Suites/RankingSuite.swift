@@ -683,9 +683,20 @@ public enum RankingSuite {
         // Task 01 (mid-surface orphan promotion): buffers whose DP emits
         // a dep-vowel after an asat with no anchor now generate a legal
         // အ-anchored sibling. The panel top must be the anchored form.
+        //
+        // TASK-022 update: the `aungout` expected was previously
+        // `အောင်အေအာက်` (= `1021 1031 102C 1004 103A 1021 1031 1021
+        // 102C 1000 103A`) which carried the per-scalar anchor
+        // injection's pollution shape — TWO `U+1021` anchors for the
+        // single orphan-mark cluster `1031 102C` (the `o`+`a` halves
+        // of the `out` rule's `ော`). The corrected per-cluster anchor
+        // injection (TASK-022) emits ONE anchor per contiguous orphan-
+        // mark run, producing `အောင်အောက်` (= `1021 1031 102C 1004
+        // 103A 1021 1031 102C 1000 103A`), which is the orthographically
+        // correct two-syllable rendering.
         for (buffer, expectedTop) in [
             ("aungain", "\u{1021}\u{1031}\u{102C}\u{1004}\u{103A}\u{1021}\u{102D}\u{1014}\u{103A}"),  // အောင်အိန်
-            ("aungout", "\u{1021}\u{1031}\u{102C}\u{1004}\u{103A}\u{1021}\u{1031}\u{1021}\u{102C}\u{1000}\u{103A}"),  // အောင်အေအာက်
+            ("aungout", "\u{1021}\u{1031}\u{102C}\u{1004}\u{103A}\u{1021}\u{1031}\u{102C}\u{1000}\u{103A}"),  // အောင်အောက်
             ("outain",  "\u{1021}\u{1031}\u{102C}\u{1000}\u{103A}\u{1021}\u{102D}\u{1014}\u{103A}"),  // အောက်အိန်
         ] {
             cases.append(TestCase("tasksDir01_midSurfaceOrphanPromoted_\(buffer)") { ctx in

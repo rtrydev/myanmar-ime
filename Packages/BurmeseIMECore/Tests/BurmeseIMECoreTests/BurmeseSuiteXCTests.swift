@@ -266,4 +266,8 @@ final class ApostropheContractionXCTests: XCTestCase {
 final class InherentAChainOverflowXCTests: XCTestCase {
     func testAll() { runSuite(InherentAChainOverflowSuite.suite, xctest: self) }
 }
+
+final class OrphanMarkClusterAnchorXCTests: XCTestCase {
+    func testAll() { runSuite(OrphanMarkClusterAnchorSuite.suite, xctest: self) }
+}
 #endif

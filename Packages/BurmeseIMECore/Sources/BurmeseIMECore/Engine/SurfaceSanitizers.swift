@@ -227,7 +227,7 @@ extension BurmeseEngine {
     /// two valid Burmese syllables (`thi` + `u`) where the second is
     /// an independent-vowel particle, an established orthographic
     /// shape exercised by existing test suites.
-    internal static func surfaceViolatesIndependentVowelInvariant(_ surface: String) -> Bool {
+    @_spi(Testing) public static func surfaceViolatesIndependentVowelInvariant(_ surface: String) -> Bool {
         let scalars = Array(surface.unicodeScalars).map(\.value)
         // (1) adjacent indep-vowel scalars.
         if scalars.count >= 2 {
@@ -268,6 +268,103 @@ extension BurmeseEngine {
             // Anything else resets the chain.
             chainCount = 0
             i += 1
+        }
+        // (3) TASK-022: bridged-anchor pollution. Two or more
+        // orphan-mark clusters (each pre-anchored by U+1021)
+        // bridged by a <consonant-base> 103A asat-closed coda
+        // fragment from the orphan-mark sanitizer's `e`-rule
+        // fallback. The shape is:
+        //
+        //   <U+1021><dep-vowel(s)><consonant><U+103A><U+1021><dep-vowel(s)>
+        //
+        // and crucially the second cluster contains only dep-vowel
+        // signs — no further base consonant + asat coda. A
+        // legitimate two-syllable pattern like
+        // `… 1021 1031 102C 1004 103A 1021 102C 1010 103A …`
+        // (`aungout`) terminates the second cluster with a base +
+        // asat coda, indicating a complete syllable rather than
+        // an orphan-mark anchor.
+        if scalarsContainBridgedAnchorPollution(scalars) {
+            return true
+        }
+        return false
+    }
+
+    /// TASK-022 detector helper. Returns true when `scalars` contains
+    /// a bridged orphan-mark anchor chain whose final cluster is a
+    /// bare orphan-mark anchor (no terminating consonant-asat coda).
+    /// The shape is:
+    ///
+    ///   <U+1021><dep-vowel-run>{ <consonant><U+103A><U+1021><dep-vowel-run> }+
+    ///
+    /// where the LAST cluster is a bare orphan-mark anchor (not
+    /// terminated by a base-consonant + asat coda). A legitimate
+    /// multi-syllable pattern terminates EVERY cluster with a base-
+    /// consonant + asat coda (e.g. `aungout` → `… 1021 102C 1010
+    /// 103A`), so it does not match. The bug shape
+    /// `… 1021 102D 102F 101A 103A 1021 102D 102F` (the `aoo` /
+    /// `aungoo` orphan-fallback's final dangling cluster) does.
+    private static func scalarsContainBridgedAnchorPollution(
+        _ scalars: [UInt32]
+    ) -> Bool {
+        guard scalars.count >= 5 else { return false }
+
+        // Scan helper: starting at `start`, walk a contiguous run of
+        // dep-mark scalars. Returns the index just past the run.
+        func walkDepRun(from start: Int) -> Int {
+            var k = start
+            while k < scalars.count {
+                let v = scalars[k]
+                let isDepMark = (0x102B...0x1032).contains(v)
+                    || v == 0x1036
+                    || (0x103B...0x103E).contains(v)
+                guard isDepMark else { break }
+                k += 1
+            }
+            return k
+        }
+
+        // Try every U+1021 anchor as the start of a chain.
+        for start in 0..<scalars.count where scalars[start] == 0x1021 {
+            var i = start
+            // Track whether at least one bridge has been crossed.
+            var bridgeCount = 0
+            while true {
+                // Walk past this cluster's dep-vowel run.
+                let depEnd = walkDepRun(from: i + 1)
+                guard depEnd > i + 1 else { break } // need >= 1 dep-mark
+                // Look for bridge: <consonant><U+103A>.
+                guard depEnd + 1 < scalars.count else {
+                    // No room for bridge; if we already crossed at
+                    // least one bridge, this cluster is a bare
+                    // anchor at the end → flag it.
+                    if bridgeCount >= 1 { return true }
+                    break
+                }
+                let bridgeBase = scalars[depEnd]
+                let isBridgeBase = (bridgeBase >= 0x1000 && bridgeBase <= 0x1021)
+                    || bridgeBase == 0x103F
+                guard isBridgeBase, scalars[depEnd + 1] == 0x103A else {
+                    // Not a bridge. If we've crossed bridges, the
+                    // current cluster is the trailing one. A
+                    // legitimate trailing cluster ends with a
+                    // base-consonant + asat (caught above as a
+                    // bridge-shape continuation), so anything else
+                    // (e.g. just dep-marks running to end of surface)
+                    // is the bug shape.
+                    if bridgeCount >= 1 { return true }
+                    break
+                }
+                // Next anchor must be U+1021.
+                guard depEnd + 2 < scalars.count, scalars[depEnd + 2] == 0x1021 else {
+                    // Bridge but no following anchor → this is the
+                    // legitimate `<cluster> + <complete syllable>`
+                    // shape. Move on.
+                    break
+                }
+                bridgeCount += 1
+                i = depEnd + 2
+            }
         }
         return false
     }
@@ -393,7 +490,7 @@ extension BurmeseEngine {
         "u": "\u{1021}\u{1030}",    // အူ
     ]
 
-    internal static func bareVowelOverrideSurface(for normalized: String) -> String? {
+    @_spi(Testing) public static func bareVowelOverrideSurface(for normalized: String) -> String? {
         if normalized == "i" { return "\u{1021}\u{102D}" } // အိ
         guard let first = normalized.first,
               normalized.count >= 2,
@@ -494,9 +591,41 @@ extension BurmeseEngine {
         let orphanPositions = orphanAttachableMarkIndices(in: scalars)
         guard !orphanPositions.isEmpty else { return nil }
 
+        // TASK-022: collapse contiguous orphan-mark scalars into a
+        // single anchor per cluster, but split clusters whenever a
+        // same-category dep-vowel reappears (since `scanOutputLegality`
+        // rejects same-category dep-vowel stacks on a single base —
+        // see `attachableMarkHasAnchor` in this file and the parser's
+        // `Finalization.scanOutputLegality`). The earlier per-scalar
+        // injection produced multi-anchor patterns like
+        // `1021 102D 1021 102F 1021 102D 1021 102F` (four anchors
+        // for two semantic syllables); the per-cluster scheme below
+        // produces `1021 102D 102F 1021 102D 102F` (two anchors for
+        // two `o`-rule clusters) — one anchor per cluster, with
+        // each cluster legally stacked under its anchor.
+        let sortedPositions = orphanPositions.sorted()
+        var clusterStarts: [Int] = []
+        var previousPos: Int? = nil
+        var seenCategoriesInCluster: Set<Int> = []
+        for pos in sortedPositions {
+            let currentCategory = orphanScalarCategory(scalars[pos])
+            let isContiguous = previousPos.map { pos == $0 + 1 } ?? false
+            let alreadySeenCategory = currentCategory != 0
+                && seenCategoriesInCluster.contains(currentCategory)
+            let startNewCluster = !isContiguous || alreadySeenCategory
+            if startNewCluster {
+                clusterStarts.append(pos)
+                seenCategoriesInCluster.removeAll()
+            }
+            if currentCategory != 0 {
+                seenCategoriesInCluster.insert(currentCategory)
+            }
+            previousPos = pos
+        }
+
         var rebuilt: [Unicode.Scalar] = []
-        rebuilt.reserveCapacity(scalars.count + orphanPositions.count)
-        let insertSet = Set(orphanPositions)
+        rebuilt.reserveCapacity(scalars.count + clusterStarts.count)
+        let insertSet = Set(clusterStarts)
         for i in scalars.indices {
             if insertSet.contains(i) {
                 rebuilt.append(Unicode.Scalar(0x1021)!)
@@ -505,13 +634,13 @@ extension BurmeseEngine {
         }
         let output = String(String.UnicodeScalarView(rebuilt))
         guard SyllableParser.scanOutputLegality(output) else { return nil }
-        // Each orphan-position insertion shifts boundaries that sit
+        // Each cluster-start insertion shifts boundaries that sit
         // STRICTLY after that scalar offset by +1. A boundary at
         // exactly the insertion position keeps its scalar offset —
         // semantically the inserted U+1021 anchor belongs to the arc
         // whose orphan mark it is anchoring, so the boundary preceding
         // it stays where it is. The boundary's `charEnd` is unchanged.
-        let sortedInsertPositions = orphanPositions.sorted()
+        let sortedInsertPositions = clusterStarts.sorted()
         let adjustedBoundaries = parse.arcBoundaries.map { boundary -> SyllableParse.ArcBoundary in
             let inserted = sortedInsertPositions.lazy
                 .filter { $0 < boundary.scalarOffset }
@@ -533,6 +662,7 @@ extension BurmeseEngine {
             arcBoundaries: adjustedBoundaries
         )
     }
+
 
     private static func orphanAttachableMarkIndices(in scalars: [Unicode.Scalar]) -> [Int] {
         var result: [Int] = []
@@ -600,6 +730,15 @@ extension BurmeseEngine {
             return false
         }
         return false
+    }
+
+    /// Categorise the scalar at a per-cluster orphan-injection
+    /// candidate position. Reuses `depVowelCategory` for dep-vowel
+    /// scalars; non-dep-vowel scalars (medials, asat, tone marks)
+    /// return 0 so they don't trigger same-category cluster splits.
+    @inline(__always)
+    private static func orphanScalarCategory(_ scalar: Unicode.Scalar) -> Int {
+        depVowelCategory(scalar.value)
     }
 
     @inline(__always)
