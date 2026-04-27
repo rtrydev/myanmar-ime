@@ -143,7 +143,7 @@ public final class BurmeseEngine: @unchecked Sendable {
     /// `cacheLock` so `recordSelection` can write the same key the lexicon
     /// and history stores would have seen on lookup — keeping write/read
     /// symmetric without plumbing the key through `CompositionState`.
-    private var lastHistoryKey: String = ""
+    internal var lastHistoryKey: String = ""
 
     /// Upper bound on the active-tail length before the frozen prefix is
     /// extended forward. Keeping this larger than `compositionWindowSize`
@@ -297,6 +297,15 @@ public final class BurmeseEngine: @unchecked Sendable {
                 )],
                 committedContext: context
             )
+        }
+        // TASK-021: Letter-flanked apostrophes that match English
+        // contraction shapes (`don't`, `can't`, `it's`, `we're`, …)
+        // must surface as a literal candidate at rank 0 so the user
+        // can commit the typed contraction as English text. The
+        // null-vowel connector rule would otherwise silently swallow
+        // the apostrophe and concatenate the surrounding letters.
+        if Self.englishContractionApostropheIndex(in: displayBuffer) != nil {
+            return englishContractionState(buffer: displayBuffer, context: context)
         }
         // Task 10: Peel mid-buffer ASCII digits (letter-digit-letter) off
         // the buffer before the rest of the pipeline runs, then splice

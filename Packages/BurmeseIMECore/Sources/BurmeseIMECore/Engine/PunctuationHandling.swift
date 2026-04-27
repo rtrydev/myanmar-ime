@@ -162,8 +162,12 @@ extension BurmeseEngine {
             // BurmeseEngine), and `'` next to punctuation/digits.
             //
             // When both neighbours ARE letters (e.g. `nya'n`, `don't`) the
-            // null-vowel connector role is preserved — the split does not fire
-            // here; contraction handling is a follow-up (task 03 noted).
+            // null-vowel connector role is preserved here — the split does
+            // not fire. English-contraction handling is done at the engine
+            // level (TASK-021) where the literal-preserved candidate can be
+            // injected at rank 0 directly, instead of going through the
+            // split-and-render-prefix path which would render the prefix as
+            // mixed Myanmar + literal `'`.
             let hasLetterLeft: Bool = idx > buffer.startIndex && {
                 let prev = buffer.index(before: idx)
                 let v = buffer[prev].unicodeScalars.first?.value ?? 0
@@ -221,6 +225,111 @@ extension BurmeseEngine {
 
     private static func isFrozenPunctuationLiteral(_ c: Character) -> Bool {
         midBufferComposingPunctuation.contains(c) || PunctuationMapper.isMappable(c)
+    }
+
+    /// Common English contraction suffix tails that follow an
+    /// apostrophe (`'t` / `'s` / `'re` / `'ll` / `'ve` / `'d` / `'m`
+    /// / `'nt`). When the buffer matches `<letters>'<suffix>` and the
+    /// suffix runs to the end of the buffer (or to a natural word
+    /// boundary), the engine routes the buffer through the
+    /// literal-preservation path so the surface keeps the typed `'`.
+    /// TASK-021.
+    internal static let englishContractionSuffixes: Set<String> = [
+        "nt", "ll", "re", "ve",
+        "t", "s", "d", "m",
+    ]
+
+    /// Locate a letter-flanked apostrophe whose suffix matches a
+    /// common English contraction shape (`'t`, `'s`, `'re`, `'ll`,
+    /// `'ve`, `'d`, `'m`, `'nt`). Returns the substring index of the
+    /// apostrophe when one is found, or nil if none qualifies.
+    /// Conservative by design — Burmese-romanization buffers typed
+    /// with `'` as a syllable separator (`nya'n`, `kya'aung`, `a'a`)
+    /// do not match because their suffix is not in the contraction
+    /// set, so the connector-rule behaviour at the top rank is
+    /// preserved (TASK-021 acceptance criterion).
+    /// TASK-021: build a CompositionState for an English-contraction
+    /// buffer. Strategy: rank 0 is the literal `buffer` so the user
+    /// can commit the contraction as typed (apostrophe preserved).
+    /// Lower ranks include the connector-collapsed form (the
+    /// apostrophe acting as a null-vowel separator, producing the
+    /// pre-fix Burmese reading) so users who genuinely typed the
+    /// apostrophe-flanked pattern as a syllable separator still have
+    /// a path to it. The connector form is reachable by re-running
+    /// `update` on the apostrophe-stripped buffer; if that produces
+    /// no candidates (e.g. `cant` for `can't`), the literal is the
+    /// only candidate — guaranteeing a non-empty panel.
+    internal func englishContractionState(
+        buffer: String,
+        context: [String]
+    ) -> CompositionState {
+        let stripped = String(buffer.filter { $0 != "'" })
+        let collapsed = stripped.isEmpty
+            ? CompositionState(committedContext: context)
+            : update(buffer: stripped, context: context)
+        var combined: [Candidate] = []
+        // Rank 0: literal contraction surface.
+        combined.append(Candidate(
+            surface: buffer,
+            reading: buffer,
+            source: .grammar,
+            score: 0
+        ))
+        // Rank 1+: connector-collapsed candidates (deduplicated
+        // against the literal, which would only collide if the user
+        // typed an apostrophe-stripped surface — can't happen here).
+        for cand in collapsed.candidates where cand.surface != buffer {
+            combined.append(Candidate(
+                surface: cand.surface,
+                reading: buffer,
+                source: cand.source,
+                score: cand.score
+            ))
+        }
+        cacheLock.lock()
+        lastHistoryKey = Romanization.aliasReading(buffer)
+        cacheLock.unlock()
+        return CompositionState(
+            rawBuffer: buffer,
+            selectedCandidateIndex: 0,
+            candidates: combined,
+            committedContext: context
+        )
+    }
+
+    internal static func englishContractionApostropheIndex(
+        in buffer: String
+    ) -> String.Index? {
+        guard buffer.contains("'") else { return nil }
+        for idx in buffer.indices where buffer[idx] == "'" {
+            // Both neighbours must be ASCII letters. Otherwise the
+            // existing literal-split path already handles it.
+            let prevIdx = idx > buffer.startIndex
+                ? buffer.index(before: idx) : nil
+            let nextIdx = buffer.index(after: idx)
+            guard let prevIdx, nextIdx < buffer.endIndex else { continue }
+            let prevValue = buffer[prevIdx].unicodeScalars.first?.value ?? 0
+            let nextValue = buffer[nextIdx].unicodeScalars.first?.value ?? 0
+            let prevIsLetter = (prevValue >= 0x61 && prevValue <= 0x7A)
+                || (prevValue >= 0x41 && prevValue <= 0x5A)
+            let nextIsLetter = (nextValue >= 0x61 && nextValue <= 0x7A)
+                || (nextValue >= 0x41 && nextValue <= 0x5A)
+            guard prevIsLetter && nextIsLetter else { continue }
+            // Walk to the end of the letter run after `'`.
+            var end = nextIdx
+            while end < buffer.endIndex {
+                let v = buffer[end].unicodeScalars.first?.value ?? 0
+                let isLetter = (v >= 0x61 && v <= 0x7A)
+                    || (v >= 0x41 && v <= 0x5A)
+                guard isLetter else { break }
+                end = buffer.index(after: end)
+            }
+            let suffix = String(buffer[nextIdx..<end]).lowercased()
+            if englishContractionSuffixes.contains(suffix) {
+                return idx
+            }
+        }
+        return nil
     }
 
     private static func hasAsciiLetters(_ s: String) -> Bool {

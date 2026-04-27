@@ -258,4 +258,8 @@ final class AdjacentIndependentVowelXCTests: XCTestCase {
 final class RepeatedVowelLetterXCTests: XCTestCase {
     func testAll() { runSuite(RepeatedVowelLetterSuite.suite, xctest: self) }
 }
+
+final class ApostropheContractionXCTests: XCTestCase {
+    func testAll() { runSuite(ApostropheContractionSuite.suite, xctest: self) }
+}
 #endif
