@@ -162,6 +162,39 @@ extension BurmeseEngine {
         }
     }
 
+    /// TASK-012: drop any candidate whose surface contains an
+    /// independent-vowel scalar (U+1021..U+102A) immediately
+    /// followed by virama (U+1039). That adjacency is structurally
+    /// illegal in modern Burmese — independent vowels cannot serve
+    /// as the upper of a virama stack
+    /// (`Grammar.stackableConsonants` is restricted to
+    /// U+1000..U+101F plus U+103F) — and historically reached the
+    /// candidate panel through the windowed-prefix / active-tail
+    /// seam in long `+`-chains. The defensive filter is run after
+    /// the other sanitizers so it operates on the merged + ZWNJ-
+    /// promoted surface set.
+    internal static func sanitizeIndepVowelVirama(_ candidates: [Candidate]) -> [Candidate] {
+        let hasClean = candidates.contains {
+            !surfaceHasIndepVowelVirama($0.surface)
+        }
+        guard hasClean else { return candidates }
+        return candidates.filter {
+            !surfaceHasIndepVowelVirama($0.surface)
+        }
+    }
+
+    private static func surfaceHasIndepVowelVirama(_ surface: String) -> Bool {
+        let scalars = Array(surface.unicodeScalars).map(\.value)
+        guard scalars.count >= 2 else { return false }
+        for i in 0..<(scalars.count - 1) {
+            let v = scalars[i]
+            if v >= 0x1021 && v <= 0x102A && scalars[i + 1] == 0x1039 {
+                return true
+            }
+        }
+        return false
+    }
+
     /// ZWSP is allowed as a lexicon word-boundary marker. ZWNJ/ZWJ are only
     /// tolerated for the parser's leading orphan-mark fallback; elsewhere in
     /// a lexicon surface they are corpus pollution and should not outrank a

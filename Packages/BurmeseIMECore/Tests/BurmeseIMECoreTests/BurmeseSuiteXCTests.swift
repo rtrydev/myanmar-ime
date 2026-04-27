@@ -238,4 +238,8 @@ final class BareVowelPaliStackXCTests: XCTestCase {
 final class ExplicitPlusVowelXCTests: XCTestCase {
     func testAll() { runSuite(ExplicitPlusVowelSuite.suite, xctest: self) }
 }
+
+final class WindowedIndepVowelViramaInvariantXCTests: XCTestCase {
+    func testAll() { runSuite(WindowedIndepVowelViramaInvariantSuite.suite, xctest: self) }
+}
 #endif

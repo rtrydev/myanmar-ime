@@ -69,5 +69,6 @@ public enum BurmeseTestSuites {
         StandaloneParticleMidBufferSuite.suite,
         BareVowelPaliStackSuite.suite,
         ExplicitPlusVowelSuite.suite,
+        WindowedIndepVowelViramaInvariantSuite.suite,
     ]
 }
