@@ -865,7 +865,49 @@ public final class BurmeseEngine: @unchecked Sendable {
                 let lowers = Self.stackLowerConsonantsStarting(chars: bufChars, at: 4)
                 return lowers.contains { Grammar.isValidStack(upper: Myanmar.nga, lower: $0) }
             }()
-            if isAiNgFastPathShape {
+            // Onsetless leading-vowel + Pali-stack site (TASK-010): when
+            // the buffer starts with an independent-vowel romanization
+            // key (`o`, `aw`, `oo`, …) and the inferred parse produces
+            // a leading ZWNJ + dependent-vowel surface (parser's bare-
+            // vowel emission), promote ZWNJ→U+1021 so the inferred
+            // candidate's surface matches the merged-candidate form
+            // and `strictInferredStackOutputs` tracks the legal anchor
+            // shape. Without this, the inferred stacked candidate
+            // (`အိုက္က` for `okka`) never enters the rank-0 promotion
+            // set and the no-`+` flat sibling wins.
+            //
+            // The promotion is gated to consonant-upper virama stacks
+            // (no asat between the consonant and the virama) — the
+            // diphthong-kinzi family (`ainga`, `kar:aing`) materialises
+            // an `<asat> 1039 <consonant>` shape that
+            // `surfaceHasOnlyNativeViramaStacks` accepts as legal but
+            // is structurally a *vowel-rule-derived* kinzi, not a
+            // Pali stack on a leading bare vowel. Promoting those
+            // would lift the kinzi candidate above the open form for
+            // inputs like `ainga` (TASK-006 carve-out).
+            let isLeadingBareVowelStackShape: Bool = {
+                // Windowed buffers are excluded — the active tail may
+                // start with an arbitrary vowel even though the user-
+                // visible buffer doesn't, and the prefix-cache anchor
+                // monotonicity invariant is sensitive to incremental
+                // promotion choices. The bug class targets short
+                // self-contained buffers (`okka`, `ekka`, `aykka`, …)
+                // which never window in practice.
+                guard !effectiveWindowed else { return false }
+                // The bug class is "buffer is a short Pali word that
+                // begins with a bare vowel." Long buffers that happen
+                // to start with a vowel may pull in spurious kinzi
+                // promotions through the diphthong-coda paths
+                // (`ainga`, `kar:aing`, …) which the existing
+                // `isAiNgFastPathShape` already handles. Cap at 8
+                // chars — every reproduction in TASK-010 fits within
+                // 6 chars (`ekka`, `aykka`, `iddha`, `enta`, …).
+                guard effectiveParseInput.count <= 8 else { return false }
+                guard let firstChar = effectiveParseInput.first else { return false }
+                let vowelLeaders: Set<Character> = ["a", "e", "i", "o", "u"]
+                return vowelLeaders.contains(firstChar)
+            }()
+            if isAiNgFastPathShape || isLeadingBareVowelStackShape {
                 let inferredCount = grammarParses.count
                 for i in 0..<inferredCount {
                     let parent = grammarParses[i]
@@ -873,8 +915,19 @@ public final class BurmeseEngine: @unchecked Sendable {
                        !grammarParses.contains(where: { $0.output == zwnjPromoted.output }) {
                         grammarParses.append(zwnjPromoted)
                         if Self.surfaceHasOnlyNativeViramaStacks(zwnjPromoted.output) {
-                            strictInferredStackOutputs.insert(zwnjPromoted.output)
-                            strictInferredStackOutputs.insert(Self.correctAaShape(zwnjPromoted.output))
+                            // Only register as a strict-inferred-stack
+                            // surface (which triggers rank-0 promotion)
+                            // when this is a Pali-style consonant stack
+                            // — not the diphthong-kinzi shape that
+                            // `aing<X>` patterns produce. The aing
+                            // fast-path keeps its own promotion via
+                            // `isAiNgFastPathShape`.
+                            let isPaliConsonantStack = isAiNgFastPathShape
+                                || Self.surfaceHasConsonantOnlyViramaStack(zwnjPromoted.output)
+                            if isPaliConsonantStack {
+                                strictInferredStackOutputs.insert(zwnjPromoted.output)
+                                strictInferredStackOutputs.insert(Self.correctAaShape(zwnjPromoted.output))
+                            }
                         }
                     }
                 }

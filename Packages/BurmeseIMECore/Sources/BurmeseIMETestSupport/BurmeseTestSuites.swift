@@ -67,5 +67,6 @@ public enum BurmeseTestSuites {
         VisargaInherentASuite.suite,
         RedundantExplicitAsatSuite.suite,
         StandaloneParticleMidBufferSuite.suite,
+        BareVowelPaliStackSuite.suite,
     ]
 }

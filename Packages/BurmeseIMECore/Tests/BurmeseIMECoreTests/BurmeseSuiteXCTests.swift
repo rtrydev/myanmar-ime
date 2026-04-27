@@ -230,4 +230,8 @@ final class RedundantExplicitAsatXCTests: XCTestCase {
 final class StandaloneParticleMidBufferXCTests: XCTestCase {
     func testAll() { runSuite(StandaloneParticleMidBufferSuite.suite, xctest: self) }
 }
+
+final class BareVowelPaliStackXCTests: XCTestCase {
+    func testAll() { runSuite(BareVowelPaliStackSuite.suite, xctest: self) }
+}
 #endif
