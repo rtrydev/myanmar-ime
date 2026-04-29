@@ -155,7 +155,14 @@ public enum DiphthongPlusBareNgaSuite {
 
         TestCase("ai_kinziWithStackedKha") { ctx in
             guard let engine = bundledEngine(ctx) else { return }
-            for input in ["maingkha", "kaingkha"] {
+            // `maingkha` removed — `မိုင်ခ` is a real lexicon entry
+            // (Myanmar acronym, freq 48), so once the lexicon dropped
+            // its ASCII-suffixed sibling rows the lexicon-validated
+            // non-kinzi form correctly wins over the grammar-only
+            // kinzi-stack interpretation. `kaingkha` has no
+            // `ကိုင်ခ` lexicon entry and continues to surface the
+            // kinzi form at top.
+            for input in ["kaingkha"] {
                 let top = topCandidate(engine, input)
                 ctx.assertTrue(
                     containsKinzi(top),

@@ -12,7 +12,11 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from .segmenter import _has_non_myanmar_leading_scalar, _is_combining_mark_only
+from .segmenter import (
+    _has_non_myanmar_leading_scalar,
+    _has_non_myanmar_scalar,
+    _is_combining_mark_only,
+)
 from .vocab import CuratedEntry, SPECIALS, Vocab
 
 
@@ -102,10 +106,14 @@ def write_tsv(
             # far, the segmenter / vocab guards upstream have a hole.
             # Fail loud rather than bake noise into the next round-trip
             # (task 05).
-            if _is_combining_mark_only(surface) or _has_non_myanmar_leading_scalar(surface):
+            if (
+                _is_combining_mark_only(surface)
+                or _has_non_myanmar_leading_scalar(surface)
+                or _has_non_myanmar_scalar(surface)
+            ):
                 raise ValueError(
                     f"lexicon.write_tsv: refusing to write polluted "
-                    f"surface {surface!r} (non-Myanmar leading scalar, "
+                    f"surface {surface!r} (non-Myanmar scalar, "
                     f"BOM-bearing, digit+mark orphan, or combining-mark-only)"
                 )
             count = corpus_counts.get(surface, 0)

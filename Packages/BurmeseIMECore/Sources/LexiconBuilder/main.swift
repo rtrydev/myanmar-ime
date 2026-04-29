@@ -75,6 +75,24 @@ struct LexiconEntry {
     let overrideReading: String?
 }
 
+/// True when `surface` contains any scalar outside the Myanmar block
+/// (U+1000–U+109F), excluding ZWNJ (U+200C) and ZWJ (U+200D) which
+/// appear inside legitimate orthographic clusters. Mirrors
+/// `corpus_builder.segmenter._has_non_myanmar_scalar`. Polluted rows
+/// (ASCII punct suffix from corpus sentences ending in `..`/`...`,
+/// curly quotes, ellipsis, emoji, …) anchor garbage entries in the
+/// candidate panel; this guard keeps them out of the SQLite even if
+/// the upstream corpus_builder filter regresses.
+func surfaceContainsNonMyanmarScalar(_ s: String) -> Bool {
+    if s.isEmpty { return true }
+    for scalar in s.unicodeScalars {
+        let v = scalar.value
+        if v == 0x200C || v == 0x200D { continue }
+        if v < 0x1000 || v > 0x109F { return true }
+    }
+    return false
+}
+
 /// Detect ya-pin canonical readings (e.g. `ky2aung:`, `khy2at*`,
 /// `gy2ay`) — any consonant cluster ending in `y2` before a vowel.
 /// Used to emit a zero-penalty alias row alongside the digit-bearing
@@ -112,6 +130,11 @@ for line in lines {
     let surface = fields[0]
     guard let frequency = Double(fields[1]) else {
         fputs("Warning: Invalid frequency on line \(lineNum): \(fields[1])\n", stderr)
+        continue
+    }
+    if surfaceContainsNonMyanmarScalar(surface) {
+        // Polluted surface — corpus_builder is the source of truth;
+        // dropping here keeps a stale TSV from re-poisoning SQLite.
         continue
     }
 

@@ -47,6 +47,29 @@ def _is_combining_mark_only(token: str) -> bool:
     return True
 
 
+def _has_non_myanmar_scalar(token: str) -> bool:
+    """True if `token` contains any scalar outside the Myanmar block.
+
+    Allowed scalars: U+1000–U+109F (Myanmar block) plus ZWNJ (U+200C) and
+    ZWJ (U+200D), which appear inside legitimate orthographic clusters.
+    Anything else — ASCII letters / digits / punctuation, ellipsis
+    (U+2026), curly quotes, emoji, BOM, etc. — is corpus noise. Without
+    this filter, sentences ending with ASCII ellipsis (`..`, `...`) get
+    segmented as `<word>..` / `<word>...` tokens and propagate as
+    separate high-frequency lexicon entries that pollute the candidate
+    panel (e.g. `ဗျာ..`, `ဗျာ...`).
+    """
+    if not token:
+        return True
+    for ch in token:
+        cp = ord(ch)
+        if cp == 0x200C or cp == 0x200D:
+            continue
+        if cp < 0x1000 or cp > 0x109F:
+            return True
+    return False
+
+
 def _has_non_myanmar_leading_scalar(token: str) -> bool:
     """True if `token` is polluted by a non-Myanmar leading scalar or BOM.
 
@@ -303,6 +326,7 @@ class Segmenter:
             for p in pieces
             if not _is_combining_mark_only(p)
             and not _has_non_myanmar_leading_scalar(p)
+            and not _has_non_myanmar_scalar(p)
         ]
 
     @staticmethod
