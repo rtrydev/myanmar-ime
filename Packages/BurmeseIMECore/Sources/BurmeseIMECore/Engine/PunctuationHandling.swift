@@ -75,17 +75,32 @@ extension BurmeseEngine {
         vowelSuffixesWithTrailingDot.contains(where: { prefix.hasSuffix($0) })
     }
 
-    /// TASK-014: when a candidate surface ends in a bare base
-    /// consonant (its inherent-`a` is unmodified) and the trailing
-    /// literal text starts with `:` or `.`, return a sibling whose
-    /// surface absorbs the leading `:`/`.` as visarga (U+1038) or
-    /// creaky tone (U+1037). The remainder of the tail is returned
-    /// alongside so the caller can re-attach it. Returns nil when the
-    /// tail doesn't start with one of the tone markers, the surface
-    /// doesn't end in a bare consonant, or the next character in the
-    /// tail is itself a letter (mid-buffer position). This deliberately
-    /// only reshapes the simple `<C><tone-marker>` shape — multi-segment
-    /// or English-mid-buffer tails are unaffected.
+    /// TASK-014 / TASK-023 / TASK-024: when a candidate surface ends in a
+    /// shape that can take a tone marker on its existing syllable cluster
+    /// and the trailing literal text starts with `:` or `.`, return a
+    /// sibling whose surface absorbs the leading `:`/`.` as visarga
+    /// (U+1038) or creaky tone (U+1037). The eligible suffix shapes:
+    ///
+    ///   1. Bare base consonant (`<C>`) — inherent-`a` open syllable.
+    ///      Tone is appended after the consonant: creaky `<C> 1037`,
+    ///      visarga `<C> 1038`. (TASK-014)
+    ///
+    ///   2. Asat-closed coda (`<C> 103A`) — stop or nasal coda. Tone
+    ///      is inserted at the orthographic position dictated by
+    ///      Burmese rule: creaky goes BEFORE the asat
+    ///      (`<C> 1037 103A`), visarga goes AFTER the asat
+    ///      (`<C> 103A 1038`). (TASK-023)
+    ///
+    ///   3. Medial-bearing inherent-`a` (`<C> + medial(s)` ending in
+    ///      U+103B..U+103E). Tone is appended after the trailing
+    ///      medial scalar: creaky `<C> <medial(s)> 1037`,
+    ///      visarga `<C> <medial(s)> 1038`. (TASK-024)
+    ///
+    /// The remainder of the tail is returned alongside so the caller
+    /// can re-attach it. Returns nil when the tail doesn't start with
+    /// one of the tone markers, the surface doesn't match an eligible
+    /// suffix shape, or the next character in the tail is itself an
+    /// ASCII letter (mid-buffer position — `kit.kha`, `kya.kha`).
     internal static func applyBareConsonantToneFromTail(
         candidateSurface: String,
         tail: String
@@ -97,15 +112,8 @@ extension BurmeseEngine {
         case ".": toneScalar = 0x1037
         default: return nil
         }
-        // Require the surface's last scalar to be a base consonant
-        // (U+1000..U+1021 or U+103F) with no following dep-vowel,
-        // medial, or other mark — i.e. the syllable is in its bare
-        // inherent-`a` shape.
         let scalars = Array(candidateSurface.unicodeScalars)
-        guard let last = scalars.last else { return nil }
-        let v = last.value
-        let isBaseConsonant = (v >= 0x1000 && v <= 0x1021) || v == 0x103F
-        guard isBaseConsonant else { return nil }
+        guard !scalars.isEmpty else { return nil }
         // Reject when the very next character of the tail is an ASCII
         // letter — that means the user is mid-typing an English word
         // and the `:`/`.` is intended as ASCII punctuation, not a
@@ -117,10 +125,96 @@ extension BurmeseEngine {
                 return nil
             }
         }
-        let toneChar = Character(Unicode.Scalar(toneScalar)!)
-        let toned = candidateSurface + String(toneChar)
+        // Classify the surface suffix shape and decide where the tone
+        // scalar lands.
+        guard let toned = insertToneIntoSurface(
+            scalars: scalars,
+            toneScalar: toneScalar
+        ) else {
+            return nil
+        }
         let remainder = String(tailChars.dropFirst())
         return (toned, remainder)
+    }
+
+    /// Insert `toneScalar` into a candidate surface at the
+    /// orthographically correct position for Burmese tone marking.
+    /// Returns nil if the surface does not match a tone-eligible
+    /// suffix shape.
+    ///
+    /// Eligible shapes:
+    /// - `<C>` (bare base consonant) — append tone.
+    /// - `<C> 103A` (asat-closed coda) — creaky inserts BEFORE asat,
+    ///   visarga inserts AFTER asat.
+    /// - `<C> <medial(s)>` (one or more U+103B..U+103E after a base
+    ///   consonant, with no asat or vowel sign past the medials) —
+    ///   append tone after medials.
+    private static func insertToneIntoSurface(
+        scalars: [Unicode.Scalar],
+        toneScalar: UInt32
+    ) -> String? {
+        guard let last = scalars.last else { return nil }
+        let v = last.value
+        let toneChar = Character(Unicode.Scalar(toneScalar)!)
+        // Case 1: surface ends in a bare base consonant.
+        if isBaseConsonantScalar(v) {
+            // Walk back through any medials (`103B..103E`) — if the
+            // base consonant is the *only* scalar after the medials
+            // (i.e. the trailing scalar is the consonant itself with
+            // nothing after it), this is the bare-consonant case.
+            // Otherwise it's the medial-bearing case below; we
+            // identify medial-bearing by the *last* scalar being a
+            // medial, not a base.
+            let toned = String(scalars.map(Character.init)) + String(toneChar)
+            return toned
+        }
+        // Case 2: surface ends in an asat (`103A`). The scalar before
+        // the asat must be a base consonant (or a base consonant
+        // optionally preceded by medials/vowels — the orthographic
+        // rule only requires the immediate predecessor of the asat to
+        // be a base consonant).
+        if v == 0x103A, scalars.count >= 2 {
+            let prev = scalars[scalars.count - 2].value
+            if isBaseConsonantScalar(prev) {
+                // Creaky inserts BEFORE the asat (between base and
+                // asat); visarga inserts AFTER the asat.
+                let head = scalars.dropLast()
+                let baseStr = String(head.map(Character.init))
+                if toneScalar == 0x1037 {
+                    // creaky → `<…C> 1037 103A`
+                    return baseStr + String(toneChar) + String(Character(Unicode.Scalar(0x103A)!))
+                } else {
+                    // visarga → `<…C> 103A 1038`
+                    return baseStr + String(Character(Unicode.Scalar(0x103A)!)) + String(toneChar)
+                }
+            }
+        }
+        // Case 3: surface ends in one or more medials
+        // (`103B..103E`). Walk back through the medial run; the
+        // immediately-preceding scalar must be a base consonant.
+        if isMedialScalar(v) {
+            var idx = scalars.count - 1
+            while idx > 0, isMedialScalar(scalars[idx - 1].value) {
+                idx -= 1
+            }
+            if idx > 0, isBaseConsonantScalar(scalars[idx - 1].value) {
+                // The base is at idx-1; medials run from idx..count-1.
+                // Append the tone scalar after the trailing medial.
+                let toned = String(scalars.map(Character.init)) + String(toneChar)
+                return toned
+            }
+        }
+        return nil
+    }
+
+    @inline(__always)
+    private static func isBaseConsonantScalar(_ v: UInt32) -> Bool {
+        (v >= 0x1000 && v <= 0x1021) || v == 0x103F
+    }
+
+    @inline(__always)
+    private static func isMedialScalar(_ v: UInt32) -> Bool {
+        v >= 0x103B && v <= 0x103E
     }
 
     internal static func colonActsAsVowelModifier(prefixEndingAtColon prefix: Substring) -> Bool {

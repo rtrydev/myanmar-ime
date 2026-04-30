@@ -80,5 +80,6 @@ public enum BurmeseTestSuites {
         LeadingAaTrailingVowelSuite.suite,
         OoSuffixOrphanChainSuite.suite,
         DoubledLetterKinziSuite.suite,
+        AsatCodaToneSuite.suite,
     ]
 }
