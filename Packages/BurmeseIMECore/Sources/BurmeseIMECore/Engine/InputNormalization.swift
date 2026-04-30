@@ -1588,7 +1588,25 @@ extension BurmeseEngine {
     }
 
     @_spi(Testing) public static func isAcceptableParse(_ parse: SyllableParse) -> Bool {
-        guard parse.legalityScore > 0 || hasOnlyCleanViramaStacks(parse) else { return false }
+        // Carve-out for clean Pali-style virama stacks whose DP-time
+        // legality flagged 0 but whose materialised surface is
+        // orthographically clean (`hasOnlyCleanViramaStacks`).
+        //
+        // TASK-025: also require `parse.score >= 0`. The DP's `.skip`
+        // arc penalises score by -100 per unparseable char it
+        // consumes; legitimate stack rescues never include a `.skip`
+        // arc and always score ≥ 0. Without this guard, a buffer like
+        // `k+ka.` is accepted at full length (the `.` is silently
+        // absorbed by a `.skip` arc) and the trailing tone marker
+        // never reaches the right-shrink probe's `droppedTail` — the
+        // tone-attachment helper in
+        // `Engine/PunctuationHandling.swift::applyBareConsonantToneFromTail`
+        // is then never invoked, and both the literal `.`/`:` and the
+        // would-be tone scalar disappear from every panel candidate.
+        let stackCarveOut = parse.legalityScore == 0
+            && parse.score >= 0
+            && hasOnlyCleanViramaStacks(parse)
+        guard parse.legalityScore > 0 || stackCarveOut else { return false }
         guard !hasInterleavedLatin(parse.output) else { return false }
         guard !hasTripleViramaStack(parse.output) else { return false }
         // The parser's per-transition `isLegal` flag is computed before

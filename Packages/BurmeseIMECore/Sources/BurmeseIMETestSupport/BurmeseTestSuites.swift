@@ -81,5 +81,6 @@ public enum BurmeseTestSuites {
         OoSuffixOrphanChainSuite.suite,
         DoubledLetterKinziSuite.suite,
         AsatCodaToneSuite.suite,
+        ViramaStackToneSuite.suite,
     ]
 }
