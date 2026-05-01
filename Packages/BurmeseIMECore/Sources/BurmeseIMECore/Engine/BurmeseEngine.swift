@@ -493,14 +493,28 @@ public final class BurmeseEngine: @unchecked Sendable {
         // `parseLongestAcceptablePrefix` collapses the per-length loop
         // into a single DP pass + backward walk of its buckets. On garbage
         // / keyboard-bashing input this turns O(n) full parses into O(1).
+        // TASK-027: peel a trailing run of `y`/`w`/`r`/`l` letters off
+        // the buffer when they are the doubled-coda artifact (`kayy`,
+        // `kall`, `kawww`, `karrr`) or the stray-coda after a long
+        // closed-syllable vowel rule (`myaungy`). The peeled letters
+        // are kept in `peeledTrailingCoda` and discarded entirely from
+        // the composing pipeline — the parser must not see them
+        // (otherwise it would re-pick the visible-standalone-consonant
+        // chain that produces the bug surface), and the literal-tail
+        // composer must not re-render them either. The user still sees
+        // their original keystrokes via the engine's composing buffer
+        // overlay; the panel surface drops the artifact.
+        let (preTrimmedNormalized, peeledTrailingCoda) =
+            Self.peelRepeatedTrailingCoda(initialNormalized)
         let (acceptableLen, _) = parser.parseLongestAcceptablePrefix(
-            initialNormalized,
+            preTrimmedNormalized,
             maxResults: 1,
             acceptable: Self.isAcceptableParse
         )
-        let initialChars = Array(initialNormalized)
+        let initialChars = Array(preTrimmedNormalized)
         let normalizedInitial = String(initialChars.prefix(acceptableLen))
         let droppedTailInitial = String(initialChars.suffix(initialChars.count - acceptableLen))
+        _ = peeledTrailingCoda  // dropped from the composing pipeline
 
         // TASK-026: trim a doubled-bare-vowel tail run from the dropped
         // section when its leading characters match the kept buffer's

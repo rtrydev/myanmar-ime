@@ -194,6 +194,116 @@ extension BurmeseEngine {
         c == "i" || c == "u" || c == "e" || c == "o"
     }
 
+    /// TASK-027: peel a trailing run of "coda-style" consonant letters
+    /// (`y`, `w`, `r`, `l`) from `buffer` when the run is a structural
+    /// artifact rather than a deliberate spelling. Two patterns:
+    ///
+    ///   1. Doubled coda repeat (`kayy`, `kaww`, `karr`, `kall`): the
+    ///      buffer's tail has two or more consecutive matching coda
+    ///      letters. Examples — `kayy` → ("kay", "y"); `karrr` → ("ka",
+    ///      "rr"); `kall` → ("kal", "l"). Without the peel the parser's
+    ///      `vowelOnly(<rule>) + onsetOnly(<letter>)` chain (or the
+    ///      `onsetOnly + onsetOnly` doubled-consonant chain for `kall`)
+    ///      materialises a visible standalone consonant scalar
+    ///      (`101A`/`101D`/`101B`/`101C`) tacked onto an otherwise
+    ///      complete syllable, which no Burmese typist intends.
+    ///
+    ///   2. Single trailing coda letter after a closed-syllable vowel
+    ///      rule (`myaungy`): the rule itself already encodes a
+    ///      consonant-letter coda (`g` for `aung`, `n` for `ain`/`an`,
+    ///      `t` for `at`/`ote`/`out`/`ate`, etc.) and the user appends
+    ///      another stray coda-style letter. The closed-syllable rules
+    ///      checked here are the multi-character vowel rules whose
+    ///      canonical roman ends with `g`, `n`, or — restricted to the
+    ///      `aung`/`aing`/`ain`/`out`/`ote`/`ate`/`own`/`on`/`an`/`in`
+    ///      family — to avoid touching short rules like `at`/`et`/`it`
+    ///      whose trailing consonant is the user's only signal that
+    ///      they wanted a closed syllable at all (no clear bug
+    ///      reproduction for those shapes).
+    ///
+    /// Returns the trimmed buffer and the peeled-off characters. The
+    /// peeled characters are dropped from the parser input AND from
+    /// the literal-tail pipeline (callers must not re-render them);
+    /// the user still sees the original keystrokes via the engine's
+    /// composing-buffer string.
+    internal static func peelRepeatedTrailingCoda(_ buffer: String) -> (trimmed: String, peeled: String) {
+        let chars = Array(buffer)
+        guard chars.count >= 3 else { return (buffer, "") }
+
+        // Pattern 1: doubled coda repeat. Walk back over identical
+        // trailing coda letters; require at least two (so `kayy` peels
+        // one `y`, `karrr` peels two `r`s, `kall` peels one `l`).
+        if let last = chars.last, isCodaStyleConsonantLetter(last) {
+            var doublingStart = chars.count
+            while doublingStart > 0 && chars[doublingStart - 1] == last {
+                doublingStart -= 1
+            }
+            let runLen = chars.count - doublingStart
+            if runLen >= 2 {
+                let trimmed = String(chars.prefix(doublingStart + 1))
+                let peeled = String(chars.suffix(runLen - 1))
+                return (trimmed, peeled)
+            }
+        }
+
+        // Pattern 2: single trailing coda letter after a long
+        // closed-syllable vowel rule. The rules considered here are
+        // the multi-char closed-syllable forms whose canonical roman
+        // ends with a consonant letter and is at least 3 chars long
+        // (so `at`/`et`/`it`/`ay`/`aw`/`ar` are excluded — those are
+        // short rules whose trailing letter the user typed once as
+        // the only signal of the closed-syllable form they wanted).
+        if chars.count >= 4,
+           let last = chars.last,
+           isCodaStyleConsonantLetter(last) {
+            // Take up to 5 chars of suffix excluding the trailing
+            // candidate letter and check against the closed-syllable
+            // rule list. Longest-match-first.
+            let upto = Array(chars.dropLast())
+            for ruleSuffix in longClosedSyllableVowelRuleSuffixes {
+                if upto.count >= ruleSuffix.count
+                    && Array(upto.suffix(ruleSuffix.count)) == ruleSuffix {
+                    return (String(upto), String(last))
+                }
+            }
+        }
+
+        return (buffer, "")
+    }
+
+    /// Visible standalone consonant letters that the parser materialises
+    /// as a single base scalar when consumed as a 1-char onset arc:
+    /// `y` → `101A`, `w` → `101D`, `r` → `101B`, `l` → `101C`. These
+    /// are the letters the TASK-027 bug pattern leaves stranded at the
+    /// end of an otherwise-complete syllable. Other single-letter
+    /// onsets (e.g. `k`, `p`, `m`, `n`) are deliberately excluded — a
+    /// trailing `kak` or `kap` is a legitimate doubled-syllable
+    /// spelling (`ကက`, `ကပ`).
+    @inline(__always)
+    private static func isCodaStyleConsonantLetter(_ c: Character) -> Bool {
+        c == "y" || c == "w" || c == "r" || c == "l"
+    }
+
+    /// Vowel rules whose canonical roman is at least 3 chars long and
+    /// ends with a consonant letter — these are the "long closed-
+    /// syllable" rules that already encode a consonant-letter coda
+    /// in their own spelling. A trailing extra coda letter after one
+    /// of these is the TASK-027 pattern-2 bug shape (`myaungy`,
+    /// `kainy`, `kowny`, …). Stored as `[Character]` arrays so the
+    /// suffix check in `peelRepeatedTrailingCoda` can compare without
+    /// per-call string slicing. Sorted longest-first so the suffix
+    /// check picks the most specific rule first.
+    private static let longClosedSyllableVowelRuleSuffixes: [[Character]] = {
+        let keys: [String] = [
+            "aung", "aing",
+            "ain", "out", "ote", "ate", "own",
+            "on",
+        ]
+        return keys
+            .sorted { $0.count > $1.count }
+            .map { Array($0) }
+    }()
+
     /// Defence-in-depth gate for virama-stack surfaces. The DP already
     /// penalises malformed virama transitions with `legalityScore = 0`;
     /// this rescue path lets such candidates survive when the emitted
