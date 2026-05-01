@@ -16,6 +16,7 @@ venv
 
 # Large data files (compiled into SQLite at build time)
 *.tsv
+!Packages/BurmeseIMECore/Sources/BurmeseIMECore/Data/NumberMeasureWords.tsv
 
 # SQLite transient sidecars — WAL/coordination state, never source
 *.sqlite-shm

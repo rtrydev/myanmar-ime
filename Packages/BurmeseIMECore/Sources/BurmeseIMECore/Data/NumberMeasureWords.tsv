@@ -1,0 +1,12 @@
+# Measure words suggested alongside pure-digit input.
+# Columns: measure_word<TAB>score<TAB>match_pattern
+# Higher score ranks higher. Patterns supported by NumberMeasureWords.swift:
+#   any, currency_ge_100, year_4digit,
+#   hour_ge_1_le_24, minute_ge_0_le_59, day_ge_1_le_31
+ခုနှစ်	90	year_4digit
+ကျပ်	70	currency_ge_100
+ခု	60	any
+ရက်	55	day_ge_1_le_31
+ယောက်	55	any
+နာရီ	50	hour_ge_1_le_24
+မိနစ်	45	minute_ge_0_le_59
