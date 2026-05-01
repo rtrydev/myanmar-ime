@@ -221,13 +221,28 @@ extension BurmeseEngine {
     ///      they wanted a closed syllable at all (no clear bug
     ///      reproduction for those shapes).
     ///
+    /// **Trailing-tone interaction (TASK-027 follow-up):** when the
+    /// buffer ends with a tone marker (`.` or `:`) the peel checks the
+    /// pre-tone tail for the doubled-coda / stray-coda patterns and
+    /// re-attaches the tone to the trimmed buffer. Without this any
+    /// tone marker would consume the trailing position and the peel
+    /// would silently no-op, letting the bug surface (`ကေယ့`,
+    /// `ကလလ့`, `မြောင်ယ့`) re-emerge. The peeled letters never include
+    /// the tone marker — only the duplicate / stray coda letters.
+    ///
     /// Returns the trimmed buffer and the peeled-off characters. The
     /// peeled characters are dropped from the parser input AND from
     /// the literal-tail pipeline (callers must not re-render them);
     /// the user still sees the original keystrokes via the engine's
     /// composing-buffer string.
     internal static func peelRepeatedTrailingCoda(_ buffer: String) -> (trimmed: String, peeled: String) {
-        let chars = Array(buffer)
+        // Strip an optional trailing tone marker so the doubled-coda
+        // and stray-coda checks see the underlying syllable shape.
+        // Without this, `kayy.` / `kall:` / `myaungy.` evade the peel
+        // because the trailing `.` / `:` consumes the tail position
+        // (the bug class flagged in TASK-027's validation report).
+        let (preToneBuffer, toneSuffix) = splitTrailingToneMarker(buffer)
+        let chars = Array(preToneBuffer)
         guard chars.count >= 3 else { return (buffer, "") }
 
         // Pattern 1: doubled coda repeat. Walk back over identical
@@ -240,7 +255,7 @@ extension BurmeseEngine {
             }
             let runLen = chars.count - doublingStart
             if runLen >= 2 {
-                let trimmed = String(chars.prefix(doublingStart + 1))
+                let trimmed = String(chars.prefix(doublingStart + 1)) + toneSuffix
                 let peeled = String(chars.suffix(runLen - 1))
                 return (trimmed, peeled)
             }
@@ -263,12 +278,28 @@ extension BurmeseEngine {
             for ruleSuffix in longClosedSyllableVowelRuleSuffixes {
                 if upto.count >= ruleSuffix.count
                     && Array(upto.suffix(ruleSuffix.count)) == ruleSuffix {
-                    return (String(upto), String(last))
+                    return (String(upto) + toneSuffix, String(last))
                 }
             }
         }
 
         return (buffer, "")
+    }
+
+    /// Split a single trailing tone marker (`.` or `:`) off the buffer.
+    /// Used by `peelRepeatedTrailingCoda` so a tone marker at the tail
+    /// does not mask the underlying doubled-letter pattern that the
+    /// guard targets. Only one marker is peeled — chained
+    /// `..` / `::` / `.:` are not real Burmese tone shapes and the
+    /// existing pipeline already handles them as literal punctuation.
+    @inline(__always)
+    private static func splitTrailingToneMarker(_ buffer: String) -> (preTone: String, toneSuffix: String) {
+        guard let last = buffer.last, last == "." || last == ":" else {
+            return (buffer, "")
+        }
+        var pre = buffer
+        pre.removeLast()
+        return (pre, String(last))
     }
 
     /// Visible standalone consonant letters that the parser materialises
