@@ -336,9 +336,10 @@ extension BurmeseEngine {
         let (preTone, toneSuffix) = splitTrailingToneMarker(buffer)
         guard !toneSuffix.isEmpty else { return buffer }
         let chars = Array(preTone)
-        // Need at least 3 chars before the tone: a leading consonant
-        // letter + a doubled bare vowel (`<C>VV`).
-        guard chars.count >= 3, let last = chars.last,
+        // Need at least 2 chars before the tone — a doubled bare-vowel
+        // run (`VV<tone>` for buffer-leading inputs) or a `<C>VV<tone>`
+        // shape with a preceding consonant.
+        guard chars.count >= 2, let last = chars.last,
               isOtherChainedBareVowelLetter(last)
         else { return buffer }
         // Walk back over identical trailing bare-vowel letters and
@@ -351,17 +352,31 @@ extension BurmeseEngine {
         }
         let runLen = chars.count - doublingStart
         guard runLen >= 2 else { return buffer }
-        // Anchor: the char immediately before the doubled-vowel run
-        // must be an ASCII letter that is *not* the same vowel — i.e.
-        // a consonant or different vowel. This keeps buffer-leading
-        // doubled-vowel inputs (`ee.`, `oo:`) untouched because they
-        // have no preceding letter at all. Without this guard a buffer
-        // like `iee.` (rare but possible) would also peel.
-        let anchorIdx = doublingStart - 1
-        guard anchorIdx >= 0 else { return buffer }
-        let anchor = chars[anchorIdx]
-        guard anchor.isASCII, anchor.isLetter, anchor != last else {
+        // Short-circuit when the original buffer is itself a dedicated
+        // rule-table entry (`Romanization.romanToVowel` lookup hit):
+        // `ii.` → ဣ (1023) and `oo:` → ဪ (102A) collapse cleanly via
+        // the rule, and peeling would regress them to `i.` / `o:`
+        // which produce different surfaces. Only fires for buffer-
+        // leading doubled-vowel inputs whose full buffer (with tone)
+        // is in the romanization table; consonant-anchored shapes
+        // (`kii.`, `koo:`, …) are not rule entries and always peel.
+        if Romanization.romanToVowel[buffer] != nil {
             return buffer
+        }
+        // Anchor: the char immediately before the doubled-vowel run.
+        // For buffer-leading inputs (`ii:`, `uu.`, `ee.`, `ee:`, `oo.`)
+        // the run starts at index 0 and there is no anchor — peel
+        // anyway so the engine sees the single-vowel + tone form
+        // (`i:`, `u.`, `e.`, `e:`, `o.`). For consonant-anchored
+        // inputs, require the anchor be an ASCII letter that is *not*
+        // the same vowel (so a buffer like `iee.` doesn't peel — its
+        // doubled `ee` run would already be handled differently).
+        let anchorIdx = doublingStart - 1
+        if anchorIdx >= 0 {
+            let anchor = chars[anchorIdx]
+            guard anchor.isASCII, anchor.isLetter, anchor != last else {
+                return buffer
+            }
         }
         let trimmed = String(chars.prefix(doublingStart + 1)) + toneSuffix
         return trimmed

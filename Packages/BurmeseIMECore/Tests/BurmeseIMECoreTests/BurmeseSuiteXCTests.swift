@@ -286,4 +286,8 @@ final class DoubledLetterKinziXCTests: XCTestCase {
 final class CrossCategoryDepVowelLegalityXCTests: XCTestCase {
     func testAll() { runSuite(CrossCategoryDepVowelLegalitySuite.suite, xctest: self) }
 }
+
+final class BareDoubledVowelToneXCTests: XCTestCase {
+    func testAll() { runSuite(BareDoubledVowelToneSuite.suite, xctest: self) }
+}
 #endif
