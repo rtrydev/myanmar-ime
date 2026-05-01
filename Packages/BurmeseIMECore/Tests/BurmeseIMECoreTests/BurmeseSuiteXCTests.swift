@@ -282,4 +282,8 @@ final class OoSuffixOrphanChainXCTests: XCTestCase {
 final class DoubledLetterKinziXCTests: XCTestCase {
     func testAll() { runSuite(DoubledLetterKinziSuite.suite, xctest: self) }
 }
+
+final class CrossCategoryDepVowelLegalityXCTests: XCTestCase {
+    func testAll() { runSuite(CrossCategoryDepVowelLegalitySuite.suite, xctest: self) }
+}
 #endif

@@ -84,5 +84,6 @@ public enum BurmeseTestSuites {
         ViramaStackToneSuite.suite,
         DoubledBareVowelSuite.suite,
         RepeatedVowelRuleCodaSuite.suite,
+        CrossCategoryDepVowelLegalitySuite.suite,
     ]
 }

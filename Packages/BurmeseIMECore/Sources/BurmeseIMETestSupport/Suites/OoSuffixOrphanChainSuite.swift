@@ -16,28 +16,92 @@ public enum OoSuffixOrphanChainSuite {
         BurmeseEngine(candidateStore: EmptyCandidateStore(), languageModel: NullLanguageModel())
     }
 
-    /// True when `surface` carries two or more anchors immediately
-    /// adjacent (either touching or separated only by one or more
-    /// dep-mark scalars). Used by the `openSyllablePrefix_onePerCluster`
-    /// test to verify the TASK-022 per-cluster invariant: each
-    /// contiguous orphan-mark run carries at most one anchor.
+    /// True when `surface` contains an independent-vowel anchor
+    /// (`1021..102A`) that splits a single orthographic cluster
+    /// mid-stream — i.e. an anchor that lands BETWEEN dep-vowel
+    /// scalars that would otherwise form a contiguous valid Burmese
+    /// cluster on the prior anchor. Used by the
+    /// `openSyllablePrefix_onePerCluster` test to verify the TASK-022
+    /// per-cluster invariant: each cluster's `1021` injection lands
+    /// at a cluster boundary, never in the middle of an in-progress
+    /// cluster.
+    ///
+    /// A "valid Burmese cluster" is the contiguous dep-vowel/medial/
+    /// tone-mark run that follows an anchor. A cluster ends at:
+    ///   * a same-category dep-vowel repeat (`102D ... 102D`).
+    ///   * an asat (`103A`) — closes the syllable.
+    ///   * the next anchor.
+    ///
+    /// `1021 102D 102F 1021 102D 102F` is the legitimate "two
+    /// complete `o`-clusters back-to-back" shape produced by
+    /// per-cluster anchor injection — each `1021 102D 102F` is one
+    /// `o`-cluster (`အို`). The cross-category cluster-completion
+    /// shapes recognised here are the same canonical legal multi-
+    /// scalar shapes as `Parser/Finalization::scanOutputLegality`:
+    /// `o`-cluster (`102D 102F`, cats {2,3}) and aung-order
+    /// (`1031 102B/102C`, cats {4,1}). Any other cross-category
+    /// chain after an anchor is incomplete — a follow-on anchor
+    /// would be mid-cluster.
     private static func consecutiveAnchorsInDepMarkRun(_ scalars: [UInt32]) -> Bool {
         var sawAnchor = false
+        var seenDepCategoriesInCluster: Set<Int> = []
         for v in scalars {
             let isAnchor = (0x1021...0x102A).contains(v)
             let isDepMark = (0x102B...0x1032).contains(v)
                 || v == 0x1036
                 || (0x103B...0x103E).contains(v)
+            let depCategory = depVowelCategory(v)
             if isAnchor {
-                if sawAnchor { return true }
+                if sawAnchor {
+                    // The prior cluster is complete iff it is empty
+                    // (anchor with no dep-marks of its own — the
+                    // anchor IS the cluster) or a canonical multi-
+                    // scalar shape.
+                    let isComplete = seenDepCategoriesInCluster.isEmpty
+                        || seenDepCategoriesInCluster == [2, 3]      // o-cluster
+                        || seenDepCategoriesInCluster == [4, 1]      // aung-order
+                        || seenDepCategoriesInCluster == [4]         // standalone e-kar
+                        || seenDepCategoriesInCluster == [1]         // standalone aa
+                        || seenDepCategoriesInCluster == [2]         // standalone i
+                        || seenDepCategoriesInCluster == [3]         // standalone u
+                        || seenDepCategoriesInCluster == [5]         // standalone ai
+                    if !isComplete {
+                        return true
+                    }
+                }
                 sawAnchor = true
+                seenDepCategoriesInCluster.removeAll()
             } else if isDepMark {
-                // stay in the current run
+                if depCategory != 0,
+                   seenDepCategoriesInCluster.contains(depCategory) {
+                    // Same-category dep-vowel repeat opens a new
+                    // cluster — mirror the engine's per-cluster split.
+                    sawAnchor = false
+                    seenDepCategoriesInCluster.removeAll()
+                }
+                if depCategory != 0 {
+                    seenDepCategoriesInCluster.insert(depCategory)
+                }
             } else {
                 sawAnchor = false
+                seenDepCategoriesInCluster.removeAll()
             }
         }
         return false
+    }
+
+    /// Categorise dep-vowel scalars for cluster-split detection.
+    /// Mirrors `Engine/SurfaceSanitizers.swift::depVowelCategory`.
+    @inline(__always)
+    private static func depVowelCategory(_ v: UInt32) -> Int {
+        switch v {
+        case 0x102B, 0x102C: return 1
+        case 0x102D, 0x102E: return 2
+        case 0x102F, 0x1030: return 3
+        case 0x1031:        return 4
+        case 0x1032:        return 5
+        default:            return 0
+        }
     }
 
     /// Count independent-vowel scalars (U+1021..U+102A) appearing

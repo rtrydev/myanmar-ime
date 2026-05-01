@@ -726,6 +726,27 @@ extension BurmeseEngine {
                w >= 0x102B, w <= 0x1032 {
                 return false
             }
+            // Cross-category dep-vowel allow-list (TASK-028). Mirrors
+            // `Parser/Finalization.swift::scanOutputLegality` so the
+            // orphan-mark detector treats illegal cross-category
+            // chains as unanchored — feeding them to the per-cluster
+            // anchor injector. Restricted to the aa / i / u / ai
+            // families (cats 1, 2, 3, 5); walks involving the leading
+            // e-kar `1031` (cat 4) are excluded because the e-kar's
+            // own placement rules are handled by the dedicated
+            // `current == 0x1031` rule above and `kayoo`-style inputs
+            // depend on the existing same-category split for their
+            // single-anchor injection.
+            if currentCategory != 0,
+               currentCategory != 4,
+               wCategory != 0,
+               wCategory != 4,
+               wCategory != currentCategory {
+                let isOClusterUpstream = (w == 0x102D && current == 0x102F)
+                if !isOClusterUpstream {
+                    return false
+                }
+            }
             if isAttachableMarkValue(w) { j -= 1; continue }
             return false
         }
