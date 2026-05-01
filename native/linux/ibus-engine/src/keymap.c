@@ -18,6 +18,35 @@ KeymapResult keymap_map(uint32_t keyval, uint32_t modifiers)
         return r;
     }
 
+    /* Bare modifier presses arrive as standalone key events on
+       IBus/X11 (unlike AppKit, which folds them into the next
+       character event). Treat them as a distinct action so the
+       caller doesn't commit a half-typed buffer when the user
+       presses Shift to reach ':' or '+'. */
+    switch (keyval) {
+    case IBUS_KEY_Shift_L:
+    case IBUS_KEY_Shift_R:
+    case IBUS_KEY_Control_L:
+    case IBUS_KEY_Control_R:
+    case IBUS_KEY_Caps_Lock:
+    case IBUS_KEY_Shift_Lock:
+    case IBUS_KEY_Meta_L:
+    case IBUS_KEY_Meta_R:
+    case IBUS_KEY_Alt_L:
+    case IBUS_KEY_Alt_R:
+    case IBUS_KEY_Super_L:
+    case IBUS_KEY_Super_R:
+    case IBUS_KEY_Hyper_L:
+    case IBUS_KEY_Hyper_R:
+    case IBUS_KEY_ISO_Level3_Shift:
+    case IBUS_KEY_ISO_Level5_Shift:
+    case IBUS_KEY_Num_Lock:
+        r.action = KEYMAP_MODIFIER;
+        return r;
+    default:
+        break;
+    }
+
     switch (keyval) {
     case IBUS_KEY_BackSpace:
         r.action = KEYMAP_BACKSPACE;

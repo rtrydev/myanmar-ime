@@ -37,6 +37,35 @@ static void test_modifiers_pass_through(void)
     EXPECT(r.action == KEYMAP_IGNORE, "Alt-A passes through");
 }
 
+static void test_bare_modifier_keys(void)
+{
+    /* Bare Shift / Ctrl / Alt / Super / Caps presses must report
+       KEYMAP_MODIFIER, never KEYMAP_IGNORE — KEYMAP_IGNORE forces
+       the engine to commit the buffer, which would break ':' (typed
+       as Shift+';'), '+', '?', and every other shift-reachable
+       character. */
+    EXPECT(keymap_map(IBUS_KEY_Shift_L, 0).action == KEYMAP_MODIFIER,
+           "bare Shift_L is a modifier press");
+    EXPECT(keymap_map(IBUS_KEY_Shift_R, 0).action == KEYMAP_MODIFIER,
+           "bare Shift_R is a modifier press");
+    EXPECT(keymap_map(IBUS_KEY_Control_L, 0).action == KEYMAP_MODIFIER,
+           "bare Control_L is a modifier press");
+    EXPECT(keymap_map(IBUS_KEY_Alt_L, 0).action == KEYMAP_MODIFIER,
+           "bare Alt_L is a modifier press");
+    EXPECT(keymap_map(IBUS_KEY_Super_L, 0).action == KEYMAP_MODIFIER,
+           "bare Super_L is a modifier press");
+    EXPECT(keymap_map(IBUS_KEY_Caps_Lock, 0).action == KEYMAP_MODIFIER,
+           "Caps_Lock is a modifier press");
+    EXPECT(keymap_map(IBUS_KEY_ISO_Level3_Shift, 0).action == KEYMAP_MODIFIER,
+           "AltGr (ISO_Level3_Shift) is a modifier press");
+
+    /* The shifted character itself is still typeable — only the
+       standalone modifier press is special. */
+    KeymapResult colon = keymap_map((guint)':', IBUS_SHIFT_MASK);
+    EXPECT(colon.action == KEYMAP_TYPEABLE, "Shift+';' → ':' is typeable");
+    EXPECT(colon.typed_char == ':',         "':' typed_char preserved");
+}
+
 static void test_navigation(void)
 {
     EXPECT(keymap_map(IBUS_KEY_BackSpace, 0).action == KEYMAP_BACKSPACE,
@@ -78,6 +107,7 @@ int main(void)
 {
     test_typeable();
     test_modifiers_pass_through();
+    test_bare_modifier_keys();
     test_navigation();
     test_punctuation();
     if (failures == 0) {

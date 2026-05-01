@@ -241,6 +241,12 @@ static gboolean ibus_myangler_engine_process_key_event(IBusEngine* engine,
     if (modifiers & IBUS_RELEASE_MASK) return FALSE;
 
     KeymapResult km = keymap_map(keyval, modifiers);
+    if (km.action == KEYMAP_MODIFIER) {
+        /* Bare modifier press (Shift, Ctrl, …). The user is in the
+           middle of forming a chord — e.g. Shift before ':' — so we
+           must NOT commit the buffer. Just let it pass through. */
+        return FALSE;
+    }
     if (km.action == KEYMAP_IGNORE) {
         /* Don't consume keys we have no mapping for — let the client
            handle them. If the buffer is non-empty, commit it first so

@@ -13,6 +13,10 @@
  */
 typedef enum {
     KEYMAP_IGNORE,           /* Pass through to the client unmodified. */
+    KEYMAP_MODIFIER,         /* Bare modifier press (Shift, Ctrl, …). Pass
+                                through, but unlike KEYMAP_IGNORE the
+                                caller must NOT commit the buffer — the
+                                user is mid-chord (e.g. Shift before ':'). */
     KEYMAP_TYPEABLE,         /* Append `typed_char` to the buffer. */
     KEYMAP_BACKSPACE,        /* Shrink the buffer by one char. */
     KEYMAP_COMMIT,           /* Commit selected candidate (Space, Return). */

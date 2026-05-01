@@ -4,6 +4,7 @@
 .claude
 .codex-home
 **/.DS_Store
+**/.cache
 
 # Xcode
 **/xcuserdata
