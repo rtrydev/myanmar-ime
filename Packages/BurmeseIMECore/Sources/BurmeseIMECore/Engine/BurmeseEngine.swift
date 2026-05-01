@@ -504,8 +504,21 @@ public final class BurmeseEngine: @unchecked Sendable {
         // composer must not re-render them either. The user still sees
         // their original keystrokes via the engine's composing buffer
         // overlay; the panel surface drops the artifact.
+        //
+        // TASK-026 follow-up: peel a doubled bare-vowel tail (`ee`,
+        // `ii`, `oo`, `uu`) when it is followed by a tone marker
+        // (`kee.`, `kii:`, `koo.`, `kuu:`). Without this pre-pass the
+        // tone marker consumes the trailing position so the right-
+        // shrink probe never drops the duplicate vowel into
+        // `droppedTail`, leaving `trimChainedBareVowelTail` unable to
+        // fire and the malformed double-anchor surfaces re-emerge
+        // (`ကယ်ယ့်`, `ကီည့်`, `ကိုအို့`, `ကူဥ`). The peel runs before
+        // `peelRepeatedTrailingCoda` so the tone-marker re-attach
+        // chains correctly across both guards.
+        let preToneTrimmedNormalized =
+            Self.peelDoubledBareVowelTrailingTone(initialNormalized)
         let (preTrimmedNormalized, peeledTrailingCoda) =
-            Self.peelRepeatedTrailingCoda(initialNormalized)
+            Self.peelRepeatedTrailingCoda(preToneTrimmedNormalized)
         let (acceptableLen, _) = parser.parseLongestAcceptablePrefix(
             preTrimmedNormalized,
             maxResults: 1,

@@ -171,5 +171,129 @@ public enum DoubledBareVowelSuite {
                 )
             }
         },
+
+        // TASK-026 follow-up: when the doubled bare-vowel pattern is
+        // followed by a tone marker (`.` / `:`) the pre-pass must
+        // still strip the duplicate vowel BEFORE the parser sees the
+        // tone-attached buffer. Without the fix, the trailing tone
+        // consumes the tail position and the right-shrink probe never
+        // peels the duplicate vowel into `droppedTail`, so
+        // `trimChainedBareVowelTail` cannot fire and the malformed
+        // double-anchor surfaces (`ကယ်ယ့်`, `ကီည့်`, `ကိုအို့`,
+        // `ကူဥ`) re-emerge.
+        //
+        // Forbidden subsequences mirror the no-tone bug-class checks:
+        // - `kee.` / `kee:` → forbid two adjacent `101A 103A` clusters
+        //                     (doubled ya-asat).
+        // - `kii.` / `kii:` → forbid `100A 103A` (nya-asat coda
+        //                     fallback).
+        // - `koo.` / `koo:` → forbid `102D 102F 1021` (multi-anchor
+        //                     chain via injected `1021`).
+        // - `kuu.` / `kuu:` → forbid `1026` (independent ဦ as second
+        //                     anchor).
+        TestCase("doubledE_withTone_noDoubledYaAsat") { ctx in
+            let engine = emptyEngine()
+            for buffer in ["kee.", "kee:", "khee.", "khee:", "thee.", "thee:",
+                           "keee.", "keee:", "kakee.", "kakee:"] {
+                let surface = engine.update(buffer: buffer, context: [])
+                    .candidates.first?.surface ?? ""
+                let scalars = Array(surface.unicodeScalars.map(\.value))
+                ctx.assertTrue(
+                    countSubsequence(scalars, sub: [0x101A, 0x103A]) <= 1,
+                    buffer,
+                    detail: "rank-0 has multiple ya-asat clusters with trailing tone: '\(hex(surface))'"
+                )
+            }
+        },
+
+        TestCase("doubledI_withTone_noNyaAsatCoda") { ctx in
+            let engine = emptyEngine()
+            for buffer in ["kii.", "kii:", "khii.", "khii:", "thii.", "thii:",
+                           "kiii.", "kiii:", "kakii.", "kakii:"] {
+                let surface = engine.update(buffer: buffer, context: [])
+                    .candidates.first?.surface ?? ""
+                let scalars = Array(surface.unicodeScalars.map(\.value))
+                ctx.assertFalse(
+                    containsSubsequence(scalars, sub: [0x100A, 0x103A]),
+                    buffer,
+                    detail: "rank-0 contains nya-asat coda fallback with trailing tone: '\(hex(surface))'"
+                )
+            }
+        },
+
+        TestCase("doubledO_withTone_noDoubleAnchorChain") { ctx in
+            let engine = emptyEngine()
+            for buffer in ["koo.", "koo:", "khoo.", "khoo:", "thoo.", "thoo:",
+                           "kooo.", "kooo:", "kakoo.", "kakoo:", "myoo.", "myoo:"] {
+                let surface = engine.update(buffer: buffer, context: [])
+                    .candidates.first?.surface ?? ""
+                let scalars = Array(surface.unicodeScalars.map(\.value))
+                // `o`-rule emits `102D 102F`. A multi-anchor chain
+                // looks like `… 102D 102F 1021 102D 102F`. Forbid both
+                // the injected `1021` between two o-pairs and a
+                // second o-pair appearing in a row.
+                ctx.assertFalse(
+                    containsSubsequence(scalars, sub: [0x102D, 0x102F, 0x1021]),
+                    buffer,
+                    detail: "rank-0 has o-pair + 1021 anchor chain with trailing tone: '\(hex(surface))'"
+                )
+                ctx.assertTrue(
+                    countSubsequence(scalars, sub: [0x102D, 0x102F]) <= 1,
+                    "\(buffer)_singleOpair",
+                    detail: "rank-0 has multiple o-pair clusters with trailing tone: '\(hex(surface))'"
+                )
+            }
+        },
+
+        TestCase("doubledU_withTone_noIndependentVowel1026") { ctx in
+            let engine = emptyEngine()
+            // `kuu.` collapses to `ku.` whose top parse is `ကု`
+            // (`102F`, short u) — `1026` (ဦ) must not appear. `kuu:`
+            // collapses to `ku:` whose top parse is `ကူး`
+            // (`1030 1038`) — same `1026` ban.
+            for buffer in ["kuu.", "kuu:", "khuu.", "khuu:", "thuu.", "thuu:",
+                           "kuuu.", "kuuu:", "kakuu.", "kakuu:"] {
+                let surface = engine.update(buffer: buffer, context: [])
+                    .candidates.first?.surface ?? ""
+                let scalars = Array(surface.unicodeScalars.map(\.value))
+                ctx.assertFalse(
+                    scalars.contains(0x1026),
+                    buffer,
+                    detail: "rank-0 contains stray independent ဦ (1026) with trailing tone: '\(hex(surface))'"
+                )
+            }
+        },
+
+        // Spot-check the expected toned surfaces for the canonical
+        // cases. The doubled bare-vowel + tone is collapsed to the
+        // single bare-vowel + tone form, then the parser applies its
+        // existing `<vowel><tone>` rule. For `i`/`u` the parser's
+        // rule scheme treats `.` as the short-vowel switch rather
+        // than as a creaky-tone marker, so `kii.` resolves to the
+        // short-i form (`ကိ`); this matches `ki.` exactly and
+        // is structurally clean (no spurious double anchor).
+        TestCase("doubledVowelWithTone_expectedSurfaces") { ctx in
+            let engine = emptyEngine()
+            let cases: [(buffer: String, expected: [UInt32])] = [
+                ("kee.", [0x1000, 0x101A, 0x1037, 0x103A]),     // ကယ့်
+                ("kee:", [0x1000, 0x1032]),                       // ကဲ
+                ("kii.", [0x1000, 0x102D]),                       // ကိ
+                ("kii:", [0x1000, 0x102E, 0x1038]),               // ကီး
+                ("koo.", [0x1000, 0x102D, 0x102F, 0x1037]),       // ကို့
+                ("koo:", [0x1000, 0x102D, 0x102F, 0x1038]),       // ကိုး
+                ("kuu.", [0x1000, 0x102F]),                       // ကု
+                ("kuu:", [0x1000, 0x1030, 0x1038]),               // ကူး
+            ]
+            for c in cases {
+                let surface = engine.update(buffer: c.buffer, context: [])
+                    .candidates.first?.surface ?? ""
+                let actual = Array(surface.unicodeScalars.map(\.value))
+                ctx.assertTrue(
+                    actual == c.expected,
+                    c.buffer,
+                    detail: "expected scalars=\(c.expected.map { String(format: "%04X", $0) }) got '\(hex(surface))'"
+                )
+            }
+        },
     ])
 }

@@ -287,9 +287,10 @@ extension BurmeseEngine {
     }
 
     /// Split a single trailing tone marker (`.` or `:`) off the buffer.
-    /// Used by `peelRepeatedTrailingCoda` so a tone marker at the tail
-    /// does not mask the underlying doubled-letter pattern that the
-    /// guard targets. Only one marker is peeled — chained
+    /// Used by `peelRepeatedTrailingCoda` and
+    /// `peelDoubledBareVowelTrailingTone` so a tone marker at the tail
+    /// does not mask the underlying doubled-letter pattern that those
+    /// guards target. Only one marker is peeled — chained
     /// `..` / `::` / `.:` are not real Burmese tone shapes and the
     /// existing pipeline already handles them as literal punctuation.
     @inline(__always)
@@ -300,6 +301,70 @@ extension BurmeseEngine {
         var pre = buffer
         pre.removeLast()
         return (pre, String(last))
+    }
+
+    /// TASK-026 follow-up: peel a doubled bare-vowel tail (`ee`, `ii`,
+    /// `oo`, `uu`) when the buffer ends in a tone marker (`.` or `:`).
+    /// Without this, the right-shrink probe sees the tone marker as the
+    /// trailing character and the doubled-vowel run never falls into
+    /// `droppedTail`, so `trimChainedBareVowelTail` cannot fire —
+    /// letting the malformed surfaces (`ကယ်ယ့်`, `ကီည့်`, `ကိုအို့`,
+    /// `ကူဥ`) re-emerge for `kee.`/`kii.`/`koo.`/`kuu.` and their
+    /// colon siblings. Strategy: strip the tone marker, peel the
+    /// doubled-vowel duplicate(s) the same way TASK-016 / TASK-026
+    /// would for the no-tone form, then re-attach the tone to the
+    /// trimmed buffer so the parser can apply the `<vowel><tone>`
+    /// rule to the now-single bare vowel (e.g. `ke.` → `ကယ့်`,
+    /// `ko.` → `ကို့`, `ko:` → `ကိုး`). For `i`/`u` the parser's
+    /// rule scheme uses `.` to switch to the short-vowel sign rather
+    /// than as a creaky-tone marker, so `kii.` resolves to `ki.` →
+    /// `ကိ` (short i, tone implicit in vowel choice) — still
+    /// structurally clean, which is the load-bearing invariant.
+    ///
+    /// Only fires when the doubled-bare-vowel run sits immediately
+    /// after a consonant-bearing prefix (`<C>...VV` shape); buffer-
+    /// leading doubled vowels (`ee.`, `ii:`, …) are left untouched
+    /// because they are handled by `bareVowelOverrideSurface` and
+    /// the dot-suffixed bare-vowel rules (`ee.`, `oo.`, …) already
+    /// produce clean independent-vowel surfaces.
+    ///
+    /// Returns the (possibly unchanged) trimmed buffer; the peeled
+    /// duplicate letters are discarded from the composing pipeline
+    /// (the user still sees their original keystrokes via the
+    /// engine's composing-buffer overlay).
+    internal static func peelDoubledBareVowelTrailingTone(_ buffer: String) -> String {
+        let (preTone, toneSuffix) = splitTrailingToneMarker(buffer)
+        guard !toneSuffix.isEmpty else { return buffer }
+        let chars = Array(preTone)
+        // Need at least 3 chars before the tone: a leading consonant
+        // letter + a doubled bare vowel (`<C>VV`).
+        guard chars.count >= 3, let last = chars.last,
+              isOtherChainedBareVowelLetter(last)
+        else { return buffer }
+        // Walk back over identical trailing bare-vowel letters and
+        // require at least two — `kee.` peels one `e`, `keee.` peels
+        // two `e`s, `koooo:` peels three `o`s. The first occurrence
+        // stays so the parser still sees `ke.` / `ki:` / `ko.`.
+        var doublingStart = chars.count
+        while doublingStart > 0 && chars[doublingStart - 1] == last {
+            doublingStart -= 1
+        }
+        let runLen = chars.count - doublingStart
+        guard runLen >= 2 else { return buffer }
+        // Anchor: the char immediately before the doubled-vowel run
+        // must be an ASCII letter that is *not* the same vowel — i.e.
+        // a consonant or different vowel. This keeps buffer-leading
+        // doubled-vowel inputs (`ee.`, `oo:`) untouched because they
+        // have no preceding letter at all. Without this guard a buffer
+        // like `iee.` (rare but possible) would also peel.
+        let anchorIdx = doublingStart - 1
+        guard anchorIdx >= 0 else { return buffer }
+        let anchor = chars[anchorIdx]
+        guard anchor.isASCII, anchor.isLetter, anchor != last else {
+            return buffer
+        }
+        let trimmed = String(chars.prefix(doublingStart + 1)) + toneSuffix
+        return trimmed
     }
 
     /// Visible standalone consonant letters that the parser materialises
