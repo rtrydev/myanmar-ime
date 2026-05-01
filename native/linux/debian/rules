@@ -1,0 +1,71 @@
+#!/usr/bin/make -f
+# debhelper rules for ibus-myangler.
+#
+# Build flow:
+#   1. Build the Swift dynamic library shim with -static-stdlib so the
+#      shipped .so has no Swift runtime dep. Requires `swift` on PATH;
+#      the README documents that build hosts must install via swiftly.
+#   2. Configure + build the C IBus engine binary via meson. The
+#      shim_dir option points at the staged .so so the engine binary
+#      gets the right -L flag.
+#   3. Install everything from debian/ibus-myangler.install.
+#   4. postinst recompiles GSettings schemas, refreshes icon cache,
+#      and asks the calling user's IBus to restart.
+
+# Source layout: meson project lives at native/linux/ibus-engine/.
+# `--sourcedirectory` is a dh-level option; passing it after `--` would
+# silently route it to meson which ignores it, leaving dh to install
+# nothing. Keep it on the `dh $@` line.
+%:
+	dh $@ --buildsystem=meson --sourcedirectory=ibus-engine
+
+PKG_LIB_DIR  = /usr/lib/ibus-myangler
+PKG_DATA_DIR = /usr/share/myangler
+
+TOPDIR       = $(CURDIR)
+SHIM_DIR     = $(TOPDIR)/swift-shim
+SHIM_STAGING = $(SHIM_DIR)/.build/release
+
+override_dh_auto_configure:
+	# Build the Swift shim first; meson configure depends on the .so
+	# existing so libBurmeseIMEFFI's -lBurmeseIMEFFI link succeeds.
+	$(TOPDIR)/scripts/build-swift-shim.sh
+	dh_auto_configure -- -Dshim_dir=$(SHIM_STAGING)
+
+override_dh_auto_install:
+	dh_auto_install
+	# Drop the Swift shim into the engine library dir alongside the
+	# C binary; install_rpath in meson.build resolves $ORIGIN there.
+	install -d $(CURDIR)/debian/ibus-myangler$(PKG_LIB_DIR)
+	install -m 0755 $(SHIM_STAGING)/libBurmeseIMEFFI.so \
+	    $(CURDIR)/debian/ibus-myangler$(PKG_LIB_DIR)/
+	# Bundled lexicon + LM. Generated out-of-band by the
+	# corpus_builder pipeline and copied into data/staging/ on the
+	# build host. The package builds without them (engine falls back
+	# to parser-only), but production builds must include them.
+	install -d $(CURDIR)/debian/ibus-myangler$(PKG_DATA_DIR)
+	if [ -f data/staging/BurmeseLexicon.sqlite ]; then \
+	    install -m 0644 data/staging/BurmeseLexicon.sqlite \
+	        $(CURDIR)/debian/ibus-myangler$(PKG_DATA_DIR)/; \
+	fi
+	if [ -f data/staging/BurmeseLM.bin ]; then \
+	    install -m 0644 data/staging/BurmeseLM.bin \
+	        $(CURDIR)/debian/ibus-myangler$(PKG_DATA_DIR)/; \
+	fi
+	# Python preferences sources are dropped via debian/install. We
+	# ship pure .py files; first run on the user's machine generates
+	# .pyc.
+
+override_dh_strip:
+	# Don't strip the Swift shim — Swift's debug symbols cooperate with
+	# its runtime, and the strip pass occasionally garbles them. The C
+	# engine still gets stripped normally.
+	dh_strip --no-automatic-dbgsym -X libBurmeseIMEFFI.so
+
+override_dh_dwz:
+	# Swift release builds emit a `.debug_names` accelerator table
+	# (DWARF 5) that `dwz` 0.15 in noble can't parse — it aborts with
+	# "Unknown debugging section .debug_names". The C engine binary
+	# uses standard DWARF and compresses fine, so run dh_dwz only
+	# against the directories that don't contain the Swift shim.
+	dh_dwz -X libBurmeseIMEFFI.so

@@ -2,6 +2,8 @@ import Foundation
 import BurmeseIMECore
 #if canImport(SQLite3)
 import SQLite3
+#elseif canImport(CSQLite)
+import CSQLite
 #endif
 
 public enum SQLiteCandidateStoreSuite {

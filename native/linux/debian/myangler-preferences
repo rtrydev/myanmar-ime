@@ -1,0 +1,10 @@
+#!/usr/bin/env python3
+# Installed as /usr/bin/myangler-preferences. Trampolines to the
+# package main(). Kept tiny so a Python startup error here is easy to
+# diagnose; everything else lives in the package proper.
+
+import sys
+
+from myangler_preferences.app import main
+
+sys.exit(main(sys.argv))

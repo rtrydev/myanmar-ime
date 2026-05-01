@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  GSettings schema for the Myangler IME. Mirrors IMESettings.Key in
+  Packages/BurmeseIMECore/Sources/BurmeseIMECore/IMESettings.swift —
+  same defaults, same ranges. Keep the two in sync; LinuxSettingsBridge
+  test should fail loudly on drift.
+
+  Installed to /usr/share/glib-2.0/schemas/. The deb's postinst runs
+  `glib-compile-schemas /usr/share/glib-2.0/schemas/` to refresh the
+  binary cache.
+-->
+<schemalist>
+  <schema id="com.myangler.inputmethod.burmese"
+          path="/com/myangler/inputmethod/burmese/">
+    <key name="candidate-page-size" type="i">
+      <default>9</default>
+      <range min="3" max="12"/>
+      <summary>Candidate panel page size</summary>
+      <description>
+        How many candidates to show per page in the lookup panel.
+        Recommended values: 3, 5, 9, or 12. Out-of-range values are
+        clamped to [3, 12].
+      </description>
+    </key>
+
+    <key name="commit-on-space" type="b">
+      <default>false</default>
+      <summary>Commit selection on Space</summary>
+      <description>
+        When enabled, the spacebar commits the highlighted candidate.
+        When disabled, Space inserts a literal space and the candidate
+        must be committed with Return.
+      </description>
+    </key>
+
+    <key name="cluster-aliases-enabled" type="b">
+      <default>true</default>
+      <summary>Cluster-sound shortcuts</summary>
+      <description>
+        Enables consonant-cluster shortcut aliases such as 'j' = 'ky',
+        'ch' = 'kj', 'gy' = 'ky+s', 'sh' = 'shy'. Toggling rebuilds the
+        parser; takes effect within ~1 second of the change.
+      </description>
+    </key>
+
+    <key name="lm-prune-margin" type="d">
+      <default>8.0</default>
+      <range min="0.0" max="16.0"/>
+      <summary>Language-model pruning margin (nats)</summary>
+      <description>
+        Maximum log-probability gap a candidate may trail the best
+        ranked candidate before being dropped. Larger = more permissive
+        panel; 0 = no LM pruning.
+      </description>
+    </key>
+
+    <key name="anchor-commit-threshold" type="i">
+      <default>8</default>
+      <range min="4" max="16"/>
+      <summary>Anchor commit threshold (chars)</summary>
+      <description>
+        Roman-input length past which the engine locks a previously
+        rendered top candidate as committed and stops re-parsing it.
+      </description>
+    </key>
+
+    <key name="burmese-punctuation-enabled" type="b">
+      <default>false</default>
+      <summary>Auto-map punctuation to Myanmar</summary>
+      <description>
+        When enabled, '.' / ',' typed after a Burmese surface insert
+        the corresponding Myanmar punctuation marks ('။' / '၊').
+      </description>
+    </key>
+
+    <key name="number-measure-words-enabled" type="b">
+      <default>false</default>
+      <summary>Suggest measure words after numbers</summary>
+      <description>
+        Offer Burmese measure-word completions when a number is typed
+        (e.g. '၂၀၂၄ ခုနှစ်' for '2024').
+      </description>
+    </key>
+
+    <key name="learning-enabled" type="b">
+      <default>true</default>
+      <summary>Remember candidate picks</summary>
+      <description>
+        When enabled, committed selections are recorded in the on-disk
+        history database and re-ranked higher next time the same
+        reading is typed. Off disables both reads and writes.
+      </description>
+    </key>
+  </schema>
+</schemalist>

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  IBus component descriptor for the Myangler Burmese IME.
+  Installed to /usr/share/ibus/component/myangler.xml. The
+  ibus-daemon reads it on startup to learn how to spawn the engine.
+
+  Keep this file in sync with the fallback string in
+  src/main.c (used when --xml is invoked before install).
+-->
+<component>
+  <name>org.freedesktop.IBus.Myangler</name>
+  <description>Myangler Burmese (Romanized) Input Method</description>
+  <exec>/usr/lib/ibus-myangler/ibus-engine-myangler --ibus</exec>
+  <version>0.1.0</version>
+  <author>rtrydev &lt;r.kulka44@gmail.com&gt;</author>
+  <license>MIT</license>
+  <homepage>https://github.com/rtrydev/myanmar-ime</homepage>
+  <textdomain>ibus-myangler</textdomain>
+  <engines>
+    <engine>
+      <name>myangler</name>
+      <longname>Myangler (Burmese, Romanized)</longname>
+      <description>Romanized Burmese input</description>
+      <language>my</language>
+      <license>MIT</license>
+      <author>rtrydev &lt;r.kulka44@gmail.com&gt;</author>
+      <icon>myangler</icon>
+      <layout>us</layout>
+      <rank>50</rank>
+      <symbol>က</symbol>
+    </engine>
+  </engines>
+</component>

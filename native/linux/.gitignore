@@ -1,0 +1,23 @@
+# Build outputs
+build/                    # final .deb / .changes / .buildinfo (build-deb.sh)
+ibus-engine/build/        # meson build dir for the C engine
+swift-shim/.build/        # SwiftPM build dir for libBurmeseIMEFFI.so
+preferences/build/
+preferences/dist/
+preferences/*.egg-info/
+preferences/myangler_preferences/__pycache__/
+preferences/myangler_preferences/tabs/__pycache__/
+preferences/myangler_preferences/**/*.pyc
+
+# Bundled lexicon + LM staging (large, generated out-of-band)
+data/staging/*
+
+# .deb artifacts produced by dpkg-buildpackage
+debian/.debhelper/
+debian/files
+debian/ibus-myangler/
+debian/ibus-myangler.debhelper.log
+debian/ibus-myangler.substvars
+debian/debhelper-build-stamp
+*.buildinfo
+*.changes

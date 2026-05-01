@@ -1,0 +1,26 @@
+#!/bin/sh
+# Symmetric to postinst: refresh caches after the files are gone.
+# User data under ~/.local/share/myangler/ is intentionally preserved
+# even on `purge` — typing history is the user's own work.
+
+set -e
+
+case "$1" in
+    remove|purge|upgrade|abort-install|abort-upgrade|disappear)
+        if command -v glib-compile-schemas >/dev/null 2>&1; then
+            glib-compile-schemas /usr/share/glib-2.0/schemas/ || true
+        fi
+        if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+            gtk-update-icon-cache -q -t /usr/share/icons/hicolor || true
+        fi
+        if command -v update-desktop-database >/dev/null 2>&1; then
+            update-desktop-database -q || true
+        fi
+        ;;
+    failed-upgrade)
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

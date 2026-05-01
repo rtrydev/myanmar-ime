@@ -1,0 +1,5 @@
+# Path to the directory containing libBurmeseIMEFFI.so. Empty means
+# "use system search path" — appropriate for a package build where the
+# shim is installed to /usr/lib/ibus-myangler/. Local devs point this
+# at native/linux/swift-shim/.build/staging/ via meson configure.
+option('shim_dir', type : 'string', value : '')

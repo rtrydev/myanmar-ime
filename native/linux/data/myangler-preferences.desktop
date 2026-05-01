@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Myangler Preferences
+GenericName=Burmese Input Method Settings
+Comment=Configure the Myangler Burmese (Romanized) input method
+Exec=myangler-preferences
+Icon=myangler
+Categories=Settings;DesktopSettings;
+Keywords=Burmese;Myanmar;ibus;input;
+StartupNotify=true

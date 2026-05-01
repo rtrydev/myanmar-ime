@@ -2,7 +2,16 @@ import Foundation
 import BurmeseIMECore
 #if canImport(SQLite3)
 import SQLite3
+#elseif canImport(CSQLite)
+import CSQLite
 #endif
+
+// Glibc declares `stderr` as a plain global var, which Swift 6 strict
+// concurrency rejects when read from anywhere. FileHandle.standardError is
+// Sendable and works the same on Darwin and Glibc.
+private func writeStderr(_ s: String) {
+    FileHandle.standardError.write(Data(s.utf8))
+}
 
 /// LexiconBuilder: reads BurmeseLexiconSource.tsv, reverse-romanizes each entry
 /// through the grammar engine, and emits BurmeseLexicon.sqlite.
@@ -28,7 +37,7 @@ while argi < CommandLine.arguments.count {
     let a = CommandLine.arguments[argi]
     if a == "--lm" {
         guard argi + 1 < CommandLine.arguments.count else {
-            fputs("Error: --lm requires a path argument\n", stderr)
+            writeStderr("Error: --lm requires a path argument\n")
             exit(1)
         }
         lmArg = CommandLine.arguments[argi + 1]
@@ -40,11 +49,11 @@ while argi < CommandLine.arguments.count {
 }
 
 guard positionalArgs.count >= 2 else {
-    fputs("Usage: LexiconBuilder <input.tsv> <output.sqlite> [--lm <BurmeseLM.bin>]\n", stderr)
-    fputs("\nReads a Burmese lexicon TSV and emits a SQLite database.\n", stderr)
-    fputs("TSV format: surface<TAB>frequency[<TAB>override_reading]\n", stderr)
-    fputs("--lm enables LM↔SQLite drift assertion; default location is\n", stderr)
-    fputs("     `BurmeseLM.bin` next to the output sqlite.\n", stderr)
+    writeStderr("Usage: LexiconBuilder <input.tsv> <output.sqlite> [--lm <BurmeseLM.bin>]\n")
+    writeStderr("\nReads a Burmese lexicon TSV and emits a SQLite database.\n")
+    writeStderr("TSV format: surface<TAB>frequency[<TAB>override_reading]\n")
+    writeStderr("--lm enables LM↔SQLite drift assertion; default location is\n")
+    writeStderr("     `BurmeseLM.bin` next to the output sqlite.\n")
     exit(1)
 }
 
@@ -65,7 +74,7 @@ let resolvedLMPath: String? = {
 // Read input TSV
 guard let data = FileManager.default.contents(atPath: inputPath),
       let content = String(data: data, encoding: .utf8) else {
-    fputs("Error: Cannot read input file: \(inputPath)\n", stderr)
+    writeStderr("Error: Cannot read input file: \(inputPath)\n")
     exit(1)
 }
 
@@ -123,13 +132,13 @@ for line in lines {
 
     let fields = trimmed.components(separatedBy: "\t")
     guard fields.count >= 2 else {
-        fputs("Warning: Skipping malformed line \(lineNum): \(trimmed)\n", stderr)
+        writeStderr("Warning: Skipping malformed line \(lineNum): \(trimmed)\n")
         continue
     }
 
     let surface = fields[0]
     guard let frequency = Double(fields[1]) else {
-        fputs("Warning: Invalid frequency on line \(lineNum): \(fields[1])\n", stderr)
+        writeStderr("Warning: Invalid frequency on line \(lineNum): \(fields[1])\n")
         continue
     }
     if surfaceContainsNonMyanmarScalar(surface) {
@@ -142,7 +151,7 @@ for line in lines {
     entries.append(LexiconEntry(surface: surface, frequency: frequency, overrideReading: overrideReading))
 }
 
-fputs("Parsed \(entries.count) entries from \(inputPath)\n", stderr)
+writeStderr("Parsed \(entries.count) entries from \(inputPath)\n")
 
 // Compute max frequency for normalization
 let maxFreq = entries.map(\.frequency).max() ?? 1.0
@@ -155,7 +164,7 @@ if FileManager.default.fileExists(atPath: outputPath) {
 }
 
 guard sqlite3_open(outputPath, &db) == SQLITE_OK else {
-    fputs("Error: Cannot create database: \(outputPath)\n", stderr)
+    writeStderr("Error: Cannot create database: \(outputPath)\n")
     exit(1)
 }
 
@@ -163,7 +172,7 @@ func exec(_ sql: String) {
     var err: UnsafeMutablePointer<CChar>?
     if sqlite3_exec(db, sql, nil, nil, &err) != SQLITE_OK {
         let msg = err.map { String(cString: $0) } ?? "unknown error"
-        fputs("SQL Error: \(msg)\n  SQL: \(sql)\n", stderr)
+        writeStderr("SQL Error: \(msg)\n  SQL: \(sql)\n")
         sqlite3_free(err)
         exit(1)
     }
@@ -265,7 +274,7 @@ entryLoop: for entry in entries {
     sqlite3_bind_double(insertEntryStmt, 3, score)
 
     guard sqlite3_step(insertEntryStmt) == SQLITE_DONE else {
-        fputs("Warning: Failed to insert entry: \(entry.surface)\n", stderr)
+        writeStderr("Warning: Failed to insert entry: \(entry.surface)\n")
         sqlite3_reset(insertEntryStmt)
         continue
     }
@@ -314,7 +323,7 @@ entryLoop: for entry in entries {
         sqlite3_bind_double(insertAliasStmt, 4, score)
         sqlite3_bind_int(insertAliasStmt, 5, 0)
         if sqlite3_step(insertAliasStmt) != SQLITE_DONE {
-            fputs("Warning: failed to insert ya-pin zero-penalty alias for \(entry.surface)\n", stderr)
+            writeStderr("Warning: failed to insert ya-pin zero-penalty alias for \(entry.surface)\n")
         }
         sqlite3_reset(insertAliasStmt)
     }
@@ -360,9 +369,9 @@ exec("PRAGMA journal_mode = DELETE")
 
 sqlite3_close(db)
 
-fputs("Done: \(insertCount) entries written to \(outputPath)\n", stderr)
+writeStderr("Done: \(insertCount) entries written to \(outputPath)\n")
 if reverseFailCount > 0 {
-    fputs("Warning: \(reverseFailCount) entries failed reverse romanization\n", stderr)
+    writeStderr("Warning: \(reverseFailCount) entries failed reverse romanization\n")
 }
 
 // MARK: - LM ↔ SQLite drift assertion
@@ -380,22 +389,22 @@ if let lmPath = resolvedLMPath {
             missing.append(surface)
         }
         if missing.isEmpty {
-            fputs("Drift check: \(insertCount) surfaces all present in LM vocab (\(lmPath))\n", stderr)
+            writeStderr("Drift check: \(insertCount) surfaces all present in LM vocab (\(lmPath))\n")
         } else {
-            fputs("Drift check FAILED: \(missing.count) lexicon surfaces missing from LM vocab.\n", stderr)
-            fputs("  LM: \(lmPath)\n", stderr)
+            writeStderr("Drift check FAILED: \(missing.count) lexicon surfaces missing from LM vocab.\n")
+            writeStderr("  LM: \(lmPath)\n")
             for surface in missing.prefix(maxToList) {
-                fputs("    - \(surface)\n", stderr)
+                writeStderr("    - \(surface)\n")
             }
             if missing.count > maxToList {
-                fputs("    ... and \(missing.count - maxToList) more.\n", stderr)
+                writeStderr("    ... and \(missing.count - maxToList) more.\n")
             }
-            fputs("Fix: re-run `corpus-build lm` against the current TSV so the LM vocab matches.\n", stderr)
+            writeStderr("Fix: re-run `corpus-build lm` against the current TSV so the LM vocab matches.\n")
             exit(1)
         }
     } catch {
-        fputs("Warning: could not load LM at \(lmPath) for drift check: \(error). Skipping.\n", stderr)
+        writeStderr("Warning: could not load LM at \(lmPath) for drift check: \(error). Skipping.\n")
     }
 } else {
-    fputs("Drift check skipped: no LM found (pass --lm <path> or place BurmeseLM.bin next to the sqlite output).\n", stderr)
+    writeStderr("Drift check skipped: no LM found (pass --lm <path> or place BurmeseLM.bin next to the sqlite output).\n")
 }

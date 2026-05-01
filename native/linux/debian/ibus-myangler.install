@@ -1,0 +1,17 @@
+data/myangler.xml                                 usr/share/ibus/component/
+data/com.myangler.inputmethod.burmese.gschema.xml usr/share/glib-2.0/schemas/
+data/myangler.svg                                 usr/share/icons/hicolor/scalable/apps/
+data/myangler-preferences.desktop                 usr/share/applications/
+debian/myangler-preferences                       usr/bin/
+preferences/myangler_preferences/__init__.py        usr/lib/python3/dist-packages/myangler_preferences/
+preferences/myangler_preferences/__main__.py        usr/lib/python3/dist-packages/myangler_preferences/
+preferences/myangler_preferences/app.py             usr/lib/python3/dist-packages/myangler_preferences/
+preferences/myangler_preferences/window.py          usr/lib/python3/dist-packages/myangler_preferences/
+preferences/myangler_preferences/gsettings.py       usr/lib/python3/dist-packages/myangler_preferences/
+preferences/myangler_preferences/history.py         usr/lib/python3/dist-packages/myangler_preferences/
+preferences/myangler_preferences/tabs/__init__.py     usr/lib/python3/dist-packages/myangler_preferences/tabs/
+preferences/myangler_preferences/tabs/setup.py        usr/lib/python3/dist-packages/myangler_preferences/tabs/
+preferences/myangler_preferences/tabs/preferences.py  usr/lib/python3/dist-packages/myangler_preferences/tabs/
+preferences/myangler_preferences/tabs/diagnostics.py  usr/lib/python3/dist-packages/myangler_preferences/tabs/
+preferences/myangler_preferences/tabs/convert.py      usr/lib/python3/dist-packages/myangler_preferences/tabs/
+preferences/myangler_preferences/tabs/history.py      usr/lib/python3/dist-packages/myangler_preferences/tabs/

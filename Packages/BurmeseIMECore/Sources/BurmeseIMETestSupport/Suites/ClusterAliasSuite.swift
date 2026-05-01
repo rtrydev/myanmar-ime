@@ -173,9 +173,14 @@ public enum ClusterAliasSuite {
                 buffer: "mingalarparshinbyarthwarmaylay",
                 context: []
             ).candidates.first?.surface ?? ""
-            ctx.assertTrue(top.contains("ရှင်"),
+            // `String.contains` falls back to grapheme-cluster matching that
+            // misfires on Linux for some Myanmar combining sequences (e.g. the
+            // င် in this surface), so use a literal scalar-byte search — the
+            // engine emits a fixed scalar sequence, no normalization variants
+            // expected on either platform.
+            ctx.assertTrue(top.range(of: "ရှင်", options: .literal) != nil,
                            detail: "mingalarparshinbyarthwarmaylay must contain ရှင် (not စဟင်); got '\(top)'")
-            ctx.assertFalse(top.contains("စဟင်"),
+            ctx.assertTrue(top.range(of: "စဟင်", options: .literal) == nil,
                             detail: "decomposition စဟင် must not appear; got '\(top)'")
         },
 

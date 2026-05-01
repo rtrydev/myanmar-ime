@@ -14,6 +14,12 @@
 venv
 .venv
 
+# VSCode workspace state. settings.json holds the developer's local
+# Swift toolchain absolute path (e.g. ~/.local/share/swiftly/...),
+# which is per-machine. Ignore the whole dir; if shared launch.json /
+# extensions.json are wanted later, negate them selectively here.
+.vscode/
+
 # Large data files (compiled into SQLite at build time)
 *.tsv
 !Packages/BurmeseIMECore/Sources/BurmeseIMECore/Data/NumberMeasureWords.tsv

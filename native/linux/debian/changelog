@@ -1,0 +1,14 @@
+ibus-myangler (0.1.0) noble; urgency=medium
+
+  * Initial Linux release.
+  * IBus engine with full feature parity against the macOS IMK build:
+    keystroke routing, candidate panel, Tab cycling, Compose/Roman
+    toggle, punctuation auto-mapping, mixed-script input.
+  * GTK4 + libadwaita Preferences app (Setup, Preferences, History,
+    Convert, Diagnostics tabs); follows system theme/dark/accent.
+  * GSettings schema com.myangler.inputmethod.burmese mirrors the
+    macOS UserDefaults keys 1:1.
+  * Settings change live (no daemon restart) including
+    cluster-aliases-enabled, which rebuilds the parser on flip.
+
+ -- rtrydev <r.kulka44@gmail.com>  Fri, 01 May 2026 00:00:00 +0000

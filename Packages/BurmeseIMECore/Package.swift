@@ -11,18 +11,35 @@ let package = Package(
         ),
     ],
     targets: [
+        .systemLibrary(
+            name: "CSQLite",
+            pkgConfig: "sqlite3",
+            providers: [
+                .apt(["libsqlite3-dev"]),
+                .brew(["sqlite3"])
+            ]
+        ),
         .target(
             name: "BurmeseIMECore",
+            dependencies: [
+                .target(name: "CSQLite", condition: .when(platforms: [.linux]))
+            ],
             exclude: ["LanguageModel/FORMAT.md"],
             resources: [.process("Data/NumberMeasureWords.tsv")]
         ),
         .target(
             name: "BurmeseIMETestSupport",
-            dependencies: ["BurmeseIMECore"]
+            dependencies: [
+                "BurmeseIMECore",
+                .target(name: "CSQLite", condition: .when(platforms: [.linux]))
+            ]
         ),
         .executableTarget(
             name: "LexiconBuilder",
-            dependencies: ["BurmeseIMECore"]
+            dependencies: [
+                "BurmeseIMECore",
+                .target(name: "CSQLite", condition: .when(platforms: [.linux]))
+            ]
         ),
         .executableTarget(
             name: "BurmeseBench",

@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools >= 61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "myangler-preferences"
+version = "0.1.0"
+description = "GTK4 + libadwaita preferences UI for the Myangler Burmese IME"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  { name = "rtrydev", email = "r.kulka44@gmail.com" },
+]
+license = { text = "MIT" }
+# PyGObject and the various GIR bindings are system packages on Ubuntu;
+# they are intentionally not listed here. The .deb pulls them via
+# python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1.
+
+[project.scripts]
+myangler-preferences = "myangler_preferences.app:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["myangler_preferences*"]

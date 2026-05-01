@@ -1,6 +1,10 @@
-#if canImport(SQLite3)
+#if canImport(SQLite3) || canImport(CSQLite)
 import Foundation
+#if canImport(SQLite3)
 import SQLite3
+#elseif canImport(CSQLite)
+import CSQLite
+#endif
 import BurmeseIMECore
 
 /// Builds a throwaway on-disk SQLite lexicon matching the schema

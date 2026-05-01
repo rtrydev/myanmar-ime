@@ -1,0 +1,41 @@
+Source: ibus-myangler
+Section: utils
+Priority: optional
+Maintainer: rtrydev <r.kulka44@gmail.com>
+Build-Depends: debhelper-compat (= 13),
+               meson (>= 0.61),
+               ninja-build,
+               pkg-config,
+               libibus-1.0-dev (>= 1.5.20),
+               libglib2.0-dev (>= 2.66),
+               libsqlite3-dev,
+               libjson-glib-dev (>= 1.4),
+               python3,
+               python3-setuptools,
+Standards-Version: 4.6.2
+Homepage: https://github.com/rtrydev/myanmar-ime
+Rules-Requires-Root: no
+
+Package: ibus-myangler
+Architecture: amd64 arm64
+Depends: ${misc:Depends},
+         ${shlibs:Depends},
+         ibus (>= 1.5.20),
+         python3 (>= 3.10),
+         python3-gi (>= 3.42),
+         gir1.2-gtk-4.0,
+         gir1.2-adw-1 (>= 1.5),
+         gir1.2-ibus-1.0,
+         libadwaita-1-0 (>= 1.5),
+         libgtk-4-1,
+Recommends: gnome-control-center,
+            fonts-myanmar
+Description: Romanized Burmese input method for IBus
+ Myangler is an IBus engine that converts romanized Burmese
+ keystrokes into Burmese (Myanmar) text. The bundled Preferences
+ application uses GTK4 and libadwaita to expose the same toggles,
+ sliders, and history controls as the upstream macOS build.
+ .
+ Add the engine via Settings -> Region & Language -> Manage
+ Installed Languages -> Input Sources after installing this
+ package and restarting IBus.
