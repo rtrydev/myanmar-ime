@@ -520,6 +520,120 @@ extension SyllableParser {
                             }
                         }
                     }
+                    // TASK-026: generalisation of TASK-016 for the
+                    // four other bare-vowel letters (`i`, `u`, `e`,
+                    // `o`). When the user types `<C><X><X>` (a
+                    // consonant followed by the same bare vowel
+                    // letter twice), the DP picks one of two
+                    // chained shapes that both materialise as a
+                    // malformed multi-anchor or doubled coda-asat
+                    // surface (`ကီည်`, `ကူဦ`, `ကယ်ယ်`, `ကိုအို`):
+                    //
+                    //   (a) `onsetVowel(C, X) + vowelOnly(X')` —
+                    //       the consonant onset consumes the first
+                    //       `X`, the second `X` chains as a
+                    //       standalone `vowelOnly` arc whose
+                    //       canonical may be a different suffix
+                    //       variant (e.g. `i` paired with the
+                    //       consonant, `i2` standalone).
+                    //
+                    //   (b) `onsetVowel(C, a) + vowelOnly(X) + vowelOnly(X')`
+                    //       — the consonant onset takes the
+                    //       inherent `a`, then two `vowelOnly` arcs
+                    //       consume `XX`. This shape produces the
+                    //       same malformed surface and must be
+                    //       rejected so the inherent-A path doesn't
+                    //       become an alternate route to the bug
+                    //       once shape (a) is gated off.
+                    //
+                    // No Burmese typist intends either shape — the
+                    // user wants the long-vowel form or a clean
+                    // recovery via the engine's literal-tail
+                    // trimming.
+                    //
+                    // Reject the chain whenever:
+                    //   - the current `vowelOnly` arc consumed a
+                    //     single ASCII letter at position `i`,
+                    //   - that letter is one of `i`/`u`/`e`/`o`,
+                    //   - and either:
+                    //       - previous = `onsetVowel` whose last
+                    //         consumed input letter equals the
+                    //         current letter (shape a), or
+                    //       - previous = `vowelOnly` whose last
+                    //         consumed input letter equals the
+                    //         current letter, AND grand-parent =
+                    //         `onsetVowel` taking the inherent-`a`
+                    //         vowel (shape b — anchors the pattern
+                    //         to a real `<C>VV` typing site rather
+                    //         than a mid-buffer doubled-vowel run
+                    //         after a vowel-bearing syllable).
+                    //
+                    // Buffer-leading doubled-vowel inputs (`ee`,
+                    // `oo`, …) are unaffected because there is no
+                    // `onsetVowel` ancestor at all; they reach the
+                    // panel via `bareVowelOverrideSurface`.
+                    // Mid-buffer doubled vowels after a vowel-
+                    // bearing syllable (e.g. `larme.oogotel` —
+                    // `oo` after `me.`) are unaffected because the
+                    // chained `vowelOnly + vowelOnly` predecessor
+                    // is not anchored on an inherent-`a`
+                    // `onsetVowel`.
+                    //
+                    // The chars-based check (instead of comparing
+                    // vowel terminal IDs as TASK-016 does) handles
+                    // the variant-suffix case where the current arc
+                    // uses a *different* vowel terminal for the
+                    // matching input letter (`i` vs `i2`, `u` vs
+                    // `u2`, …). Without this, the parser silently
+                    // produces the malformed surface.
+                    if vowelEnd - i == 1 {
+                        let cur = chars[i]
+                        let isOtherBareVowel = cur == "i" || cur == "u"
+                            || cur == "e" || cur == "o"
+                        if isOtherBareVowel {
+                            let prevEnd = Int(previous.charEnd)
+                            let prevLastLetterMatches = prevEnd >= 1
+                                && prevEnd <= chars.count
+                                && chars[prevEnd - 1] == cur
+                            // Shape (a): previous is onsetVowel
+                            // ending on the matching letter.
+                            let shapeA: Bool = {
+                                if case .onsetVowel = previous.matchRef,
+                                   prevLastLetterMatches {
+                                    return true
+                                }
+                                return false
+                            }()
+                            // Shape (b): previous is vowelOnly
+                            // ending on the matching letter, AND
+                            // grand-parent is a consonant arc that
+                            // took the inherent `a` (either an
+                            // explicit `onsetVowel(C, a)` or a bare
+                            // `onsetOnly(C)` whose syllable is the
+                            // inherent-`a` open form).
+                            let shapeB: Bool = {
+                                guard prevLastLetterMatches,
+                                      previous.parentIdx >= 0,
+                                      case .vowelOnly = previous.matchRef
+                                else {
+                                    return false
+                                }
+                                let grandparent = arena[Int(previous.parentIdx)]
+                                switch grandparent.matchRef {
+                                case .onsetOnly:
+                                    return true
+                                case .onsetVowel(_, let prevVowelId):
+                                    return inherentAVowelId >= 0
+                                        && prevVowelId == inherentAVowelId
+                                default:
+                                    return false
+                                }
+                            }()
+                            if shapeA || shapeB {
+                                continue
+                            }
+                        }
+                    }
                     let aliasCostAdj = vowelEntry.aliasCost
                         + (stackedFinal ? 2 : 0)
                         + standaloneAfterEmptyAliasPenalty

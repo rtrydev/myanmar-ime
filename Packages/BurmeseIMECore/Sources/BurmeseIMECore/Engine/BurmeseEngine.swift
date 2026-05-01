@@ -499,8 +499,26 @@ public final class BurmeseEngine: @unchecked Sendable {
             acceptable: Self.isAcceptableParse
         )
         let initialChars = Array(initialNormalized)
-        let normalized = String(initialChars.prefix(acceptableLen))
-        let droppedTail = String(initialChars.suffix(initialChars.count - acceptableLen))
+        let normalizedInitial = String(initialChars.prefix(acceptableLen))
+        let droppedTailInitial = String(initialChars.suffix(initialChars.count - acceptableLen))
+
+        // TASK-026: trim a doubled-bare-vowel tail run from the dropped
+        // section when its leading characters match the kept buffer's
+        // last character. The DP guard
+        // (`Parser/NBestDP.swift::runDP`) rejects chained `vowelOnly`
+        // arcs after a paired consonant + bare-vowel arc for the
+        // bare-vowel keys `i`/`u`/`e`/`o`, so the right-shrink probe
+        // peels the duplicated letters off into `droppedTail`. Without
+        // this trim the tail composer re-renders them as a second
+        // visible syllable that, when concatenated to the kept prefix,
+        // produces the exact scalar shapes the task forbids
+        // (`<C>ိုအို` / `<C>ယ်ယ်` for the `o` and `e` rules whose
+        // surfaces don't carry an orphan-ZWNJ promotable to a clean
+        // `1021` separator).
+        let (normalized, droppedTail) = Self.trimChainedBareVowelTail(
+            normalized: normalizedInitial,
+            droppedTail: droppedTailInitial
+        )
 
         guard !normalized.isEmpty else {
             // Right-shrink probe consumed the entire composable run as

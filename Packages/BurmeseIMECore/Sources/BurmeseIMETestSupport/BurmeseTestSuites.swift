@@ -82,5 +82,6 @@ public enum BurmeseTestSuites {
         DoubledLetterKinziSuite.suite,
         AsatCodaToneSuite.suite,
         ViramaStackToneSuite.suite,
+        DoubledBareVowelSuite.suite,
     ]
 }

@@ -156,6 +156,44 @@ extension BurmeseEngine {
         return (composable, String(buffer[splitIndex...]))
     }
 
+    /// TASK-026: trim a doubled-bare-vowel tail run from `droppedTail`
+    /// when its leading characters match the kept buffer's last
+    /// character. The DP guard
+    /// (`Parser/NBestDP.swift::runDP`) rejects chained `vowelOnly` arcs
+    /// for the bare-vowel keys `i`/`u`/`e`/`o`, so the right-shrink
+    /// probe peels the duplicated letters off into `droppedTail`.
+    /// Without this trim the tail composer re-renders them as a second
+    /// visible syllable on top of the same vowel anchor, producing the
+    /// exact scalar shapes the task forbids (`<C>ိုအို`, `<C>ူဦ`,
+    /// `<C>ည်ည်`, `<C>ယ်ယ်`).
+    ///
+    /// Returns the (possibly unchanged) `normalized` and `droppedTail`
+    /// pair. The `a` letter is intentionally NOT trimmed: TASK-016
+    /// relies on the dropped `a` re-rendering as `U+1021` so `kaa`
+    /// surfaces as the visible two-syllable `ကအ` shape.
+    internal static func trimChainedBareVowelTail(
+        normalized: String,
+        droppedTail: String
+    ) -> (normalized: String, droppedTail: String) {
+        guard let kept = normalized.last,
+              let head = droppedTail.first,
+              head == kept,
+              isOtherChainedBareVowelLetter(head)
+        else {
+            return (normalized, droppedTail)
+        }
+        var trimmed = droppedTail
+        while let next = trimmed.first, next == kept {
+            trimmed.removeFirst()
+        }
+        return (normalized, trimmed)
+    }
+
+    @inline(__always)
+    private static func isOtherChainedBareVowelLetter(_ c: Character) -> Bool {
+        c == "i" || c == "u" || c == "e" || c == "o"
+    }
+
     /// Defence-in-depth gate for virama-stack surfaces. The DP already
     /// penalises malformed virama transitions with `legalityScore = 0`;
     /// this rescue path lets such candidates survive when the emitted
