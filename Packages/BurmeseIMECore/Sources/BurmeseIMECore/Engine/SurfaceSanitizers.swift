@@ -425,6 +425,87 @@ extension BurmeseEngine {
         return false
     }
 
+    /// TASK-039: drop any candidate whose surface chains two
+    /// `<consonant><U+103A>` codas back-to-back attached to a single
+    /// anchor with no real intervening base. The shape is:
+    ///
+    ///   <X>?<C1><U+103A><C2><U+103A>...
+    ///
+    /// where:
+    ///   - `<X>` is empty, U+1021 (orphan-anchor implicit-အ), or any
+    ///     independent vowel U+1021..U+102A (a stand-alone-vowel
+    ///     anchor like `1027` from `aye+e`).
+    ///   - Both `<C1>` and `<C2>` are bare consonant bases (U+1000..
+    ///     U+1021 or U+103F) with no dep-vowel, medial, virama, or
+    ///     fresh anchor between them.
+    ///   - The pattern occurs at the very start of the surface (no
+    ///     consonant base precedes `<C1>` other than `<X>`).
+    ///
+    /// The bug class is the doubled-`e`-rule chain
+    /// (`eea`/`een`/`eeing`/...): the `e` rule emits `101A 103A`
+    /// (ya-asat) and two consecutive `e`-rule arcs concatenate to
+    /// `... 101A 103A 101A 103A ...` with no new base between. The
+    /// second coda has no real syllable to close.
+    ///
+    /// Two-syllable shapes where the second coda has its own
+    /// dedicated consonant base (e.g. `let+pet` →
+    /// `101C 1000 103A 1015 1000 103A` — the `1015` `p` is the
+    /// second syllable's base, not part of a doubled-coda chain) are
+    /// untouched: between the two `103A`s the surface contains TWO
+    /// consonant scalars (the closing `1000` of `let` and the
+    /// opening `1015` of `pet`), which the predicate refuses to
+    /// consider a doubled-coda chain.
+    internal static func sanitizeDoubledCodaChain(_ candidates: [Candidate]) -> [Candidate] {
+        let cleanFiltered = candidates.filter {
+            !surfaceContainsDoubledCodaChain($0.surface)
+        }
+        if !cleanFiltered.isEmpty {
+            return cleanFiltered
+        }
+        return candidates
+    }
+
+    @_spi(Testing) public static func surfaceContainsDoubledCodaChain(_ surface: String) -> Bool {
+        let scalars = Array(surface.unicodeScalars).map(\.value)
+        guard scalars.count >= 4 else { return false }
+
+        @inline(__always) func isConsonantBase(_ v: UInt32) -> Bool {
+            return (v >= 0x1000 && v <= 0x1021) || v == 0x103F
+        }
+        @inline(__always) func isIndependentVowel(_ v: UInt32) -> Bool {
+            return v >= 0x1021 && v <= 0x102A
+        }
+
+        // The pattern only fires from the very start of a cluster
+        // that has no real consonant base in front of `<C1>`. Walk
+        // a leading optional `<X>` prefix:
+        //   - empty
+        //   - one independent vowel (U+1021..U+102A)
+        //   - U+1021 followed by U+1031 (the `aye+e` "implicit-A +
+        //     e-kar" prefix that some inputs produce)
+        var idx = 0
+        if isIndependentVowel(scalars[idx]) {
+            idx += 1
+            // Optional e-kar that an independent-vowel anchor can
+            // carry as an opening dep-vowel — `1021 1031` is the
+            // `aye+e` form's shape `<U+1021><U+1031><101A><103A>...`.
+            if idx < scalars.count, scalars[idx] == 0x1031 {
+                idx += 1
+            }
+        }
+        guard idx + 3 < scalars.count else { return false }
+        let c1 = scalars[idx]
+        let asat1 = scalars[idx + 1]
+        let c2 = scalars[idx + 2]
+        let asat2 = scalars[idx + 3]
+        guard isConsonantBase(c1),
+              asat1 == 0x103A,
+              isConsonantBase(c2),
+              asat2 == 0x103A
+        else { return false }
+        return true
+    }
+
     private static func surfaceHasIndepVowelVirama(_ surface: String) -> Bool {
         let scalars = Array(surface.unicodeScalars).map(\.value)
         guard scalars.count >= 2 else { return false }

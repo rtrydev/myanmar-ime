@@ -194,6 +194,58 @@ extension BurmeseEngine {
         c == "i" || c == "u" || c == "e" || c == "o"
     }
 
+    /// TASK-039: peel a leading doubled bare-vowel run (`ee*`) when
+    /// the buffer continues with non-`e` content. The `e` rule in
+    /// `Romanization.vowels` emits `101A 103A` (ya-asat). Two
+    /// consecutive `e`-rule arcs concatenate to `… 101A 103A 101A
+    /// 103A …` — a doubled ya-asat coda chain attached to a single
+    /// implicit-A anchor. That shape has no legitimate Burmese
+    /// spelling (one syllable carries one coda, not two). The
+    /// existing `bareVowelOverrideSurface` collapses pure
+    /// repetitions (`ee` / `eee` / `eeee`) to `အီ`, but a buffer
+    /// whose `ee*` run is followed by additional letters
+    /// (`eea`, `een`, `eeing`, `een+ka`, …) escapes the override
+    /// and reaches the parser unchanged.
+    ///
+    /// Strategy: when the buffer starts with at least two `e`s and
+    /// the run is followed by content (at least one more
+    /// composable character), peel the leading run down to a
+    /// single `e`. The parser then sees `ea` / `en` / `eing` /
+    /// `en+ka` — each of which produces a single legal ya-asat
+    /// coda followed by clean tail composition (`အယ်` /
+    /// `အယ်န` / `အယ်အီင` / `အယ်န္က`).
+    ///
+    /// Restricted to `e` only because:
+    ///   - `i` / `u` / `o` continued buffers (`iia`, `uue`, `ooe`,
+    ///     …) reach the parser through different code paths and
+    ///     are already covered by other invariants.
+    ///   - The `e` doubled-coda chain is a pure storage-order
+    ///     artifact: it never corresponds to a spelling the user
+    ///     could be reaching for, so peeling has no false-positive
+    ///     surface.
+    internal static func peelLeadingDoubledE(_ buffer: String) -> String {
+        let chars = Array(buffer)
+        guard chars.count >= 3, chars[0] == "e", chars[1] == "e" else {
+            return buffer
+        }
+        // Walk past the leading `e` run.
+        var i = 0
+        while i < chars.count && chars[i] == "e" {
+            i += 1
+        }
+        // Need a non-`e` continuation. Pure repetition (`ee`,
+        // `eee`, …) is handled by `bareVowelOverrideSurface` and
+        // must not reach this peel — it would otherwise collapse
+        // to a single `e` and lose the override.
+        guard i < chars.count else { return buffer }
+        // The continuation must contain composable content (at
+        // least one of: an ASCII letter, a digit, a `+` separator,
+        // or a tone marker). Pure-punctuation tails (e.g. trailing
+        // tone marker) reach `peelDoubledBareVowelTrailingTone` on
+        // their own and need no leading peel.
+        return "e" + String(chars[i..<chars.count])
+    }
+
     /// TASK-027: peel a trailing run of "coda-style" consonant letters
     /// (`y`, `w`, `r`, `l`) from `buffer` when the run is a structural
     /// artifact rather than a deliberate spelling. Two patterns:

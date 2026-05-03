@@ -517,8 +517,15 @@ public final class BurmeseEngine: @unchecked Sendable {
         // chains correctly across both guards.
         let preToneTrimmedNormalized =
             Self.peelDoubledBareVowelTrailingTone(initialNormalized)
+        // TASK-039: collapse a leading `ee*` doubled-bare-vowel run
+        // when the buffer continues with non-`e` content. The
+        // doubled-`e` chain produces an illegal `1021 101A 103A
+        // 101A 103A` doubled-ya-asat coda surface that never
+        // corresponds to real Burmese spelling.
+        let leadingEeTrimmed =
+            Self.peelLeadingDoubledE(preToneTrimmedNormalized)
         let (preTrimmedNormalized, peeledTrailingCoda) =
-            Self.peelRepeatedTrailingCoda(preToneTrimmedNormalized)
+            Self.peelRepeatedTrailingCoda(leadingEeTrimmed)
         let (acceptableLen, _) = parser.parseLongestAcceptablePrefix(
             preTrimmedNormalized,
             maxResults: 1,
@@ -1538,6 +1545,7 @@ public final class BurmeseEngine: @unchecked Sendable {
         merged = Self.sanitizeMalformedMyanmarMarks(merged)
         merged = Self.sanitizeIndepVowelVirama(merged)
         merged = Self.sanitizeAdjacentIndependentVowels(merged)
+        merged = Self.sanitizeDoubledCodaChain(merged)
 
         if !effectiveParseInput.contains("+"),
            !effectiveWindowed,
@@ -2038,7 +2046,8 @@ public final class BurmeseEngine: @unchecked Sendable {
 
         let sanitizedAffixed = Self.sanitizeMalformedMyanmarMarks(mergedWithAffixes)
         let sanitizedAffixed2 = Self.sanitizeIndepVowelVirama(sanitizedAffixed)
-        let sanitizedWithAffixes = Self.sanitizeAdjacentIndependentVowels(sanitizedAffixed2)
+        let sanitizedAffixed3 = Self.sanitizeAdjacentIndependentVowels(sanitizedAffixed2)
+        let sanitizedWithAffixes = Self.sanitizeDoubledCodaChain(sanitizedAffixed3)
         let finalCandidates: [Candidate]
         if leadingLiteral.isEmpty,
            digitPrefix.isEmpty,
