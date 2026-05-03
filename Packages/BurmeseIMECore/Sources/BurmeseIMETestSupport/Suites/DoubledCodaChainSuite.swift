@@ -142,5 +142,150 @@ public enum DoubledCodaChainSuite {
                 line: #line
             )
         },
+
+        // TASK-045: predicate must flag every doubled-ya-asat coda
+        // chain shape, not just the three TASK-039 hard-coded
+        // prefixes. The bug class includes consonant prefixes,
+        // consonant + dep-vowel prefixes, medial-bearing onsets,
+        // virama stacks, closed-syllable preludes, indep-vowel +
+        // non-1031 dep-vowel prefixes, and mid-buffer occurrences.
+        TestCase("predicate_flagsDoubledCodaChainOnAllPrefixes") { ctx in
+            let violators: [(String, [UInt32])] = [
+                // Bare consonant prefix.
+                ("ka+ee",   [0x1000, 0x101A, 0x103A, 0x101A, 0x103A]),
+                // Consonant + dep-vowel.
+                ("kar+ee",  [0x1000, 0x102C, 0x101A, 0x103A, 0x101A, 0x103A]),
+                ("ko+ee",   [0x1000, 0x102D, 0x102F, 0x101A, 0x103A, 0x101A, 0x103A]),
+                ("ku+ee",   [0x1000, 0x1030, 0x101A, 0x103A, 0x101A, 0x103A]),
+                // Consonant + medial.
+                ("kya+ee",  [0x1000, 0x103B, 0x101A, 0x103A, 0x101A, 0x103A]),
+                ("khwa+ee", [0x1001, 0x103D, 0x101A, 0x103A, 0x101A, 0x103A]),
+                // Indep-vowel + non-1031 dep-vowel (existing
+                // predicate stops at non-1031 second scalar).
+                ("u+ee",    [0x1021, 0x1030, 0x101A, 0x103A, 0x101A, 0x103A]),
+                // Closed-syllable + base prefix.
+                ("let+ee",  [0x101C, 0x1000, 0x103A, 0x101A, 0x103A, 0x101A, 0x103A]),
+                // Virama stack prefix.
+                ("akka+ee", [0x1021, 0x1000, 0x1039, 0x1000, 0x101A, 0x103A, 0x101A, 0x103A]),
+                ("amba+ee", [0x1021, 0x1019, 0x1039, 0x1018, 0x101A, 0x103A, 0x101A, 0x103A]),
+                // Tone-closed prefix.
+                ("kar:+ee", [0x1000, 0x102C, 0x1038, 0x101A, 0x103A, 0x101A, 0x103A]),
+                // Mid-buffer doubled coda inside a longer surface.
+                ("tarmaeenkhin",
+                 [0x1010, 0x102C, 0x1019, 0x101A, 0x103A, 0x101A, 0x103A,
+                  0x1014, 0x1001, 0x1004, 0x103A]),
+                ("kareedi",
+                 [0x1000, 0x102C, 0x101A, 0x103A, 0x101A, 0x103A, 0x1012, 0x102E]),
+                // Triple-coda is also flagged (any doubled-coda
+                // adjacency suffices).
+                ("u+eee",
+                 [0x1021, 0x1030, 0x101A, 0x103A, 0x101A, 0x103A, 0x101A, 0x103A]),
+                // Indep-vowel particle + doubled coda.
+                ("uu+ee",
+                 [0x1021, 0x1030, 0x1026, 0x101A, 0x103A, 0x101A, 0x103A]),
+            ]
+            for (label, scalars) in violators {
+                var s = ""
+                s.unicodeScalars.append(
+                    contentsOf: scalars.compactMap { Unicode.Scalar($0) }
+                )
+                ctx.assertTrue(
+                    BurmeseEngine.surfaceContainsDoubledCodaChain(s),
+                    label,
+                    detail: "predicate failed to flag '\(label)' surface='\(s)'"
+                )
+            }
+        },
+
+        // TASK-045: predicate must NOT flag legitimate two-syllable
+        // shapes whose intervening run between the two `103A`s
+        // contains a fresh anchor (independent vowel) or a second
+        // consonant base that opens a real syllable.
+        TestCase("predicate_preservesLegitimateTwoSyllableShapes") { ctx in
+            let nonViolators: [(String, [UInt32])] = [
+                // `let+pet`: between the asats sits `1015 1000` —
+                // two consonant bases (the closing of `let`'s first
+                // syllable's coda was `1000`, but it's now in the
+                // first segment: actually `103A 1015 1000 103A` —
+                // between asats we have `1015 1000`).
+                ("let_pet", [0x101C, 0x1000, 0x103A, 0x1015, 0x1000, 0x103A]),
+                ("kintkint",
+                 [0x1000, 0x1004, 0x103A, 0x1010, 0x1000, 0x1004, 0x103A, 0x1010]),
+                ("ngantnin",
+                 [0x1004, 0x1014, 0x103A, 0x1010, 0x1014, 0x1004, 0x103A]),
+                // `aye+aye` rank-2 form: two independent-vowel
+                // anchors — the second `1021` is a fresh syllable
+                // base between the two asats.
+                ("aye+aye_two_anchor",
+                 [0x1021, 0x1031, 0x101A, 0x103A, 0x1021, 0x1031, 0x101A, 0x103A]),
+                // Single coda: nothing to chain with.
+                ("aye_one_only", [0x1021, 0x101A, 0x103A]),
+                // `ee` → `အီ` bare-vowel override surface — no asat
+                // present at all.
+                ("ee", [0x1021, 0x102E]),
+                // `ka+aye` → `<C> <e> <indep-A> <e>` — distinct
+                // anchor (1021) between the asats.
+                ("ka+aye",
+                 [0x1000, 0x101A, 0x103A, 0x1021, 0x101A, 0x103A]),
+            ]
+            for (label, scalars) in nonViolators {
+                var s = ""
+                s.unicodeScalars.append(
+                    contentsOf: scalars.compactMap { Unicode.Scalar($0) }
+                )
+                ctx.assertFalse(
+                    BurmeseEngine.surfaceContainsDoubledCodaChain(s),
+                    label,
+                    detail: "predicate over-flagged '\(label)' surface='\(s)'"
+                )
+            }
+        },
+
+        // TASK-045: engine must not surface a doubled-coda chain
+        // at rank 0 for any of the documented inputs whose buffer
+        // produces a doubled-`e`-rule chain on a non-trivial prefix.
+        TestCase("engine_rank0FreeOfDoubledCodaChainOnAllPrefixes") { ctx in
+            let buffers = [
+                "ka+ee", "kar+ee", "karee", "kuee", "ku+ee",
+                "u+ee", "uee", "ko+ee", "kya+ee", "khwa+ee",
+                "let+ee", "akka+ee", "amba+ee",
+                "tarmaeenkhin", "kareedi",
+                "u+eee", "uu+ee",
+            ]
+            for buffer in buffers {
+                let surface = emptyEngine()
+                    .update(buffer: buffer, context: [])
+                    .candidates.first?.surface ?? ""
+                ctx.assertFalse(
+                    BurmeseEngine.surfaceContainsDoubledCodaChain(surface),
+                    buffer,
+                    detail: "rank-0 carries doubled-coda chain for '\(buffer)' surface='\(surface)'"
+                )
+            }
+        },
+
+        // TASK-045: regression — `aye+aye` legitimate two-anchor
+        // form (`1021 1031 101A 103A 1021 1031 101A 103A`) must
+        // appear in the candidate panel, since the predicate must
+        // not flag it.
+        TestCase("engine_ayeayeTwoAnchorFormReachable") { ctx in
+            let candidates = emptyEngine()
+                .update(buffer: "aye+aye", context: [])
+                .candidates
+            let target: [UInt32] = [
+                0x1021, 0x1031, 0x101A, 0x103A,
+                0x1021, 0x1031, 0x101A, 0x103A,
+            ]
+            var expected = ""
+            expected.unicodeScalars.append(
+                contentsOf: target.compactMap { Unicode.Scalar($0) }
+            )
+            let found = candidates.contains { $0.surface == expected }
+            ctx.assertTrue(
+                found,
+                "aye+aye",
+                detail: "legitimate two-anchor form missing from panel; got: \(candidates.map(\.surface))"
+            )
+        },
     ])
 }

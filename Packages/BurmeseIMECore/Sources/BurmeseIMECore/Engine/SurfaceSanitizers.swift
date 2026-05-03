@@ -476,34 +476,92 @@ extension BurmeseEngine {
             return v >= 0x1021 && v <= 0x102A
         }
 
-        // The pattern only fires from the very start of a cluster
-        // that has no real consonant base in front of `<C1>`. Walk
-        // a leading optional `<X>` prefix:
-        //   - empty
-        //   - one independent vowel (U+1021..U+102A)
-        //   - U+1021 followed by U+1031 (the `aye+e` "implicit-A +
-        //     e-kar" prefix that some inputs produce)
-        var idx = 0
-        if isIndependentVowel(scalars[idx]) {
-            idx += 1
-            // Optional e-kar that an independent-vowel anchor can
-            // carry as an opening dep-vowel — `1021 1031` is the
-            // `aye+e` form's shape `<U+1021><U+1031><101A><103A>...`.
-            if idx < scalars.count, scalars[idx] == 0x1031 {
-                idx += 1
+        // TASK-045: generalised forward scan. The previous TASK-039
+        // implementation hard-coded three leading-prefix shapes
+        // (empty / one indep-vowel / `1021 1031`) and missed every
+        // other prefix that can carry a doubled-`e`-rule chain
+        // (consonant + dep-vowels, medial-bearing onsets, virama
+        // stacks, closed-syllable preludes, mid-buffer occurrences,
+        // …). The generalised rule: walk the surface looking for
+        // any pair of `<C><103A>` codas back-to-back where the run
+        // between the two asats is just one bare consonant base —
+        // no dep-vowel, medial, virama, tone mark, or independent-
+        // vowel anchor — i.e. the second coda's "anchor" is a
+        // phantom syllable rather than a real syllable.
+        //
+        // For each position `i` where `scalars[i] == 103A` and
+        // `scalars[i - 1]` is a consonant base, find the next
+        // `103A` at position `j` (the next asat in the surface).
+        // The run between is `scalars[i + 1 ..< j]`. Reject when:
+        //   - the run contains exactly ONE consonant base, AND
+        //   - the run contains no dep-vowel (102B..1032), medial
+        //     (103B..103E), tone mark (1036..1038), virama (1039),
+        //     or independent-vowel scalar (1021..102A).
+        //
+        // Single-coda + own real syllable + coda (legit) is
+        // preserved by either:
+        //   - the second consonant having its own dep-vowel /
+        //     medial / tone mark / virama-stack continuation
+        //     (`ကျွန်တော်` between asats: `1010 1031 102C` — has
+        //     `1031`/`102C` dep-vowels → not flagged), or
+        //   - having ≥2 consonant bases between asats (`let+pet`
+        //     between asats: `1015 1000` — two consonants → not
+        //     flagged), or
+        //   - having an independent-vowel anchor (`aye+aye`
+        //     between asats: `1021 1031 101A` — `1021` indep-vowel
+        //     → not flagged; `ka+aye` similarly).
+        var i = 1
+        while i < scalars.count {
+            guard scalars[i] == 0x103A else { i += 1; continue }
+            // First asat must close a real consonant base.
+            let preCoda = scalars[i - 1]
+            guard isConsonantBase(preCoda) else { i += 1; continue }
+
+            // Scan forward looking for the next `103A` and
+            // characterise the run between the two asats.
+            var j = i + 1
+            var consonantBaseCountBetween = 0
+            var sawAttachableMark = false
+            var sawFreshAnchor = false
+            while j < scalars.count, scalars[j] != 0x103A {
+                let v = scalars[j]
+                if (v >= 0x1000 && v <= 0x1021) || v == 0x103F {
+                    consonantBaseCountBetween += 1
+                }
+                if isIndependentVowel(v) {
+                    sawFreshAnchor = true
+                }
+                // Dep-vowels, medials, tone marks, virama. Any of
+                // these makes the would-be second coda's anchor
+                // into a real syllable (vowelled or stacked) rather
+                // than a phantom doubled-coda continuation.
+                if (v >= 0x102B && v <= 0x1032)
+                    || (v >= 0x1036 && v <= 0x1038)
+                    || v == 0x1039
+                    || (v >= 0x103B && v <= 0x103E) {
+                    sawAttachableMark = true
+                }
+                j += 1
             }
+            // Reached the end of the surface without finding a
+            // second `103A` — this asat is not part of a chain.
+            guard j < scalars.count else { break }
+
+            // Doubled-coda chain when the run between the asats is
+            // exactly one consonant base with no dep-vowel,
+            // medial, virama, tone mark, or fresh anchor between.
+            if consonantBaseCountBetween == 1
+                && !sawAttachableMark
+                && !sawFreshAnchor {
+                return true
+            }
+            // Otherwise advance from the second asat — pairs may
+            // overlap in sequences of three or more codas, and the
+            // next `<C><103A>` pair starting at `j` deserves its
+            // own check.
+            i = j
         }
-        guard idx + 3 < scalars.count else { return false }
-        let c1 = scalars[idx]
-        let asat1 = scalars[idx + 1]
-        let c2 = scalars[idx + 2]
-        let asat2 = scalars[idx + 3]
-        guard isConsonantBase(c1),
-              asat1 == 0x103A,
-              isConsonantBase(c2),
-              asat2 == 0x103A
-        else { return false }
-        return true
+        return false
     }
 
     private static func surfaceHasIndepVowelVirama(_ surface: String) -> Bool {

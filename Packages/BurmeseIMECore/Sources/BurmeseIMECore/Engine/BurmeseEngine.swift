@@ -278,7 +278,20 @@ public final class BurmeseEngine: @unchecked Sendable {
         // (set by `updateInternal` for the active-composition paths,
         // empty for the empty-input early return). Reuse it instead of
         // lowercasing `buffer` again on every keystroke.
-        return injectLiteralFallback(state: state, rawBuffer: state.rawBuffer)
+        var injected = injectLiteralFallback(state: state, rawBuffer: state.rawBuffer)
+        // TASK-045: re-run the doubled-coda chain sanitizer with the
+        // literal fallback in place. Inside `updateInternal` the
+        // sanitizer's "preserve when no clean sibling exists"
+        // fallback retains every violator because the only
+        // candidates at that point are parser/grammar surfaces, all
+        // of which can carry the doubled-coda chain when the buffer
+        // contains a doubled-`e`-rule on a non-trivial prefix
+        // (`ka+ee`, `kar+ee`, `u+ee`, …). Once the literal-tail
+        // fallback is injected the panel has a verifiably clean
+        // sibling, and the filter pass can promote the legal
+        // candidates above the violators.
+        injected.candidates = Self.sanitizeDoubledCodaChain(injected.candidates)
+        return injected
     }
 
     /// Pipeline implementation; produces the raw `CompositionState`
