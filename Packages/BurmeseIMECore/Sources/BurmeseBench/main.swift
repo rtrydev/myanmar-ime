@@ -53,6 +53,22 @@ let scenarios: [Scenario] = [
     Scenario(name: "plus_chain_30",
              kind: .fullBuffer(String(repeating: "ka+", count: 10)),
              iterations: 200),
+    // TASK-042: repeated cluster-alias letter `j`. The `j` alias
+    // expands to `ka` + medial-ya (`gya`/`jya`) which contributes
+    // multiple competing parses per position, so the DP beam grows
+    // super-linearly with buffer length. 16 chars is a representative
+    // adversarial shape from real fuzz / accidental key-repeat input.
+    Scenario(name: "cluster_alias_j16",
+             kind: .fullBuffer(String(repeating: "j", count: 16)),
+             iterations: 200),
+    // TASK-042: repeated 3-char syllable past the windowing threshold
+    // (`compositionWindowSize = 18`). 30 repetitions of `tha` is a
+    // 90-char buffer — every keystroke past the threshold pays
+    // active-tail-only DP cost. The scenario locks in the budget for
+    // long incremental sessions.
+    Scenario(name: "repetition_tha30",
+             kind: .fullBuffer(String(repeating: "tha", count: 30)),
+             iterations: 200),
 ]
 
 // MARK: - Timing

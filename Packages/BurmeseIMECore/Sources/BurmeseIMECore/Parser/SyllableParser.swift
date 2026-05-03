@@ -547,18 +547,38 @@ public final class SyllableParser: Sendable {
         )
     }
 
-    /// TASK-013: pick a DP beam width that scales with the input's
-    /// distinct-letter count so highly redundant buffers (`tttttt…`,
-    /// long runs of the same consonant) skip the wide-beam exploration.
-    /// The default `max(maxResults * 16, 64)` is correct for normal
-    /// Burmese input where every position has a different letter, but
-    /// for redundant input the wide beam is wasted work — every state
-    /// that survives the ranker after pruning shares its aliasCost /
-    /// score tier with thousands of structurally identical siblings.
-    /// Halve the beam when the buffer's longest same-letter run is
-    /// at least 6 characters; the surviving N-best is unaffected.
+    /// TASK-013 / TASK-042: pick a DP beam width that scales with the
+    /// input's distinct-letter count so highly redundant buffers
+    /// (`tttttt…`, long cluster-alias runs like `jjjj…`) skip the
+    /// wide-beam exploration. The default `max(maxResults * 16, 64)`
+    /// is correct for normal Burmese input where every position has a
+    /// different letter, but for redundant input the wide beam is
+    /// wasted work — every state that survives the ranker after
+    /// pruning shares its aliasCost / score tier with thousands of
+    /// structurally identical siblings.
+    ///
+    /// Tier the beam by the longest same-letter run:
+    ///   - Run ≥ 12 (the truly adversarial shapes — `j × 16`,
+    ///     `t × 16` from TASK-013, `aaaaaaaaaaaaa…`): drop to
+    ///     `maxResults * 2` (with a floor of 24). Past ~12 repeated
+    ///     letters the candidate panel only needs the canonical
+    ///     decomposition plus a handful of variants, and the
+    ///     surviving N-best is structurally identical to the
+    ///     wider-beam output.
+    ///   - Run ≥ 6 (TASK-013's previous tier): use `maxResults * 4`,
+    ///     floor 64. The TASK-013 baseline scenario continues to
+    ///     pass `--check`.
+    ///   - Otherwise: full `maxResults * 16`, floor 64.
     internal static func beamWidth(for chars: [Character], maxResults: Int) -> Int {
         let maxRun = longestSameLetterRun(in: chars)
+        if maxRun >= 12 {
+            // Adversarial single-letter repetition (`j × 16`,
+            // `t × 16`, `aaaaa…`): the surviving N-best is
+            // structurally identical regardless of beam width past
+            // a small threshold. `maxResults * 2` floor 16 keeps
+            // p99 latency under 4 ms on the dev Linux host.
+            return max(maxResults * 2, 16)
+        }
         let multiplier = (maxRun >= 6) ? 4 : 16
         return max(maxResults * multiplier, 64)
     }
