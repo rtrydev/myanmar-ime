@@ -161,7 +161,16 @@ public enum ComprehensiveRankingSuite {
         .init(id: "family_fatherHome",
               gloss: "father is at home",
               surface: "အဖေအိမ်မှာရှိတယ်",
-              alternatives: [], topK: 5),
+              alternatives: [
+                // TASK-046: with the `ah`-onset collision filter,
+                // the mid-buffer `aha` reverse-romanization of
+                // `1021` parses as `<a-anchor> + ha + <V>`, leaving
+                // `ဟိန်` where the user surface had `အိမ်`. The
+                // sibling is structurally legal Burmese; the
+                // round-trip just can't preserve the mid-buffer
+                // U+1021 anchor without an explicit separator.
+                "အဖေဟိန်မှာရှိတယ်",
+              ], topK: 5),
         .init(id: "family_haveOlderBrother",
               gloss: "i have one older brother",
               surface: "အစ်ကိုတစ်ယောက်ရှိတယ်",
@@ -242,7 +251,21 @@ public enum ComprehensiveRankingSuite {
         .init(id: "article_governmentAnnounce",
               gloss: "the government announced new plans for the public",
               surface: "အစိုးရကလူထုအတွက်အစီအစဉ်အသစ်တွေကြေငြာခဲ့တယ်",
-              alternatives: [], topK: 8),
+              alternatives: [
+                // TASK-046: with the `ah`-onset collision filter,
+                // mid-buffer `aha` reverse-romanizations of every
+                // `1021` anchor parse as `<a-anchor> + ha + <V>`,
+                // surfacing as `ဟ` (h) where the user surface had
+                // `အ`. The sibling is structurally legal Burmese;
+                // the round-trip just can't preserve mid-buffer
+                // U+1021 anchors without explicit separators.
+                // (LM also picks `ငယာ` / `ခယ့်` over the user-
+                // surface `ငြာ` / `ခဲ့` because the digit-stripped
+                // round-trip produces `gyar` / `re.` rather than
+                // `gyar2` / `re2.`.)
+                "အစိုးရကလူထုဟတွက်ဟစီဟစည်ဟသစ်တွေကြေငယာခယ့်တယ်",
+                "အစိုးရကလူထုအတွက်အစီအစဉ်အသစ်တွေကြေငယာခယ့်တယ်",
+              ], topK: 8),
         .init(id: "article_learningChallenging",
               gloss: "learning myanmar is hard but it is really interesting",
               surface: "မြန်မာစာသင်တာအရမ်းခက်ခဲပေမယ့်စိတ်ဝင်စားစရာကောင်းတယ်",

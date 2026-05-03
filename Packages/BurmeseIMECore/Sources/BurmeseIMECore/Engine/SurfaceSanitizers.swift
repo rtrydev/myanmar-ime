@@ -649,6 +649,15 @@ extension BurmeseEngine {
         "ganda":   "\u{1002}\u{1014}\u{1039}\u{1012}",          // ဂန္ဒ
         "padma":   "\u{1015}\u{1012}\u{1039}\u{1019}",          // ပဒ္မ
         "vandana": "\u{1017}\u{1014}\u{1039}\u{1012}\u{1014}",  // ဗန္ဒန
+        // TASK-046: buffer-leading `ah<C>` Pali-stack words. The
+        // grammar parser produces both an h-medial form (`အမှဒ`) and
+        // a stacked form, but only the stacked form (`အဟ္မ<…>`) is
+        // the canonical orthography for these Arabic-origin
+        // loanwords. The override pins the top-rank to the stacked
+        // surface so the user does not have to navigate past the
+        // h-medial sibling.
+        "ahmada":  "\u{1021}\u{101F}\u{1039}\u{1019}\u{1012}",            // အဟ္မဒ
+        "ahmat":   "\u{1021}\u{101F}\u{1039}\u{1019}\u{1010}\u{103A}",    // အဟ္မတ်
     ]
 
     internal static func paliStackOverrideSurface(for normalized: String) -> String? {

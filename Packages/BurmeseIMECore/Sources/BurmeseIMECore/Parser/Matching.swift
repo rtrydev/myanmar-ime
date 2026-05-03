@@ -80,7 +80,82 @@ extension SyllableParser {
         // so the byte-walk's emissions are not duplicated.
         canonicalizeOnsetProbes(chars, from: start, into: &results)
 
+        // TASK-046: drop the bare `ah` consonant onset (canonical
+        // roman `"ah"` → U+1021 အ) when its match leaves a stranded
+        // inherent-`a` boundary. The `ah` key is the only consonant
+        // rule whose match consumes a vowel letter (`a`) as part of
+        // its onset trigger; when the buffer continues with another
+        // ASCII letter, the parser otherwise silently swallows the
+        // `h` of the next syllable into the `ah` onset (`kahar` →
+        // `ကအာ` instead of `ကဟာ`, `aha` → `အ` instead of `အဟ`,
+        // `ahmada` → `အမဒ` instead of `အဟ္မဒ`). Removing the match
+        // forces the DP to take the `<a-standalone> + ha + <V>`
+        // decomposition that preserves the user's `h`. End-of-buffer
+        // `ah` (no following content) and post-`+` / post-`'`
+        // positions are preserved, so `ah`, `ah+`, and
+        // `ah+dhi+pa+yay` keep producing U+1021. The `ah` onset
+        // stays reachable for those carve-outs through the bare
+        // byte-walk's other entries (multi-medial variants are
+        // already heavily aliased and never compete).
+        filterAhStrandedAMatches(chars: chars, results: &results)
+
         return results
+    }
+
+    /// TASK-046 helper. Drops bare `ah` onset matches that sit in a
+    /// "stranded inherent-`a`" context — i.e. the character
+    /// immediately after the matched span is a non-separator ASCII
+    /// letter. Such matches are the `ah` collision shape (the user's
+    /// `h` is swallowed into the `ah` onset rather than starting a
+    /// fresh syllable). Separators `+`, `'`, `*`, end-of-buffer, and
+    /// any non-letter scalar leave the `ah` match in place because
+    /// they explicitly close the syllable and the user-intended
+    /// reading IS `<a-anchor>`. Numeric alias markers (`2`, `3`)
+    /// don't apply to `ah` (no digit-bearing variant exists), so any
+    /// trailing letter is a definitive stranded-context trigger.
+    ///
+    /// Carve-out: when the character immediately *before* the
+    /// matched span is itself an `a`, the `ah` match is at a
+    /// `<C>a-aha-<X>` site (the previous syllable has already
+    /// committed an inherent `a` with the leading consonant; the
+    /// `a` we'd consume here is the START of a fresh `1021`-anchor
+    /// syllable, not a stranded inherent-`a` of the previous
+    /// syllable). Keeping the `ah` match in this site preserves
+    /// reverse-romanization round-trips for surfaces where `1021`
+    /// follows a complete `<C>a` syllable mid-buffer (`ngarahain`
+    /// for `ငါအိမ်`, `kahakyaung` for `<some>+<C>a + 1021 + kyaung`,
+    /// …). Without this carve-out, dropping the `ah` here forces
+    /// the DP into a chained inherent-`a` parse that TASK-016
+    /// then rejects, leaving the entire run unparseable and
+    /// surfacing as a literal-fallback Latin leak.
+    private func filterAhStrandedAMatches(
+        chars: [Character],
+        results: inout [OnsetMatch]
+    ) {
+        results.removeAll { match in
+            let (end, entry) = (match.end, match.entry)
+            // Bare `ah` only — multi-medial variants (`ahw`, `ahy`,
+            // …) are already heavily aliased at trie-build time and
+            // do not produce the collision.
+            guard entry.canonicalRoman == "ah", entry.medials.isEmpty else {
+                return false
+            }
+            guard end < chars.count else { return false }
+            let nextChar = chars[end]
+            guard let ascii = nextChar.asciiValue else { return false }
+            let isLowerLetter = ascii >= 0x61 && ascii <= 0x7A
+            let isUpperLetter = ascii >= 0x41 && ascii <= 0x5A
+            guard isLowerLetter || isUpperLetter else { return false }
+            // Carve-out: previous letter was `a` — keep the `ah`
+            // match. The `<C>a-aha-<X>` site is a legitimate
+            // `<C>a + 1021-anchor + <X>` shape that should not
+            // collapse into the TASK-046 collision.
+            let start = end - 2
+            if start > 0, chars[start - 1] == "a" {
+                return false
+            }
+            return true
+        }
     }
 
     /// Auxiliary to `matchOnsets`. Extracted so the fast-path byte-walk

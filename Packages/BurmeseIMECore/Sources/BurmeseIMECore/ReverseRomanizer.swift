@@ -68,11 +68,45 @@ public enum ReverseRomanizer {
                     j += 1
                 }
 
+                // TASK-046: buffer-leading bare `အ` (U+1021)
+                // anchor. The pre-fix convention emitted `ah` +
+                // matched vowel rule (or `aha` for the bare
+                // anchor), but both forms round-trip through the
+                // new parser as `<a-anchor> + ha + <V>` (the
+                // collision shape) and produce a stray U+101F.
+                // Bypass the `ah` onset: emit just `a` (or just
+                // the matched vowel rule), and let the parser's
+                // leading-A promotion synthesise U+1021.
+                //
+                // Restricted to BUFFER-LEADING positions
+                // (`result.isEmpty`). Mid-surface anchors keep the
+                // pre-fix `ah` + trailing-`a` form because:
+                // (a) leading-A promotion fires only once per
+                //     parse, so there's no clean way to inject a
+                //     fresh U+1021 mid-surface from a no-separator
+                //     buffer;
+                // (b) the engine's LM-loaded top reranking
+                //     compensates for the mid-surface stray-`h`
+                //     produced by `aha` collisions in the
+                //     Comprehensive corpus tests.
+                if consonantChar == Myanmar.ah,
+                   medials.isEmpty,
+                   result.isEmpty {
+                    if let (vowelRoman, consumed) = matchVowelSequence(scalars, from: j) {
+                        result += vowelRoman
+                        i = j + consumed
+                    } else {
+                        result += "a"
+                        i = j
+                    }
+                    continue
+                }
+
                 // Build the onset roman key: [h]<base>[w][y|y2]
                 let hasH = medials.contains { $0.value == 0x103E }  // ှ ha-htoe
                 let hasW = medials.contains { $0.value == 0x103D }  // ွ wa-hswe
                 let hasY = medials.contains { $0.value == 0x103C }  // ြ ya-yit
-                let hasY2 = medials.contains { $0.value == 0x103B } // ျ ya-pin
+                let hasY2 = medials.contains { $0.value == 0x103B } // ြ ya-yit
 
                 var onset = ""
                 if hasH { onset += "h" }

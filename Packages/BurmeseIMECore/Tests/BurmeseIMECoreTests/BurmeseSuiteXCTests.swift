@@ -294,4 +294,8 @@ final class CrossCategoryDepVowelLegalityXCTests: XCTestCase {
 final class BareDoubledVowelToneXCTests: XCTestCase {
     func testAll() { runSuite(BareDoubledVowelToneSuite.suite, xctest: self) }
 }
+
+final class AhConsonantBoundaryHXCTests: XCTestCase {
+    func testAll() { runSuite(AhConsonantBoundaryHSuite.suite, xctest: self) }
+}
 #endif
