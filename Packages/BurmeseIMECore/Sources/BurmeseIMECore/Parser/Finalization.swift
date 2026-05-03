@@ -417,6 +417,57 @@ extension SyllableParser {
                     let next = indices[i + 1].value
                     if next >= 0x102B && next <= 0x1032 { return false }
                 }
+                // TASK-041: reject `<dep-vowel><indep-vowel><bare-C>`
+                // where the trailing consonant base is "bare" — at
+                // the end of the surface or followed only by
+                // another consonant base (no dep-vowel, medial,
+                // virama, asat, or tone mark giving it a syllable
+                // structure of its own). The `thoun` family
+                // (`101E 102D 102F 1026 1014`) is the canonical
+                // bug shape — `1014` is at the surface end with
+                // no following scalar.
+                //
+                // Legitimate multi-syllable spellings whose trailing
+                // consonant has its OWN dep-vowel / coda
+                // (`rarthiu.tu` → `101B 102C 101E 102E 1025 1010
+                // 1030` — the trailing `တ` is followed by `1030`
+                // which makes it a real syllable) pass through
+                // unchanged.
+                //
+                // Legitimate two-syllable shapes ending at the
+                // indep-vowel (`thiu` → `101E 102E 1026`,
+                // `rarthiu` → `101B 102C 101E 102E 1026`) also
+                // pass: there is no consonant after the indep-vowel.
+                if i >= 1, i + 1 < n {
+                    let prev = indices[i - 1].value
+                    let next = indices[i + 1].value
+                    let prevIsDepVowel = prev >= 0x102B && prev <= 0x1032
+                    let nextIsConsonantBase =
+                        (next >= 0x1000 && next <= 0x1021) || next == 0x103F
+                    if prevIsDepVowel && nextIsConsonantBase {
+                        // Examine what follows the consonant. A
+                        // dep-vowel, medial, virama, asat, or tone
+                        // mark immediately after means the
+                        // consonant is the base of a real
+                        // (possibly closed) syllable — fine.
+                        let hasFollowing = i + 2 < n
+                        let followingIsAttachable: Bool
+                        if hasFollowing {
+                            let after = indices[i + 2].value
+                            followingIsAttachable =
+                                (after >= 0x102B && after <= 0x1032)
+                                || (after >= 0x1036 && after <= 0x1038)
+                                || (after >= 0x103B && after <= 0x103E)
+                                || after == 0x103A
+                                || after == 0x1039
+                        } else {
+                            followingIsAttachable = false
+                        }
+                        if !followingIsAttachable {
+                            return false
+                        }
+                    }
+                }
             } else if isAttachableMark(v) {
                 if !attachableMarkHasAnchor(at: i) { return false }
             }
