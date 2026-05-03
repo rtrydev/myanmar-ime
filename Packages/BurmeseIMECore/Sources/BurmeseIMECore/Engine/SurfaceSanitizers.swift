@@ -741,6 +741,7 @@ extension BurmeseEngine {
     private static func attachableMarkHasAnchor(scalars: [Unicode.Scalar], at i: Int) -> Bool {
         let current = scalars[i].value
         let currentIsToneMark = current >= 0x1036 && current <= 0x1038
+        let currentIsMedial = current >= 0x103B && current <= 0x103E
         let currentCategory = depVowelCategory(current)
         var j = i - 1
         while j >= 0 {
@@ -754,6 +755,16 @@ extension BurmeseEngine {
             }
             if w == 0x200C { return j == 0 }
             if wIsIndependentVowel { return false }
+            // TASK-038: Unicode TUS storage order requires medials
+            // to sit between the consonant base and any dep-vowel
+            // / tone mark. Crossing one during the backward walk
+            // means the medial is misplaced.
+            if currentIsMedial, (w >= 0x102B && w <= 0x1032) {
+                return false
+            }
+            if currentIsMedial, (w >= 0x1036 && w <= 0x1038) {
+                return false
+            }
             if w == 0x1039 {
                 if j + 1 < scalars.count {
                     let next = scalars[j + 1].value

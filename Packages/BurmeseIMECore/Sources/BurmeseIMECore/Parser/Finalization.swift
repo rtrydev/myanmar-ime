@@ -256,6 +256,20 @@ extension SyllableParser {
         @inline(__always) func attachableMarkHasAnchor(at i: Int) -> Bool {
             let current = indices[i].value
             let currentCategory = depVowelCategory(current)
+            // TASK-038: Unicode TUS storage order requires medials
+            // (U+103B..U+103E) to appear immediately after the
+            // consonant base (and any kinzi / virama-stack
+            // continuation), strictly before every dependent-vowel
+            // sign and every tone mark. Crossing a dep-vowel,
+            // tone-mark, or syllable-closing asat during the
+            // backward walk from a medial means the medial sits
+            // on the wrong side of those scalars — an ordering
+            // that no rendering engine accepts as valid. Reject
+            // immediately. The narrowest-fix; the parser DP can
+            // still produce these chains, but they no longer pass
+            // the legality scan and so cannot land at rank 0 with
+            // a positive `legalityScore`.
+            let currentIsMedial = isMedial(current)
             var j = i - 1
             while j >= 0 {
                 let w = indices[j].value
@@ -276,6 +290,12 @@ extension SyllableParser {
                     return j == 0
                 }
                 if isIndependentVowel(w) {
+                    return false
+                }
+                if currentIsMedial, isDependentVowel(w) {
+                    return false
+                }
+                if currentIsMedial, isToneMark(w) {
                     return false
                 }
                 if w == 0x1039 {
