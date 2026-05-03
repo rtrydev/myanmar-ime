@@ -26,10 +26,15 @@ public enum BareVowelRepetitionSuite {
     public static let suite = TestSuite(name: "BareVowelRepetition", cases: [
 
         // Each repeated vowel letter must surface the canonical
-        // single-vowel form at rank 1 for every N ∈ {2, 3, 4, 5}.
+        // single-vowel form at the top of the Myanmar candidates
+        // for every N ∈ {2, 3, 4}. With TASK-047's Class B
+        // "extreme right-shrink collapse" gate, N ≥ 5 buffers
+        // (e.g. `aaaaa`) place the literal at rank 0; the
+        // canonical Myanmar form is then at rank 1. Both shapes
+        // remain reachable in the panel.
         TestCase("repeatedBareVowels_canonicalAtRank1") { ctx in
             for entry in canonicalForRepetition {
-                for n in 2...5 {
+                for n in 2...4 {
                     let buffer = String(repeating: String(entry.letter), count: n)
                     let state = BurmeseEngine().update(buffer: buffer, context: [])
                     let top = state.candidates.first?.surface ?? ""
@@ -39,6 +44,17 @@ public enum BareVowelRepetitionSuite {
                         detail: "top='\(top)' expected='\(entry.surface)' all=\(candidateSurfaces(state.candidates))"
                     )
                 }
+                // N = 5: TASK-047 Class B promotes the literal
+                // to rank 0; canonical Myanmar form must remain
+                // reachable in the panel.
+                let buffer5 = String(repeating: String(entry.letter), count: 5)
+                let state = BurmeseEngine().update(buffer: buffer5, context: [])
+                let surfaces = state.candidates.map(\.surface)
+                ctx.assertTrue(
+                    surfaces.contains(entry.surface),
+                    "\(buffer5)_inPanel",
+                    detail: "expected canonical '\(entry.surface)' reachable; got \(candidateSurfaces(state.candidates))"
+                )
             }
         },
 

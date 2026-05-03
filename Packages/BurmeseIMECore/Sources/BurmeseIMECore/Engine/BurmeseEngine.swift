@@ -2186,7 +2186,104 @@ public final class BurmeseEngine: @unchecked Sendable {
             in: firstCandidate!.surface,
             threshold: asciiThreshold
         )
-        let placeAtRankZero = rawCount > 0 && topAsciiLetters >= asciiThreshold
+        let asciiRatioMet = rawCount > 0 && topAsciiLetters >= asciiThreshold
+
+        // TASK-047: the ASCII-letter ratio above misses two buffer
+        // classes:
+        //
+        //   Class A — sanitizer-fallback-retained illegal Myanmar.
+        //   When every Myanmar candidate fails an existing
+        //   structural-legality predicate, the sanitizer's
+        //   "preserve violators when nothing clean exists" path
+        //   keeps the violator at rank 0 even though the engine
+        //   itself flagged it as illegal. The ASCII proxy returns
+        //   0 (the surface is pure Myanmar) and the literal is
+        //   appended at the bottom — so the user sees an illegal
+        //   Myanmar shape on top of the panel. Detect by re-
+        //   running the sanitizer predicates against the rank-0
+        //   surface; promote literal to rank 0 when any flag.
+        //
+        //   Class B — extreme right-shrink collapse. Pathological
+        //   buffers (`kaaaaaaaaa`, `k+k+k+k+k+k`, `aaaaa`) leave
+        //   a rank-0 surface of one or two scalars because the
+        //   right-shrink probe peels off the unparseable tail. The
+        //   surface is structurally legal but semantically loses
+        //   60–80% of the keystrokes. Detect by comparing rank-0
+        //   scalar count against the buffer character count: when
+        //   the scalar count is less than half the buffer count
+        //   AND the buffer is at least 5 characters, promote the
+        //   literal to rank 0. The 5-character floor keeps short
+        //   well-behaved buffers (`kya`, `kac`, `aungc`) on the
+        //   ASCII-ratio path.
+        let topSurface = firstCandidate!.surface
+        let class_A_violation = isClassALiteralPromotionTrigger(
+            surface: topSurface,
+            rawBuffer: rawBuffer
+        )
+        let class_B_collapse: Bool = {
+            // Floor: short buffers don't get Class B treatment. Real
+            // Burmese composition often produces small surfaces from
+            // small buffers (e.g. `kya` → `ကျ`, `kac` → `ကc`); the
+            // floor keeps those on the ASCII-ratio path.
+            guard rawCount >= 5 else { return false }
+            // Distinguish "extreme right-shrink collapse" (a small
+            // alphabet of repeating letters plus separators) from
+            // legitimate compact Burmese (real consonant variety).
+            // A buffer with ≤2 distinct non-separator characters is
+            // a pure-repetition gibberish shape (`kaaaaaaaaa`,
+            // `aaaaa`, `k+k+k+k+k+k`); a buffer with more distinct
+            // letters carries real variety (`kya`, `tablet`,
+            // `ka+ta+pa`, `mingalarpar`) and stays on the ASCII-
+            // ratio path.
+            var distinctContentChars: Set<Character> = []
+            var separatorCount = 0
+            var maxSameLetterRun = 0
+            var currentRun = 0
+            var lastChar: Character? = nil
+            for ch in rawBuffer {
+                let isSeparator = ch == "+" || ch == "'"
+                    || ch == ":" || ch == "." || ch == "*"
+                if isSeparator {
+                    separatorCount += 1
+                    currentRun = 0
+                    lastChar = nil
+                } else {
+                    distinctContentChars.insert(ch)
+                    if ch == lastChar {
+                        currentRun += 1
+                    } else {
+                        currentRun = 1
+                        lastChar = ch
+                    }
+                    if currentRun > maxSameLetterRun {
+                        maxSameLetterRun = currentRun
+                    }
+                }
+            }
+            guard distinctContentChars.count <= 2 else { return false }
+            // Conservative collapse threshold: `3 * scalar_count <
+            // buffer_count`. Catches the truly pathological cases
+            // (`aaaaa` 5→1, `kaaaaaaaaa` 10→2, `k+k+k+k+k+k` 11→3)
+            // while sparing borderline gibberish like `kaakaa`
+            // (6→2, ratio 0.33) where the Myanmar surface preserves
+            // enough of the user's typed structure that it remains
+            // a useful rank-0 candidate.
+            let scalarCount = topSurface.unicodeScalars.count
+            guard scalarCount * 3 < rawCount else { return false }
+            // Shape gate: the buffer must look like a pathological
+            // repetition. Two qualifying shapes:
+            //   1. Long same-letter run (≥5): `aaaaa`, `kaaaaaaaaa`,
+            //      `mmmmmmm`. The right-shrink probe truncates
+            //      everything past the first syllable.
+            //   2. Three-or-more separator-bound short tokens with
+            //      one distinct letter: `k+k+k+k+k+k`. Each `k`
+            //      attempts a virama stack, but the parser collapses
+            //      all but the first pair.
+            let pathologicalShape = maxSameLetterRun >= 5
+                || (separatorCount >= 3 && distinctContentChars.count <= 2)
+            return pathologicalShape
+        }()
+        let placeAtRankZero = asciiRatioMet || class_A_violation || class_B_collapse
 
         var candidates = state.candidates
         if placeAtRankZero {
@@ -2221,6 +2318,83 @@ public final class BurmeseEngine: @unchecked Sendable {
         var newState = state
         newState.candidates = candidates
         return newState
+    }
+
+    /// TASK-047 helper. Detect rank-0 Myanmar surfaces that the
+    /// engine's structural-legality predicates would flag as
+    /// illegal — the "Class A" literal-fallback promotion trigger.
+    /// Returns true when:
+    ///
+    ///   1. The surface fails one of the existing sanitizer
+    ///      predicates (`surfaceViolatesIndependentVowelInvariant`,
+    ///      `surfaceContainsDoubledCodaChain`,
+    ///      `surfaceHasIndepVowelVirama`,
+    ///      `isOrphanCombiningMarkSurface`, `isOrphanZwnjMark`).
+    ///      These are the same predicates `sanitizeAdjacentIndependentVowels`
+    ///      / `sanitizeIndepVowelVirama` / etc. apply, so a true
+    ///      return here means the sanitizer's fallback path
+    ///      ("preserve violators when nothing clean exists") kept
+    ///      a violator at rank 0.
+    ///
+    ///   2. The buffer is a short vowel-only run (only `a`/`e`/
+    ///      `i`/`o`/`u`/`r` letters and no separators) AND the
+    ///      surface contains 2+ independent-vowel scalars
+    ///      (U+1021..U+102A). The orphan-mark promotion path
+    ///      produces multi-anchor surfaces from short vowel-only
+    ///      buffers (`uue`, `iauu`, `aaoo`, `iueii`); these are
+    ///      legitimate last-resort fallbacks when the sanitizer
+    ///      can't find a clean sibling, but they should not
+    ///      occupy rank 0 when a literal-buffer commit is
+    ///      available. Restricting the rule to vowel-only
+    ///      alphabetic buffers preserves legitimate multi-anchor
+    ///      surfaces from real consonant-bearing buffers
+    ///      (`aungain` → `အောင်အိန်`, `aungaung` →
+    ///      `အောင်အောင်`) where the multiple anchors correspond
+    ///      to deliberate multi-syllable user input.
+    private func isClassALiteralPromotionTrigger(
+        surface: String,
+        rawBuffer: String
+    ) -> Bool {
+        // Class A only applies when the user typed a vowel-only
+        // alphabetic buffer (`uue`, `iauu`, `aaoo`, `iueii`,
+        // `uuar`, …). Buffers with consonant-bearing content
+        // (`iipy`, `mingalarpar`, `aung`, `kya`) reach the
+        // sanitizer fallback through legitimate parser paths and
+        // should not be force-collapsed to the literal even when
+        // the rank-0 surface technically violates a structural
+        // predicate — those cases reflect mid-buffer partial-typing
+        // states whose `1021`-anchor adjacency the LM can resolve
+        // once more keystrokes arrive. Buffers with separator
+        // characters (`u.aung`, `kar:au`, `aung+aung+aung`,
+        // `i:akar`, `kar.akar`) carry deliberate multi-syllable
+        // structure and similarly stay on the engine's regular
+        // ranking path.
+        let isVowelOnlyAlphaBuffer = !rawBuffer.isEmpty
+            && rawBuffer.allSatisfy { ch in
+                ch == "a" || ch == "e" || ch == "i" || ch == "o"
+                    || ch == "u" || ch == "r"
+            }
+        guard isVowelOnlyAlphaBuffer else { return false }
+
+        if Self.surfaceViolatesIndependentVowelInvariant(surface) { return true }
+        if Self.surfaceContainsDoubledCodaChain(surface) { return true }
+        if Self.surfaceHasIndepVowelVirama(surface) { return true }
+        if Self.isOrphanCombiningMarkSurface(surface) { return true }
+        if Self.isOrphanZwnjMark(surface) { return true }
+        // Vowel-only-buffer multi-anchor gate: catch the orphan-
+        // mark promotion residue (`aaoo` → `အိုယ်အိုယ်`,
+        // `iueii` → `အည်ဦယ်ဤ`) where the existing sanitizer
+        // predicates don't fire because each anchor lives in its
+        // own asat-closed cluster.
+        var indepVowelCount = 0
+        for scalar in surface.unicodeScalars {
+            let v = scalar.value
+            if v >= 0x1021 && v <= 0x102A {
+                indepVowelCount += 1
+                if indepVowelCount >= 2 { return true }
+            }
+        }
+        return false
     }
 
     /// Count of ASCII a–z / A–Z scalars in `surface`, capped at

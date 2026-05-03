@@ -298,4 +298,8 @@ final class BareDoubledVowelToneXCTests: XCTestCase {
 final class AhConsonantBoundaryHXCTests: XCTestCase {
     func testAll() { runSuite(AhConsonantBoundaryHSuite.suite, xctest: self) }
 }
+
+final class LiteralFallbackIllegalSurfaceXCTests: XCTestCase {
+    func testAll() { runSuite(LiteralFallbackIllegalSurfaceSuite.suite, xctest: self) }
+}
 #endif

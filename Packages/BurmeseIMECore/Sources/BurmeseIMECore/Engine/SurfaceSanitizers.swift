@@ -564,7 +564,7 @@ extension BurmeseEngine {
         return false
     }
 
-    private static func surfaceHasIndepVowelVirama(_ surface: String) -> Bool {
+    @_spi(Testing) public static func surfaceHasIndepVowelVirama(_ surface: String) -> Bool {
         let scalars = Array(surface.unicodeScalars).map(\.value)
         guard scalars.count >= 2 else { return false }
         for i in 0..<(scalars.count - 1) {

@@ -91,6 +91,7 @@ public enum BurmeseTestSuites {
         DoubledCodaChainSuite.suite,
         ConsonantDepVowelIndepVowelChainSuite.suite,
         AhConsonantBoundaryHSuite.suite,
+        LiteralFallbackIllegalSurfaceSuite.suite,
         BenchBaselineFormatSuite.suite,
         ClusterAliasRepeatPerfSuite.suite,
     ]
