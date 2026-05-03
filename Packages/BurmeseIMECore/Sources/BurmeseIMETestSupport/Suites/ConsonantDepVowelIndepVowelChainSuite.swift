@@ -152,5 +152,108 @@ public enum ConsonantDepVowelIndepVowelChainSuite {
                 )
             }
         },
+
+        // TASK-044: Parser-level. The trailing `<dep-vowel-pair>
+        // <indep-vowel>` pattern at end of surface (no scalar after
+        // the indep-vowel) is the same orthographic violation as the
+        // TASK-041 `<dep-vowel><indep-vowel><bare-C>` shape — two
+        // base anchors (the consonant + the indep-vowel) inside a
+        // single syllable cluster joined only by a multi-scalar
+        // dep-vowel cluster like `o` (`102D 102F`). The single-
+        // scalar dep-vowel + indep-vowel shape (`thiu`,
+        // `rarthiu` ending in `102E 1026`) is the legitimate
+        // two-syllable particle ending and must be preserved.
+        TestCase("parser_legality_rejectsTrailingDepVowelPairIndepVowel") { ctx in
+            let illegal: [(String, [UInt32])] = [
+                ("thaou",   [0x101E, 0x102D, 0x102F, 0x1026]),
+                ("thou",    [0x101E, 0x102D, 0x102F, 0x1026]),
+                ("khou",    [0x1001, 0x102D, 0x102F, 0x1026]),
+                ("phou",    [0x1016, 0x102D, 0x102F, 0x1026]),
+                ("ngou",    [0x1004, 0x102D, 0x102F, 0x1026]),
+                ("kar+thou", [0x1000, 0x102C, 0x101E, 0x102D, 0x102F, 0x1026]),
+                ("kao+u",   [0x1000, 0x102D, 0x102F, 0x1026]),
+                ("akou",    [0x1021, 0x1000, 0x102D, 0x102F, 0x1026]),
+                ("shwou",   [0x101B, 0x103D, 0x103E, 0x102D, 0x102F, 0x1026]),
+                ("kywou",   [0x1000, 0x103B, 0x103D, 0x102D, 0x102F, 0x1026]),
+                ("phywou",  [0x1016, 0x103C, 0x103D, 0x102D, 0x102F, 0x1026]),
+            ]
+            for (label, scalars) in illegal {
+                var s = ""
+                s.unicodeScalars.append(contentsOf: scalars.compactMap { Unicode.Scalar($0) })
+                ctx.assertFalse(
+                    SyllableParser.scanOutputLegality(s),
+                    label,
+                    detail: "scanOutputLegality accepted illegal trailing-pair shape '\(s)'"
+                )
+            }
+        },
+
+        // TASK-044: Engine-level. Rank-0 surface for the documented
+        // family must not end in `<dep-vowel-pair><indep-vowel>` on a
+        // single open cluster. The legal sibling
+        // (`<C><102D 102F><101A 103A><1026>` ya-asat closer, or
+        // `<C><102D 102F><1021 1030>` explicit `အ` anchor) or the
+        // right-shrink probe should win rank 0.
+        TestCase("engine_rank0FreeOfTrailingDepVowelPairIndepVowel") { ctx in
+            let buffers = [
+                "thaou", "thou", "tho+u", "khou", "phou", "ngou",
+                "hou", "rou", "saou", "kao+u", "k+ou", "p+ou",
+                "akou", "kar+thou", "kar+saou",
+                "shwou", "kywou", "khywou", "phywou",
+            ]
+            for buffer in buffers {
+                let surface = emptyEngine()
+                    .update(buffer: buffer, context: [])
+                    .candidates.first?.surface ?? ""
+                let scalars = Array(surface.unicodeScalars).map(\.value)
+                let endsWithBugShape: Bool
+                if scalars.count >= 3 {
+                    let last = scalars[scalars.count - 1]
+                    let prev1 = scalars[scalars.count - 2]
+                    let prev2 = scalars[scalars.count - 3]
+                    endsWithBugShape = (prev2 == 0x102D)
+                        && (prev1 == 0x102F)
+                        && (last >= 0x1023 && last <= 0x102A)
+                } else {
+                    endsWithBugShape = false
+                }
+                ctx.assertFalse(
+                    endsWithBugShape,
+                    buffer,
+                    detail: "rank-0 ends in <102D 102F><indep-vowel> for '\(buffer)' surface='\(surface)'"
+                )
+            }
+        },
+
+        // TASK-044: N-best parser candidates must not return any
+        // trailing-dep-vowel-pair-indep-vowel shape with positive
+        // legality score. The legality scan rejects the shape, so
+        // any such parse should drop to legalityScore=0.
+        TestCase("parser_nbestNoTrailingPairIndepVowelLegal") { ctx in
+            let parser = SyllableParser()
+            let inputs = ["thaou", "khou", "phou", "kar+thou"]
+            for input in inputs {
+                let parses = parser.parseCandidates(input, maxResults: 8)
+                for p in parses {
+                    let scalars = Array(p.output.unicodeScalars).map(\.value)
+                    guard scalars.count >= 3 else { continue }
+                    let last = scalars[scalars.count - 1]
+                    let prev1 = scalars[scalars.count - 2]
+                    let prev2 = scalars[scalars.count - 3]
+                    let endsWithBugShape = (prev2 == 0x102D)
+                        && (prev1 == 0x102F)
+                        && (last >= 0x1023 && last <= 0x102A)
+                    if endsWithBugShape {
+                        ctx.assertEqual(
+                            p.legalityScore,
+                            0,
+                            input,
+                            file: #file,
+                            line: #line
+                        )
+                    }
+                }
+            }
+        },
     ])
 }

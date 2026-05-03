@@ -468,6 +468,67 @@ extension SyllableParser {
                         }
                     }
                 }
+                // TASK-044: reject `<consonant-base><dep-vowel-run
+                // length ≥ 2><indep-vowel>` whether or not anything
+                // follows the indep-vowel. The TASK-041 rule above
+                // requires `i + 1 < n` (a trailing scalar after the
+                // indep-vowel) to gate against the legitimate
+                // single-scalar dep-vowel + indep-vowel particle
+                // ending (`thiu` → `101E 102E 1026`, `rarthiu` →
+                // `101B 102C 101E 102E 1026`). The dep-vowel run
+                // length distinguishes the bug class:
+                //
+                //   - run length 1 (`102E` long-i, `102C` aa, …):
+                //     legitimate two-syllable particle ending where
+                //     the previous syllable closes implicitly with
+                //     the consonant + single dep-vowel before the
+                //     fresh `ဦ` particle.
+                //   - run length ≥ 2 (`102D 102F` `o`-cluster, the
+                //     same shape that triggers TASK-041 mid-buffer):
+                //     two base anchors (the consonant + the indep-
+                //     vowel) joined only by a multi-scalar dep-vowel
+                //     cluster on a single open syllable. No legal
+                //     Burmese spelling produces this shape.
+                //
+                // Walks back from the indep-vowel skipping medials
+                // (`103B..103E`) and tone marks (`1036..1038`); the
+                // dep-vowel run ends on the first non-dep-vowel
+                // scalar. The walk stops at U+103A asat (which
+                // closes a cluster) or U+1039 virama (which
+                // terminates the open cluster) — neither is reached
+                // in the bug class because the consonant + dep-vowel
+                // run is uninterrupted.
+                if i >= 2 {
+                    var depVowelCount = 0
+                    var k = i - 1
+                    var foundConsonantBase = false
+                    while k >= 0 {
+                        let w = indices[k].value
+                        if w >= 0x102B && w <= 0x1032 {
+                            depVowelCount += 1
+                            k -= 1
+                            continue
+                        }
+                        if (w >= 0x1036 && w <= 0x1038)
+                            || (w >= 0x103B && w <= 0x103E) {
+                            // Skip medials and tone marks; they don't
+                            // count toward the dep-vowel run length
+                            // but do not break the open cluster.
+                            k -= 1
+                            continue
+                        }
+                        if (w >= 0x1000 && w <= 0x1021) || w == 0x103F {
+                            foundConsonantBase = true
+                        }
+                        // Any other scalar (asat, virama, indep-
+                        // vowel, format control, …) breaks the open
+                        // cluster.
+                        break
+                    }
+                    if foundConsonantBase && depVowelCount >= 2 {
+                        return false
+                    }
+                }
             } else if isAttachableMark(v) {
                 if !attachableMarkHasAnchor(at: i) { return false }
             }
