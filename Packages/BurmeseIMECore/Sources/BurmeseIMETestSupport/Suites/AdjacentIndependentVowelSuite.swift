@@ -40,22 +40,28 @@ public enum AdjacentIndependentVowelSuite {
         return false
     }
 
-    /// (b) three or more U+1021 anchors chained together with only
-    /// dep-vowel scalars between them. Two adjacent U+1021 anchors
-    /// separated by a single dep-vowel form a valid two-syllable
-    /// shape (e.g. `aungout` → `… 1021 1031 1021 102C …`); the bug
-    /// class is the orphan-mark sanitizer's per-scalar anchor
-    /// injection that produces four-anchor patterns
-    /// (`nyaungoo` → `… 1021 102D 1021 102F 1021 102D 1021 102F`).
+    /// (b) two or more independent-vowel anchors chained together
+    /// with at least one dep-vowel scalar between them. The walk
+    /// counts every scalar in U+1021..U+102A as an anchor (not just
+    /// U+1021), and resets the chain on any consonant base, virama
+    /// stack, or syllable-closing asat (U+103A). Two anchors in the
+    /// same dep-mark run violate the "one base per syllable" rule
+    /// regardless of which independent-vowel codepoints are involved.
+    /// (See TASK-037: `uun` → `1021 1030 1026 1014`, `u+ay` →
+    /// `1021 1030 1027`, `uuun` → `1021 1030 1021 1030 1026 1014`.)
     private static func violatesRepeatedAnchors(_ surface: String) -> Bool {
         let scalars = Array(surface.unicodeScalars).map(\.value)
         var i = 0
-        var chainCount = 0
+        var anchorCount = 0
+        var sawDepMarkSinceAnchor = false
         while i < scalars.count {
             let v = scalars[i]
-            if v == 0x1021 {
-                chainCount += 1
-                if chainCount >= 3 { return true }
+            if independentVowelRange.contains(v) {
+                if anchorCount >= 1 && sawDepMarkSinceAnchor {
+                    return true
+                }
+                anchorCount += 1
+                sawDepMarkSinceAnchor = false
                 i += 1
                 continue
             }
@@ -63,10 +69,14 @@ public enum AdjacentIndependentVowelSuite {
                 || v == 0x1036
                 || (v >= 0x103B && v <= 0x103E)
             if isDepMark {
+                sawDepMarkSinceAnchor = true
                 i += 1
                 continue
             }
-            chainCount = 0
+            // Anything else (consonant base, virama, asat, tone marks
+            // 1037/1038, format controls, …) terminates the cluster.
+            anchorCount = 0
+            sawDepMarkSinceAnchor = false
             i += 1
         }
         return false
@@ -110,16 +120,126 @@ public enum AdjacentIndependentVowelSuite {
         },
 
         // General invariant on every reproduction: rank-0 surface
-        // satisfies the two structural checks simultaneously.
+        // satisfies the two structural checks simultaneously. Note
+        // that `uung` is intentionally absent — under the broader
+        // TASK-037 invariant it has no clean parse and falls into
+        // the orphan-ZWNJ-class fallback policy (multi-anchor shape
+        // allowed through as a last resort). That carve-out is
+        // exercised by `task037_adjacencyFormDroppedEvenWithoutCleanSibling`.
         TestCase("allClasses_rank0SatisfiesAllInvariants") { ctx in
             let engine = emptyEngine()
-            for buffer in ["uu.", "uu:", "uung", "nyaungoo", "iing", "kar+oo", "kuuu"] {
+            for buffer in ["uu.", "uu:", "nyaungoo", "iing", "kar+oo", "kuuu"] {
                 let surface = engine.update(buffer: buffer, context: [])
                     .candidates.first?.surface ?? ""
                 ctx.assertFalse(
                     violatesAny(surface),
                     buffer,
                     detail: "invariant violated for '\(buffer)' surface='\(surface)'"
+                )
+            }
+        },
+
+        // TASK-037: when at least one clean sibling exists in the
+        // panel, no top-3 candidate may carry the multi-anchor shape
+        // (the orphan-ZWNJ class fallback policy from
+        // `sanitizeAdjacentIndependentVowels`). When NO clean sibling
+        // exists (the bare `uun` / `uung` / `u+un` / `uuun` family),
+        // the multi-anchor surface is allowed through as a last
+        // resort — but the strictly-worse adjacency form (`ဦဦင`)
+        // must always be filtered when a chain-shape sibling
+        // exists.
+        TestCase("task037_topCandidatesFreeOfMultiAnchorWhenSiblingExists") { ctx in
+            let engine = emptyEngine()
+            // Buffers where a clean sibling exists in the panel.
+            // None of the top-3 may carry the violating pattern.
+            // (`u+u` collapses to single-anchor `အူ`; `ee+oo` keeps
+            // the leading `အီ` clean. `u+oo` is excluded because all
+            // its parses are multi-anchor — no clean parse exists,
+            // so it falls into the fallback case.)
+            let withClean = ["u+u", "ee+oo"]
+            for buffer in withClean {
+                let candidates = engine.update(buffer: buffer, context: []).candidates
+                let cleanSiblingExists = candidates.contains { !violatesAny($0.surface) }
+                guard cleanSiblingExists else {
+                    ctx.fail(
+                        buffer,
+                        detail: "expected clean sibling for '\(buffer)' but none found",
+                        file: #file,
+                        line: #line
+                    )
+                    continue
+                }
+                for (i, c) in candidates.prefix(3).enumerated() {
+                    ctx.assertFalse(
+                        violatesAny(c.surface),
+                        buffer,
+                        detail: "TASK-037: top-\(i) violates invariant: '\(c.surface)'"
+                    )
+                }
+            }
+        },
+
+        // TASK-037: even when no clean sibling exists, the strictly-
+        // worse class-1 adjacency form (e.g. `ဦဦင`) must not surface
+        // when a chain-shape sibling (e.g. `အူဦင`) is available. The
+        // fallback policy in `sanitizeAdjacentIndependentVowels`
+        // prefers the chain shape over the adjacency form.
+        TestCase("task037_adjacencyFormDroppedEvenWithoutCleanSibling") { ctx in
+            let engine = emptyEngine()
+            for buffer in ["uun", "uung", "u+un", "uuun"] {
+                let surface = engine.update(buffer: buffer, context: [])
+                    .candidates.first?.surface ?? ""
+                ctx.assertFalse(
+                    violatesAdjacency(surface),
+                    buffer,
+                    detail: "TASK-037 fallback surfaced adjacency form for '\(buffer)' surface='\(surface)'"
+                )
+            }
+        },
+
+        // TASK-037: the invariant predicate itself recognises mixed-
+        // anchor pairs. Direct unit test of
+        // `surfaceViolatesIndependentVowelInvariant`.
+        TestCase("task037_predicateRecognisesMixedAnchors") { ctx in
+            // Each scalar sequence is a known violator.
+            let violators: [(String, [UInt32])] = [
+                ("uun", [0x1021, 0x1030, 0x1026, 0x1014]),
+                ("uung", [0x1021, 0x1030, 0x1026, 0x1004]),
+                ("u+ay", [0x1021, 0x1030, 0x1027]),
+                ("u+u", [0x1021, 0x1030, 0x1026]),
+                ("uuun", [0x1021, 0x1030, 0x1021, 0x1030, 0x1026, 0x1014]),
+                ("u+oo_first_pair", [0x1021, 0x1030, 0x1021, 0x102D, 0x102F]),
+                ("u+aw", [0x1021, 0x1030, 0x1029]),
+                ("u+i", [0x1021, 0x1030, 0x1024]),
+            ]
+            for (label, scalars) in violators {
+                var s = ""
+                s.unicodeScalars.append(contentsOf: scalars.compactMap { Unicode.Scalar($0) })
+                ctx.assertTrue(
+                    BurmeseEngine.surfaceViolatesIndependentVowelInvariant(s),
+                    label,
+                    detail: "predicate failed to flag '\(label)' surface='\(s)'"
+                )
+            }
+            // Negative cases: legitimate two-syllable shapes where
+            // an asat closes the first cluster before a second
+            // anchor appears.
+            let nonViolators: [(String, [UInt32])] = [
+                ("aungout",
+                 [0x1021, 0x1031, 0x102C, 0x1004, 0x103A,
+                  0x1021, 0x1031, 0x102C, 0x1000, 0x103A]),
+                ("rarthiu",
+                 [0x101B, 0x102C, 0x101E, 0x102E, 0x1026]),
+                ("kway", [0x1000, 0x103D, 0x1031]),
+                ("singleAnchor", [0x1021, 0x1030]),
+            ]
+            for (label, scalars) in nonViolators {
+                var s = ""
+                s.unicodeScalars.append(contentsOf: scalars.compactMap { Unicode.Scalar($0) })
+                ctx.assertFalse(
+                    BurmeseEngine.surfaceViolatesIndependentVowelInvariant(s),
+                    label,
+                    detail: "predicate over-flagged '\(label)' surface='\(s)'"
                 )
             }
         },

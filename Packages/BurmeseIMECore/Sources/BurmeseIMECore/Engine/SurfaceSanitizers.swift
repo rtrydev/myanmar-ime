@@ -199,13 +199,47 @@ extension BurmeseEngine {
     /// least one clean candidate exists; otherwise the panel keeps
     /// the violating candidates as a last-resort fallback.
     internal static func sanitizeAdjacentIndependentVowels(_ candidates: [Candidate]) -> [Candidate] {
-        let hasClean = candidates.contains {
+        // First pass: drop everything flagged by the full invariant
+        // (TASK-015 + TASK-022 + TASK-037). When at least one clean
+        // sibling exists, the panel surfaces only clean candidates.
+        let cleanFiltered = candidates.filter {
             !surfaceViolatesIndependentVowelInvariant($0.surface)
         }
-        guard hasClean else { return candidates }
-        return candidates.filter {
-            !surfaceViolatesIndependentVowelInvariant($0.surface)
+        if !cleanFiltered.isEmpty {
+            return cleanFiltered
         }
+        // Fallback when nothing survives the full invariant: drop
+        // only the structurally worst class — adjacent independent-
+        // vowel pairs (`<indep><indep>` with no dep-mark between),
+        // which never correspond to any legitimate Burmese spelling.
+        // This keeps the multi-anchor "open cluster" shapes (e.g.
+        // `အူဦ` for `u+u`) reachable as a last resort while still
+        // suppressing the strictly-worse adjacency form (`ဦဦ`) the
+        // ranker may otherwise float to the top once mixed-anchor
+        // chains are filtered.
+        let adjacencyFree = candidates.filter {
+            !surfaceContainsAdjacentIndepVowels($0.surface)
+        }
+        if !adjacencyFree.isEmpty {
+            return adjacencyFree
+        }
+        return candidates
+    }
+
+    /// Per-class predicate for the (1) check inside
+    /// `surfaceViolatesIndependentVowelInvariant`. Hoisted so the
+    /// fallback in `sanitizeAdjacentIndependentVowels` can reuse the
+    /// same scan without rerunning the more expensive walks.
+    private static func surfaceContainsAdjacentIndepVowels(_ surface: String) -> Bool {
+        let scalars = Array(surface.unicodeScalars).map(\.value)
+        guard scalars.count >= 2 else { return false }
+        for i in 0..<(scalars.count - 1) {
+            if (0x1021...0x102A).contains(scalars[i])
+                && (0x1021...0x102A).contains(scalars[i + 1]) {
+                return true
+            }
+        }
+        return false
     }
 
     /// True when `surface` violates one of the TASK-015 invariants.
@@ -238,36 +272,58 @@ extension BurmeseEngine {
                 }
             }
         }
-        // (2) three or more U+1021 anchors chained together with only
-        // dep-vowel scalars (no syllable closer / base consonant)
-        // between them. Two anchors with one dep-vowel between are a
-        // valid two-syllable shape (e.g. `aungout` →
-        // `… 1021 1031 1021 102C …`); the bug class is the orphan-
-        // mark sanitizer's per-scalar anchor injection that produces
-        // four-anchor patterns like `nyaungoo` →
-        // `… 1021 102D 1021 102F 1021 102D 1021 102F`.
-        var i = 0
-        var chainCount = 0
-        while i < scalars.count {
-            let v = scalars[i]
-            if v == 0x1021 {
-                chainCount += 1
-                if chainCount >= 3 {
-                    return true
+        // (2) TASK-037 generalised anchor walk: any two independent-
+        // vowel scalars (U+1021..U+102A) appearing inside the same
+        // open syllable cluster — separated only by dep-vowel /
+        // medial / anusvara marks, with no consonant base, virama
+        // stack, or U+103A asat reset between them — violate the
+        // "exactly one base per syllable" rule. This catches both
+        // same-anchor pairs (two U+1021) and mixed-anchor pairs
+        // (e.g. U+1021 → U+1026/U+1027/U+1029) that the original
+        // U+1021-only chain counter missed. The previous
+        // "chainCount >= 3" rule was a special case of this walk
+        // (three U+1021 with intervening dep-marks) — it falls out
+        // of the general check naturally.
+        //
+        // Reset on:
+        //   - Consonant bases (U+1000..U+1021 except the indep-vowel
+        //     range). Note the indep-vowel scalars themselves do NOT
+        //     reset the walk — they ARE the second anchor.
+        //   - Asat (U+103A): closes the cluster.
+        //   - Virama (U+1039): introduces a stacked consonant which
+        //     terminates the open cluster and starts a new one.
+        //   - Anything outside the indep-vowel + dep-mark vocabulary.
+        do {
+            var i = 0
+            var anchorCount = 0
+            var sawDepMarkSinceAnchor = false
+            while i < scalars.count {
+                let v = scalars[i]
+                if (0x1021...0x102A).contains(v) {
+                    if anchorCount >= 1 && sawDepMarkSinceAnchor {
+                        return true
+                    }
+                    anchorCount += 1
+                    sawDepMarkSinceAnchor = false
+                    i += 1
+                    continue
                 }
+                let isDepMark = (0x102B...0x1032).contains(v)
+                    || v == 0x1036
+                    || (0x103B...0x103E).contains(v)
+                if isDepMark {
+                    sawDepMarkSinceAnchor = true
+                    i += 1
+                    continue
+                }
+                // Consonant bases, virama, asat, tone closers, format
+                // controls, and any other scalar all reset the walk:
+                // they break the "open cluster" the anchor walk is
+                // looking for.
+                anchorCount = 0
+                sawDepMarkSinceAnchor = false
                 i += 1
-                continue
             }
-            let isDepMark = (0x102B...0x1032).contains(v)
-                || v == 0x1036
-                || (0x103B...0x103E).contains(v)
-            if isDepMark {
-                i += 1
-                continue
-            }
-            // Anything else resets the chain.
-            chainCount = 0
-            i += 1
         }
         // (3) TASK-022: bridged-anchor pollution. Two or more
         // orphan-mark clusters (each pre-anchored by U+1021)
