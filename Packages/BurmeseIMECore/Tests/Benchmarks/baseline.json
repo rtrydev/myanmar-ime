@@ -1,80 +1,164 @@
 {
-  "scenarios": [
-      {
+  "platforms": {
+    "linux": {
+        "scenarios": [
+        {
     "scenario": "short",
     "iterations": 1000,
-    "p50_us": 104.04,
-    "p95_us": 111.42,
-    "p99_us": 120.79,
-    "max_us": 172.62,
+    "p50_us": 279.40,
+    "p95_us": 288.39,
+    "p99_us": 336.30,
+    "max_us": 500.99,
     "allocations": 0
   },
           {
     "scenario": "medium",
     "iterations": 1000,
-    "p50_us": 325.46,
-    "p95_us": 338.54,
-    "p99_us": 348.25,
-    "max_us": 430.12,
+    "p50_us": 1013.23,
+    "p95_us": 1027.95,
+    "p99_us": 1085.56,
+    "max_us": 1202.37,
     "allocations": 0
   },
           {
     "scenario": "long",
     "iterations": 500,
-    "p50_us": 1420.96,
-    "p95_us": 1465.92,
-    "p99_us": 1501.12,
-    "max_us": 2304.50,
+    "p50_us": 3244.01,
+    "p95_us": 3350.39,
+    "p99_us": 3519.93,
+    "max_us": 6747.34,
     "allocations": 0
   },
           {
     "scenario": "incremental",
     "iterations": 481,
-    "p50_us": 778.79,
-    "p95_us": 2046.92,
-    "p99_us": 2136.17,
-    "max_us": 2202.75,
+    "p50_us": 1957.95,
+    "p95_us": 4799.02,
+    "p99_us": 4996.84,
+    "max_us": 5112.18,
     "allocations": 0
   },
           {
     "scenario": "garbage",
     "iterations": 200,
-    "p50_us": 386.50,
-    "p95_us": 403.50,
-    "p99_us": 419.54,
-    "max_us": 441.88,
+    "p50_us": 867.58,
+    "p95_us": 884.36,
+    "p99_us": 945.73,
+    "max_us": 980.30,
     "allocations": 0
   },
           {
     "scenario": "garbage_incremental",
     "iterations": 496,
-    "p50_us": 299.08,
-    "p95_us": 386.00,
-    "p99_us": 394.33,
-    "max_us": 399.00,
+    "p50_us": 647.73,
+    "p95_us": 848.88,
+    "p99_us": 870.62,
+    "max_us": 886.44,
     "allocations": 0
   },
           {
     "scenario": "repetition_t16",
     "iterations": 200,
-    "p50_us": 2699.79,
-    "p95_us": 2750.04,
-    "p99_us": 2777.88,
-    "max_us": 2811.96,
+    "p50_us": 6913.21,
+    "p95_us": 7011.42,
+    "p99_us": 7200.92,
+    "max_us": 7336.80,
     "allocations": 0
   },
           {
     "scenario": "plus_chain_30",
     "iterations": 200,
-    "p50_us": 336.33,
-    "p95_us": 349.71,
-    "p99_us": 373.00,
-    "max_us": 397.25,
+    "p50_us": 766.42,
+    "p95_us": 776.59,
+    "p99_us": 797.08,
+    "max_us": 799.22,
     "allocations": 0
   }
-  ],
-  "meta": {
-    "commit": "4a017c8",
-    "date": "2026-04-27T09:54:31Z"
+    ],
+    "meta": {
+      "commit": "5b1a967",
+      "date": "2026-05-03T15:01:37Z"
+    }
+  },
+    "macos": {
+  "meta" : {
+    "commit" : "4a017c8",
+    "date" : "2026-04-27T09:54:31Z"
+  },
+  "scenarios" : [
+    {
+      "allocations" : 0,
+      "iterations" : 1000,
+      "max_us" : 172.62,
+      "p50_us" : 104.04,
+      "p95_us" : 111.42,
+      "p99_us" : 120.79,
+      "scenario" : "short"
+    },
+    {
+      "allocations" : 0,
+      "iterations" : 1000,
+      "max_us" : 430.12,
+      "p50_us" : 325.46,
+      "p95_us" : 338.54,
+      "p99_us" : 348.25,
+      "scenario" : "medium"
+    },
+    {
+      "allocations" : 0,
+      "iterations" : 500,
+      "max_us" : 2304.5,
+      "p50_us" : 1420.96,
+      "p95_us" : 1465.92,
+      "p99_us" : 1501.12,
+      "scenario" : "long"
+    },
+    {
+      "allocations" : 0,
+      "iterations" : 481,
+      "max_us" : 2202.75,
+      "p50_us" : 778.79,
+      "p95_us" : 2046.92,
+      "p99_us" : 2136.17,
+      "scenario" : "incremental"
+    },
+    {
+      "allocations" : 0,
+      "iterations" : 200,
+      "max_us" : 441.88,
+      "p50_us" : 386.5,
+      "p95_us" : 403.5,
+      "p99_us" : 419.54,
+      "scenario" : "garbage"
+    },
+    {
+      "allocations" : 0,
+      "iterations" : 496,
+      "max_us" : 399,
+      "p50_us" : 299.08,
+      "p95_us" : 386,
+      "p99_us" : 394.33,
+      "scenario" : "garbage_incremental"
+    },
+    {
+      "allocations" : 0,
+      "iterations" : 200,
+      "max_us" : 2811.96,
+      "p50_us" : 2699.79,
+      "p95_us" : 2750.04,
+      "p99_us" : 2777.88,
+      "scenario" : "repetition_t16"
+    },
+    {
+      "allocations" : 0,
+      "iterations" : 200,
+      "max_us" : 397.25,
+      "p50_us" : 336.33,
+      "p95_us" : 349.71,
+      "p99_us" : 373,
+      "scenario" : "plus_chain_30"
+    }
+  ]
+}
   }
 }

@@ -1,5 +1,6 @@
 import Foundation
 import BurmeseIMECore
+import BurmeseIMETestSupport
 
 // MARK: - Scenarios
 
@@ -161,43 +162,89 @@ func runScenario(_ s: Scenario) -> Measurement {
     )
 }
 
+// MARK: - Platform detection
+
+/// Per-host baseline key. The bench gate is meaningless across hosts
+/// (Apple Silicon vs. x86_64 Linux differ by 1.4–2.4× on every
+/// scenario), so each shipping platform has its own baseline section
+/// and `--check` only compares against the matching host (TASK-040).
+let currentPlatformKey: String = BenchBaselineFormat.currentPlatformKey
+
 // MARK: - JSON I/O
 
-func emitJSON(_ measurements: [Measurement], commit: String?) -> String {
+func emitJSON(
+    _ measurements: [Measurement],
+    commit: String?,
+    existingDocument: [String: Any]? = nil
+) -> String {
     let frags = measurements.map { $0.jsonFragment() }.joined(separator: ",\n          ")
     let commitField = commit ?? "unknown"
     let date = ISO8601DateFormatter().string(from: Date())
+    let sectionBody = """
+        "scenarios": [
+            \(frags)
+        ],
+        "meta": {
+          "commit": "\(commitField)",
+          "date": "\(date)"
+        }
+    """
+    var platformSections: [String: String] = [:]
+    // Preserve every other platform's section so a `--update` on Linux
+    // doesn't drop the macOS baseline (and vice versa). We only
+    // re-emit the section for `currentPlatformKey`.
+    if let existing = existingDocument,
+       let platforms = existing["platforms"] as? [String: Any] {
+        for (platform, raw) in platforms where platform != currentPlatformKey {
+            guard let dict = raw as? [String: Any] else { continue }
+            if let serialized = try? JSONSerialization.data(
+                withJSONObject: dict,
+                options: [.prettyPrinted, .sortedKeys]
+            ),
+               let pretty = String(data: serialized, encoding: .utf8) {
+                platformSections[platform] = pretty
+            }
+        }
+    }
+    platformSections[currentPlatformKey] = "{\n    \(sectionBody)\n  }"
+    let platformBlocks = platformSections
+        .keys
+        .sorted()
+        .map { key in
+            "    \"\(key)\": \(platformSections[key] ?? "{}")"
+        }
+        .joined(separator: ",\n")
     return """
     {
-      "scenarios": [
-          \(frags)
-      ],
-      "meta": {
-        "commit": "\(commitField)",
-        "date": "\(date)"
+      "platforms": {
+    \(platformBlocks)
       }
     }
     """
 }
 
-struct BaselineEntry {
-    let scenario: String
-    let p95Us: Double
-    let p99Us: Double
+typealias BaselineEntry = BenchBaselineFormat.ScenarioEntry
+
+/// Parse a baseline JSON document. Supports both the original
+/// flat schema (`{"scenarios": [...], "meta": {...}}`) and the
+/// per-platform schema introduced in TASK-040
+/// (`{"platforms": {"linux": {...}, "macos": {...}}}`). When the
+/// document is in per-platform form, only the `platformKey`
+/// section is read; if the section is missing, returns `nil` so
+/// `--check` can surface a clear error rather than silently
+/// passing on a host that has no baseline yet.
+func parseBaseline(_ path: String, platformKey: String) -> [BaselineEntry]? {
+    return BenchBaselineFormat.entries(atPath: path, platformKey: platformKey)
 }
 
-func parseBaseline(_ path: String) -> [BaselineEntry]? {
+/// Read an existing baseline document so `--update` can preserve
+/// per-platform sections that are not the current host. Returns
+/// nil when the file is missing or unreadable.
+func readBaselineDocument(_ path: String) -> [String: Any]? {
     guard let data = FileManager.default.contents(atPath: path),
-          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-          let scenarios = json["scenarios"] as? [[String: Any]]
+          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     else { return nil }
-    return scenarios.compactMap { s in
-        guard let name = s["scenario"] as? String,
-              let p95 = s["p95_us"] as? Double,
-              let p99 = s["p99_us"] as? Double
-        else { return nil }
-        return BaselineEntry(scenario: name, p95Us: p95, p99Us: p99)
-    }
+    return json
 }
 
 // MARK: - Git commit
@@ -283,17 +330,22 @@ for s in toRun {
     results.append(m)
 }
 
-let json = emitJSON(results, commit: currentCommit())
+let updateExisting = updatePath.flatMap { readBaselineDocument($0) }
+let json = emitJSON(results, commit: currentCommit(), existingDocument: updateExisting)
 
 if let path = updatePath {
     try? json.write(toFile: path, atomically: true, encoding: .utf8)
-    FileHandle.standardError.write(Data("wrote baseline to \(path)\n".utf8))
+    FileHandle.standardError.write(Data(
+        "wrote \(currentPlatformKey) baseline to \(path)\n".utf8
+    ))
     exit(0)
 }
 
 if let path = checkPath {
-    guard let baseline = parseBaseline(path) else {
-        FileHandle.standardError.write(Data("could not read baseline at \(path)\n".utf8))
+    guard let baseline = parseBaseline(path, platformKey: currentPlatformKey) else {
+        FileHandle.standardError.write(Data(
+            "could not read \(currentPlatformKey) baseline at \(path) — run `--update` to capture one\n".utf8
+        ))
         exit(2)
     }
     var regressions: [String] = []

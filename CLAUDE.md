@@ -262,6 +262,19 @@ Four scenarios (`short`/`medium`/`long`/`incremental`). `--check` exits 1
 if p95 regresses >20% or p99 regresses >30% vs the committed baseline.
 Update the baseline only when an intentional perf change lands.
 
+The committed `Tests/Benchmarks/baseline.json` is **per-platform**: each
+shipping host (Apple Silicon `macos`, x86_64 Linux `linux`) has its
+own baseline section under `platforms.{key}`. `--check` auto-detects
+the running host via `#if os(...)` and only compares against the
+matching section; on an unbaselined host it surfaces a clear
+"could not read … baseline" diagnostic and exits 2 (rather than
+silently passing). `--update` rewrites only the running host's
+section and preserves every other platform's section verbatim, so a
+Linux developer regenerating their numbers does not stomp the macOS
+baseline (and vice versa). When a structural perf change lands,
+both maintainers must run `--update` on their respective host before
+merging — the gate is otherwise host-bound.
+
 ### Lexicon and LM data — pipeline outputs, do not hand-edit
 
 `Data/BurmeseLexiconSource.tsv`, `native/macos/Data/BurmeseLexicon.sqlite`,
