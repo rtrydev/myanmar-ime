@@ -426,17 +426,28 @@ which accumulates a raw Roman buffer and calls
 `BurmeseEngine.update(buffer:context:)` on every change.
 
 ```
-buffer ─► BurmeseEngine.update
+buffer ─► BurmeseEngine.update (outer wrapper)
             │
-            ├─ splitComposablePrefix       composable chars vs. literal tail
-            ├─ Romanization.normalize      alias folding (e.g. ph → f)
-            ├─ right-shrink probe loop     drop trailing chars until parse is legal
-            ├─ sliding-window split        frozen prefix + active tail (long inputs)
-            ├─ SyllableParser.parseCandidates
-            │     (N-best Viterbi DP over onset+vowel rules)
-            ├─ CandidateStore.lookup       lexicon prefix match
-            └─ merge, rank, expand aa      returns CompositionState
+            └─ updateInternal
+                 │
+                 ├─ splitComposablePrefix       composable chars vs. literal tail
+                 ├─ Romanization.normalize      alias folding (e.g. ph → f)
+                 ├─ right-shrink probe loop     drop trailing chars until parse is legal
+                 ├─ sliding-window split        frozen prefix + active tail (long inputs)
+                 ├─ SyllableParser.parseCandidates
+                 │     (N-best Viterbi DP over onset+vowel rules)
+                 ├─ CandidateStore.lookup       lexicon prefix match
+                 └─ merge, rank, expand aa      returns CompositionState
+            │
+            └─ injectLiteralFallback       commit-as-typed escape hatch
+                                           (see Literal-fallback candidate below)
 ```
+
+`update` is a thin wrapper over `updateInternal` so the literal-fallback
+step runs exactly once per outer call. Internal recursive calls (e.g.
+`englishContractionState` reparsing the apostrophe-stripped buffer) go
+through `updateInternal` directly to avoid double-applying the
+fallback.
 
 Like Pinyin, Kotoeri, and other system IMEs, the engine is designed to
 let users freely interlace Myanmar with Latin, digits, punctuation, or
@@ -451,8 +462,9 @@ this:
   [`Engine/BurmeseEngine.swift`](Packages/BurmeseIMECore/Sources/BurmeseIMECore/Engine/BurmeseEngine.swift)).
   So `thar.` commits as `သာ.` without breaking composition.
 - **Raw passthrough (inter-run):** when the composable prefix has no
-  legal Burmese parse, the engine emits the raw buffer verbatim. The IMK
-  controller (see [`BurmeseInputController.swift:193`](native/macos/BurmeseIME/BurmeseInputController.swift#L193))
+  legal Burmese parse, the engine emits the raw buffer verbatim via
+  `injectLiteralFallback` (see *Literal-fallback candidate* below). The
+  IMK controller (see [`BurmeseInputController.swift:193`](native/macos/BurmeseIME/BurmeseInputController.swift#L193))
   keeps typeable ASCII in the buffer rather than force-committing, so
   users can type English words inline and get them back unchanged.
 
@@ -495,6 +507,64 @@ The sanitizer applies to both:
 Callers adding new parser features that could emit combining marks
 without a base must either produce a legal-structure sibling or accept
 that their output will only surface when nothing else does.
+
+### Literal-fallback candidate
+
+The candidate panel must never be empty for a non-empty composable
+buffer, and the user must always have a "commit as typed" escape hatch.
+This is enforced by `injectLiteralFallback` running once at the end of
+the outer `BurmeseEngine.update(buffer:context:)` call, after every
+internal pipeline stage and sanitizer.
+
+Policy:
+
+> **Synthesize a candidate with `surface == reading == rawBuffer`,
+> `source = .grammar`, `score = 0` — the user's exact keystrokes,
+> verbatim — and place it in the panel based on how much of the input
+> the engine could actually convert.**
+
+Rules in order of application:
+
+1. **Skip entirely if rank-0 is `source == .lexicon`.** A lexicon hit
+   is the strong signal that the user is typing a known Burmese word.
+   Cluttering the panel with the romanization echo (e.g. `mingalarpar`
+   alongside `မင်္ဂလာပါ`) degrades the most common path. No literal is
+   added in this case.
+2. **Skip if any existing candidate already has `surface == rawBuffer`.**
+   De-dup against the engine's own raw-passthrough emissions.
+3. **Position by ratio.** Compute an unconvertible signal — the
+   shipping implementation uses the ASCII-letter count in the rank-0
+   surface (`topAsciiLetterCountAtLeast`); the equivalent
+   `parseLongestAcceptablePrefix` ratio agrees on every covered case
+   and was dropped to avoid a per-keystroke parser re-walk on the
+   `garbage` fuzz scenario. The threshold is **50%**:
+   - `candidates.isEmpty` → literal is the only candidate.
+   - `unconvertibleRatio >= 0.5` → insert literal at **rank 0**, any
+     Myanmar candidates follow.
+   - `unconvertibleRatio < 0.5` → **append** literal after the Myanmar
+     candidates (not rank 0).
+
+Examples:
+
+| Input | Resulting panel |
+|---|---|
+| `c`, `comp`, `computer`, `facebook`, `fb` | `[computer]` (literal only) |
+| `tablet` (parses fully, no lexicon hit) | `[တဘလက်, tablet]` |
+| `aungc` (~20% unconvertible) | `[အောင်c, aungc]` |
+| `kac` (~33% unconvertible) | `[ကc, kac]` |
+| `mingalarpar`, `kar` (lexicon hits) | `[မင်္ဂလာပါ, …]` (no literal) |
+| `comp2` | `[comp2]` (ASCII digit preserved verbatim — not `comp၂`) |
+
+The fallback's surface is the **raw buffer**, never the
+`displayBuffer`. `displayBuffer` runs through digit-mapping (ASCII
+`2` → Myanmar `၂`) and other engine transforms which are the wrong
+choice for a "what the user typed" candidate.
+
+Suites that previously asserted `candidates.isEmpty` for some buffer
+shape (`UnparseableTailFallbackSuite` policy comment, `EngineSuite`,
+`RankingSuite`, `PunctuationSuite` ASCII-leak guards, etc.) have been
+updated to either reflect the new invariant or skip the raw-buffer
+literal when checking script-purity.
 
 ### Key types
 

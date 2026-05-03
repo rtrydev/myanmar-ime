@@ -671,12 +671,19 @@ public enum RankingSuite {
                 "task02_awTopPromoted",
                 detail: "expected promoted orphan surface; got: \(surfaces)"
             )
+            // TASK-043: the literal-fallback candidate (raw buffer
+            // `aw`) is appended at the bottom as a commit-as-typed
+            // escape hatch. Every other candidate must remain
+            // Myanmar-only; the ASCII-leak guard now skips the
+            // explicit literal.
             ctx.assertFalse(
                 surfaces.contains { surface in
-                    surface.unicodeScalars.contains { $0.value < 0x1000 || $0.value > 0x109F }
+                    surface != "aw" && surface.unicodeScalars.contains {
+                        $0.value < 0x1000 || $0.value > 0x109F
+                    }
                 },
                 "task02_awNoAsciiTail",
-                detail: "aw candidates must stay Myanmar-only; got: \(surfaces)"
+                detail: "aw candidates (excluding raw-buffer literal) must stay Myanmar-only; got: \(surfaces)"
             )
         })
 

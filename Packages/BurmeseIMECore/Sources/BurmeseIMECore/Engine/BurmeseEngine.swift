@@ -264,7 +264,29 @@ public final class BurmeseEngine: @unchecked Sendable {
 
     /// Update the composition state based on the current buffer and context.
     /// Called on every keystroke that modifies the buffer.
+    ///
+    /// Public entry point. Delegates the heavy pipeline to
+    /// `updateInternal` and then applies the literal-fallback
+    /// post-processing (TASK-043) so the user always sees a
+    /// commit-as-typed escape hatch in the candidate panel when the
+    /// input has no clean lexicon hit. Recursive paths inside the
+    /// pipeline call `updateInternal` directly to avoid double-
+    /// applying the fallback to intermediate buffer slices.
     public func update(buffer: String, context: [String]) -> CompositionState {
+        let state = updateInternal(buffer: buffer, context: context)
+        // `state.rawBuffer` is already the lowercased displayBuffer
+        // (set by `updateInternal` for the active-composition paths,
+        // empty for the empty-input early return). Reuse it instead of
+        // lowercasing `buffer` again on every keystroke.
+        return injectLiteralFallback(state: state, rawBuffer: state.rawBuffer)
+    }
+
+    /// Pipeline implementation; produces the raw `CompositionState`
+    /// without the literal-fallback wrapper. Recursive entries inside
+    /// the engine (`englishContractionState`, mid-buffer digit /
+    /// embedded-punct splits) call this method so the literal is only
+    /// considered once, against the original outer buffer.
+    internal func updateInternal(buffer: String, context: [String]) -> CompositionState {
         guard !buffer.isEmpty else {
             cacheLock.lock()
             anchorHistory.removeAll()
@@ -320,7 +342,7 @@ public final class BurmeseEngine: @unchecked Sendable {
             // so it does not insert `+` across positions where the user placed
             // a digit — the digit is a hard syllable break (task 01).
             midDigitBoundaries = Set(midInsertions.map(\.offset))
-            var state = update(buffer: midCleanedBuffer, context: context)
+            var state = updateInternal(buffer: midCleanedBuffer, context: context)
             midDigitBoundaries = []
             state.rawBuffer = displayBuffer
             let spliced = spliceMidBufferDigits(
@@ -353,7 +375,7 @@ public final class BurmeseEngine: @unchecked Sendable {
         // connector rule. Split those literal runs before the parser can
         // skip them and silently erase what the user typed.
         if let split = splitAtLastEmbeddedComposingPunct(displayBuffer) {
-            var state = update(buffer: split.activeBuffer, context: context)
+            var state = updateInternal(buffer: split.activeBuffer, context: context)
             state.rawBuffer = displayBuffer
             if state.candidates.isEmpty {
                 state.candidates = [Candidate(
@@ -393,7 +415,7 @@ public final class BurmeseEngine: @unchecked Sendable {
         // generalises the older `splitAtLastEmbeddedMappedPunct` path
         // (which only fired for the five mapped chars under the toggle).
         if let split = splitAtLastEmbeddedLiteralPunct(displayBuffer) {
-            var state = update(buffer: split.activeBuffer, context: context)
+            var state = updateInternal(buffer: split.activeBuffer, context: context)
             state.rawBuffer = displayBuffer
             if state.candidates.isEmpty {
                 // Active portion produced nothing parseable; surface the
@@ -2074,6 +2096,138 @@ public final class BurmeseEngine: @unchecked Sendable {
             candidates: finalCandidates,
             committedContext: context
         )
+    }
+
+    /// TASK-043 literal-fallback wrapper. Synthesizes a "commit-as-typed"
+    /// candidate carrying the user's raw buffer verbatim so the panel
+    /// is never empty when the user is typing non-Burmese ASCII (English
+    /// words, brand names, mixed-script abbreviations).
+    ///
+    /// Position uses a single signal for performance: the count of
+    /// ASCII a–z letters surviving in the rank-0 candidate surface,
+    /// divided by the raw buffer length. The two signals the resolved
+    /// policy describes (parser-acceptable prefix length and rank-0
+    /// ASCII-letter content) agree in practice — when the parser can't
+    /// accept much of the buffer, the engine's pipeline echoes the
+    /// unconverted ASCII letters into the rank-0 surface, so the
+    /// rank-0 ASCII ratio already captures both cases. Reusing the
+    /// engine's already-rendered output avoids a second per-keystroke
+    /// `parseLongestAcceptablePrefix` walk on the raw buffer (which
+    /// adds ~50% to garbage-input latency in the bench).
+    ///
+    /// Layout rules:
+    ///   - `candidates.isEmpty` → literal is the only candidate.
+    ///   - rank-0 surface ASCII-letter ratio ≥ 0.5 → literal at rank 0
+    ///     (existing literal promoted if already present elsewhere
+    ///     in the list).
+    ///   - otherwise → literal appended at the bottom.
+    ///
+    /// Skipped entirely when the rank-0 candidate already has source
+    /// `.lexicon`: a lexicon hit signals intentional Burmese composition,
+    /// so cluttering the panel with a romanization echo would degrade
+    /// UX. Skipped (no insertion) when the literal surface already
+    /// exists somewhere in the panel and the ratio doesn't promote it.
+    internal func injectLiteralFallback(
+        state: CompositionState,
+        rawBuffer: String
+    ) -> CompositionState {
+        guard !rawBuffer.isEmpty else { return state }
+        // Carve-out: lexicon hit at rank 0 means the user is composing a
+        // known dictionary word — don't echo the romanization back.
+        let firstCandidate = state.candidates.first
+        if firstCandidate?.source == .lexicon { return state }
+
+        // Hot path: empty panel → literal is the only candidate.
+        if firstCandidate == nil {
+            var newState = state
+            newState.candidates = [Candidate(
+                surface: rawBuffer,
+                reading: rawBuffer,
+                source: .grammar,
+                score: 0
+            )]
+            return newState
+        }
+
+        // Hot path: rank-0 surface already equals the raw buffer
+        // (e.g. the engine echoed the raw buffer back as its only
+        // candidate, which is common for pure-ASCII garbage and
+        // mid-buffer-digit shapes). Nothing to do.
+        if firstCandidate?.surface == rawBuffer {
+            return state
+        }
+
+        // How much of the rank-0 candidate's surface is still raw
+        // ASCII a–z letters? When the engine's punct-split /
+        // digit-extract / right-shrink pipelines render a
+        // Myanmar-anchored surface (`123kya` → `၁၂၃ကျ`,
+        // `ka.tar` → `က.တာ`, `kac` → `ကc`), the rank-0 ASCII-letter
+        // count is low and the literal must NOT take rank 0 — it
+        // appends instead. The scan exits early once the count
+        // exceeds half the raw buffer length: for the common pure-
+        // Myanmar rank-0 path it returns immediately on the first
+        // non-ASCII scalar.
+        let rawCount = rawBuffer.count
+        let asciiThreshold = (rawCount + 1) / 2
+        let topAsciiLetters = topAsciiLetterCountAtLeast(
+            in: firstCandidate!.surface,
+            threshold: asciiThreshold
+        )
+        let placeAtRankZero = rawCount > 0 && topAsciiLetters >= asciiThreshold
+
+        var candidates = state.candidates
+        if placeAtRankZero {
+            if let idx = candidates.firstIndex(where: { $0.surface == rawBuffer }) {
+                // Already present (e.g. emitted by
+                // `digitOrLiteralFallback` for trailing-digit shapes
+                // like `comp2`); promote to rank 0 so the ratio
+                // threshold is honoured.
+                if idx > 0 {
+                    let existing = candidates.remove(at: idx)
+                    candidates.insert(existing, at: 0)
+                }
+            } else {
+                candidates.insert(Candidate(
+                    surface: rawBuffer,
+                    reading: rawBuffer,
+                    source: .grammar,
+                    score: 0
+                ), at: 0)
+            }
+        } else if !candidates.contains(where: { $0.surface == rawBuffer }) {
+            // Myanmar-leading panel: append only when not already
+            // present anywhere in the list.
+            candidates.append(Candidate(
+                surface: rawBuffer,
+                reading: rawBuffer,
+                source: .grammar,
+                score: 0
+            ))
+        }
+
+        var newState = state
+        newState.candidates = candidates
+        return newState
+    }
+
+    /// Count of ASCII a–z / A–Z scalars in `surface`, capped at
+    /// `threshold + 1` so the caller can early-decide whether the
+    /// count meets a threshold without paying for the full scan.
+    /// Used by the literal-fallback positioning heuristic — for the
+    /// common pure-Myanmar rank-0 path the threshold is never
+    /// reached and the helper returns 0 quickly.
+    @inline(__always)
+    private func topAsciiLetterCountAtLeast(in surface: String, threshold: Int) -> Int {
+        var count = 0
+        let cap = threshold + 1
+        for scalar in surface.unicodeScalars {
+            let v = scalar.value
+            if (v >= 0x61 && v <= 0x7A) || (v >= 0x41 && v <= 0x5A) {
+                count += 1
+                if count >= cap { return count }
+            }
+        }
+        return count
     }
 
     /// Run the inferred-`+` parses for `input`, neutralise the

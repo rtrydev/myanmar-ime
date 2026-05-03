@@ -360,7 +360,7 @@ extension BurmeseEngine {
         let stripped = String(buffer.filter { $0 != "'" })
         let collapsed = stripped.isEmpty
             ? CompositionState(committedContext: context)
-            : update(buffer: stripped, context: context)
+            : updateInternal(buffer: stripped, context: context)
         var combined: [Candidate] = []
         // Rank 0: literal contraction surface.
         combined.append(Candidate(

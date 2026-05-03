@@ -61,12 +61,18 @@ public enum PunctuationSuite {
             defer { cleanup(suiteName) }
             settings.burmesePunctuationEnabled = true
             let engine = BurmeseEngine(settings: settings)
-            let state = engine.update(buffer: "ka.", context: [])
+            let buffer = "ka."
+            let state = engine.update(buffer: buffer, context: [])
             let surfaces = state.candidates.map(\.surface)
             ctx.assertTrue(surfaces.contains("က\u{104B}"),
                            "mappedDot", detail: "surfaces=\(surfaces)")
-            ctx.assertFalse(surfaces.contains(where: { $0.hasSuffix(".") }),
-                            "noAsciiLeak", detail: "surfaces=\(surfaces)")
+            // TASK-043: skip the raw-buffer literal when checking that
+            // converted candidates have no ASCII leak.
+            ctx.assertFalse(
+                surfaces.contains(where: { $0 != buffer && $0.hasSuffix(".") }),
+                "noAsciiLeak",
+                detail: "surfaces=\(surfaces)"
+            )
         },
 
         TestCase("engine_trailingComma_mapsToU104A") { ctx in
@@ -119,12 +125,20 @@ public enum PunctuationSuite {
             defer { cleanup(suiteName) }
             settings.burmesePunctuationEnabled = true
             let engine = BurmeseEngine(settings: settings)
-            let state = engine.update(buffer: "thar,myat", context: [])
+            let buffer = "thar,myat"
+            let state = engine.update(buffer: buffer, context: [])
             let surfaces = state.candidates.map(\.surface)
             ctx.assertTrue(surfaces.contains("သာ\u{104A}မြတ်"),
                            "bothSegmentsConverted", detail: "surfaces=\(surfaces)")
-            ctx.assertFalse(surfaces.contains(where: { $0.contains("myat") }),
-                            "noRawRomanLeak", detail: "surfaces=\(surfaces)")
+            // TASK-043: the literal-fallback candidate carries the raw
+            // buffer verbatim as a commit-as-typed escape hatch; skip
+            // it when checking that the converted candidates dropped
+            // the romanization tail.
+            ctx.assertFalse(
+                surfaces.contains(where: { $0 != buffer && $0.contains("myat") }),
+                "noRawRomanLeak",
+                detail: "surfaces=\(surfaces)"
+            )
         },
 
         TestCase("engine_composableAfterDot_getsParsed") { ctx in
@@ -184,12 +198,18 @@ public enum PunctuationSuite {
             defer { cleanup(suiteName) }
             settings.burmesePunctuationEnabled = true
             let engine = BurmeseEngine(settings: settings)
-            let state = engine.update(buffer: "padma.", context: [])
+            let buffer = "padma."
+            let state = engine.update(buffer: buffer, context: [])
             let surfaces = state.candidates.map(\.surface)
             ctx.assertTrue(surfaces.contains(where: { $0.hasSuffix("\u{104B}") }),
                            "mappedDot", detail: "surfaces=\(surfaces)")
-            ctx.assertFalse(surfaces.contains(where: { $0.hasSuffix(".") }),
-                            "noAsciiLeak", detail: "surfaces=\(surfaces)")
+            // TASK-043: literal-fallback candidate is the raw buffer
+            // verbatim — exclude it from the no-ASCII-leak guard.
+            ctx.assertFalse(
+                surfaces.contains(where: { $0 != buffer && $0.hasSuffix(".") }),
+                "noAsciiLeak",
+                detail: "surfaces=\(surfaces)"
+            )
         },
 
         TestCase("engine_mixedTrailingDotBang_bothMapToPunct_whenEnabled") { ctx in
@@ -199,12 +219,18 @@ public enum PunctuationSuite {
             defer { cleanup(suiteName) }
             settings.burmesePunctuationEnabled = true
             let engine = BurmeseEngine(settings: settings)
-            let state = engine.update(buffer: "ka.!", context: [])
+            let buffer = "ka.!"
+            let state = engine.update(buffer: buffer, context: [])
             let surfaces = state.candidates.map(\.surface)
             ctx.assertTrue(surfaces.contains("က\u{104B}\u{104B}"),
                            "dotBangMapped", detail: "surfaces=\(surfaces)")
-            ctx.assertFalse(surfaces.contains(where: { $0.contains(".") }),
-                            "noRawDot", detail: "surfaces=\(surfaces)")
+            // TASK-043: literal-fallback candidate is the raw buffer
+            // verbatim — exclude it from the no-raw-dot guard.
+            ctx.assertFalse(
+                surfaces.contains(where: { $0 != buffer && $0.contains(".") }),
+                "noRawDot",
+                detail: "surfaces=\(surfaces)"
+            )
         },
 
         TestCase("engine_thiuDot_producesStandaloneBu_whenEnabled") { ctx in

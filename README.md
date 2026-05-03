@@ -236,14 +236,37 @@ ends up as a natural mix of Myanmar and non-Myanmar text:
   `min+galar!` as `မင်္ဂလာ!`.
 - Typing English in the middle of a Myanmar sentence just means the
   Latin run has no legal Burmese parse, so the engine emits the raw
-  buffer verbatim. Users can freely alternate: compose a Burmese word,
-  commit, type `OK`, commit, compose another Burmese word.
+  buffer verbatim as a **literal-fallback candidate** (see the policy
+  below). Users can freely alternate: compose a Burmese word, commit,
+  type `OK`, commit, compose another Burmese word.
 - Switching the menu-bar input mode from **က** to **ABC** disables
   conversion entirely for passthrough typing.
 
 The only constraint is *within a single composed run*: output never
 contains Latin characters interleaved between Myanmar ones. Mixing
 scripts across runs in the surrounding document is the expected flow.
+
+**Literal-fallback policy.** The candidate panel is never empty for a
+non-empty composable buffer, and the user always has a commit-as-typed
+escape hatch. After the main pipeline runs, the engine synthesizes a
+candidate whose surface is the **raw buffer** — exactly what the user
+typed, ASCII digits preserved as ASCII (`comp2`, never `comp၂`), no
+alias folding — and positions it by how much of the input could be
+converted to Myanmar:
+
+- **Empty panel after sanitizers** (e.g. `computer`, `facebook`, `fb`)
+  → the literal is the only candidate, so the user can still see and
+  commit what they typed.
+- **Mostly unconvertible** (≥ 50% of the input has no Myanmar parse)
+  → literal goes to rank 0, any Myanmar candidates follow.
+- **Mostly convertible** (< 50% unconvertible — e.g. `aungc` →
+  `အောင်c`, or fully consumed but no lexicon hit like
+  `tablet` → `တဘလက်`) → Myanmar stays at rank 0, literal is appended
+  at the bottom.
+- **Lexicon hit at rank 0** (e.g. `mingalarpar` → `မင်္ဂလာပါ`,
+  `kar` → `ကား`) → no literal is added. A lexicon hit signals the
+  user is composing intentional Burmese; cluttering the panel with the
+  romanization echo would degrade the common path.
 
 ### Native macOS Integration
 - Built on **InputMethodKit** (`IMKInputController`).
@@ -336,17 +359,23 @@ which accumulates a raw Roman buffer and calls
 `BurmeseEngine.update(buffer:context:)` on every change.
 
 ```
-buffer ─► BurmeseEngine.update
+buffer ─► BurmeseEngine.update (outer wrapper)
             │
-            ├─ splitComposablePrefix       composable chars vs. literal tail
-                                           (all ASCII digits break the composable run)
-            ├─ Romanization.normalize      alias folding, digit stripping
-            ├─ right-shrink probe loop     drop trailing chars until parse is legal
-            ├─ sliding-window split        frozen prefix + active tail (long inputs)
-            ├─ SyllableParser.parseCandidates
-            │     (N-best Viterbi DP over onset+vowel rules)
-            ├─ CandidateStore.lookup       lexicon prefix match
-            └─ merge, rank, expand aa      returns CompositionState
+            └─ updateInternal
+                 │
+                 ├─ splitComposablePrefix       composable chars vs. literal tail
+                                                (all ASCII digits break the composable run)
+                 ├─ Romanization.normalize      alias folding, digit stripping
+                 ├─ right-shrink probe loop     drop trailing chars until parse is legal
+                 ├─ sliding-window split        frozen prefix + active tail (long inputs)
+                 ├─ SyllableParser.parseCandidates
+                 │     (N-best Viterbi DP over onset+vowel rules)
+                 ├─ CandidateStore.lookup       lexicon prefix match
+                 └─ merge, rank, expand aa      returns CompositionState
+            │
+            └─ injectLiteralFallback       commit-as-typed escape hatch
+                                           (raw-buffer candidate — see Mixed-Script Input
+                                           policy above; runs once at the outermost call)
 ```
 
 ### Public API

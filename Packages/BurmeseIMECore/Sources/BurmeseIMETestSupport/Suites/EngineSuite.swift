@@ -1034,7 +1034,13 @@ public enum EngineSuite {
                 ctx.assertFalse(state.candidates.isEmpty,
                                 "task03_nonEmpty_\(buffer)",
                                 detail: "fully composable buffer produced no candidates")
-                for candidate in state.candidates {
+                // TASK-043: the panel may carry an appended literal-fallback
+                // candidate equal to the raw buffer (commit-as-typed
+                // escape hatch). Skip that one; every other candidate must
+                // still be Myanmar-only — ASCII tail leakage in a Myanmar
+                // candidate is the original task-03 regression this guard
+                // was protecting against.
+                for candidate in state.candidates where candidate.surface != buffer {
                     ctx.assertTrue(
                         hasOnlyMyanmarOrZeroWidthScalars(candidate.surface),
                         "task03_myanmarOnly_\(buffer)",

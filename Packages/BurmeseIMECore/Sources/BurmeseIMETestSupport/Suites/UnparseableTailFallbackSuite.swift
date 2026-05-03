@@ -7,11 +7,14 @@ import Foundation
 /// engine must keep at least one candidate so the user can commit
 /// what they have so far.
 ///
-/// Pure-ASCII garbage with no Burmese composable prefix (`fox`,
-/// `xyz`, `ccc`) may either be dropped or surfaced verbatim — the
-/// invariant only fires for buffers whose composable prefix produces
-/// at least one Myanmar scalar (`abc` → `အဘc`, `aungc` → `အောင်c`,
-/// `kar:bc` → `ကားbc`).
+/// Updated invariant (TASK-043, 2026-05-03): the panel is **never
+/// empty** for any non-empty composable buffer. Buffers with a
+/// Myanmar-bearing composable prefix (`abc` → `အဘ` + `c`, `aungc`
+/// → `အောင်` + `c`, `kar:bc` → `ကား` + `:bc`) keep their Myanmar
+/// candidate at rank 0; buffers with no acceptable Myanmar parse
+/// (`fox`, `xyz`, `ccc`, `c`, `comp`, `facebook`) get a synthesized
+/// literal candidate equal to the raw buffer so the user can commit
+/// what they typed.
 public enum UnparseableTailFallbackSuite {
 
     private static func emptyEngine() -> BurmeseEngine {

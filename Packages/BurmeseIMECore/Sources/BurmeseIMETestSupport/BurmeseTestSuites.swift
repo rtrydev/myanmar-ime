@@ -51,6 +51,7 @@ public enum BurmeseTestSuites {
         OrphanLeadingVowelSuite.suite,
         BareAingDiphthongSuite.suite,
         UnparseableTailFallbackSuite.suite,
+        LiteralFallbackCandidateSuite.suite,
         StandaloneCodaVowelSuite.suite,
         MidBufferDigitMedialSplitSuite.suite,
         MidBufferDigitAsatSplitSuite.suite,
