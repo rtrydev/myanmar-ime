@@ -98,5 +98,7 @@ public enum BurmeseTestSuites {
         BenchBaselineFormatSuite.suite,
         ClusterAliasRepeatPerfSuite.suite,
         DigitAsatLiteralSuite.suite,
+        EkarCrossCategoryClusterSuite.suite,
+        ExplicitPlusVowelChainSuite.suite,
     ]
 }

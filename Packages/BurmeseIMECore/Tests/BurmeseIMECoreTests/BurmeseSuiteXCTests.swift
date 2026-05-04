@@ -318,4 +318,12 @@ final class MultiStackTrailingToneXCTests: XCTestCase {
 final class DigitAsatLiteralXCTests: XCTestCase {
     func testAll() { runSuite(DigitAsatLiteralSuite.suite, xctest: self) }
 }
+
+final class EkarCrossCategoryClusterXCTests: XCTestCase {
+    func testAll() { runSuite(EkarCrossCategoryClusterSuite.suite, xctest: self) }
+}
+
+final class ExplicitPlusVowelChainXCTests: XCTestCase {
+    func testAll() { runSuite(ExplicitPlusVowelChainSuite.suite, xctest: self) }
+}
 #endif

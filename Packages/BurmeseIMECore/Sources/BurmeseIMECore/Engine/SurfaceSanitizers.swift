@@ -985,20 +985,18 @@ extension BurmeseEngine {
             // `Parser/Finalization.swift::scanOutputLegality` so the
             // orphan-mark detector treats illegal cross-category
             // chains as unanchored — feeding them to the per-cluster
-            // anchor injector. Restricted to the aa / i / u / ai
-            // families (cats 1, 2, 3, 5); walks involving the leading
-            // e-kar `1031` (cat 4) are excluded because the e-kar's
-            // own placement rules are handled by the dedicated
-            // `current == 0x1031` rule above and `kayoo`-style inputs
-            // depend on the existing same-category split for their
-            // single-anchor injection.
+            // anchor injector. TASK-053: the only legal cross-
+            // category walks on a single anchor are the `o`-cluster
+            // (`102D 102F`) and the `1031 102B/102C` aw-family. Every
+            // other cross-category walk including the `1031 + non-aa`
+            // class must reject so the orphan-mark injector breaks
+            // the cluster apart with a fresh `1021` anchor.
             if currentCategory != 0,
-               currentCategory != 4,
                wCategory != 0,
-               wCategory != 4,
                wCategory != currentCategory {
                 let isOClusterUpstream = (w == 0x102D && current == 0x102F)
-                if !isOClusterUpstream {
+                let isAungUpstream = (w == 0x1031 && currentCategory == 1)
+                if !(isOClusterUpstream || isAungUpstream) {
                     return false
                 }
             }

@@ -341,32 +341,31 @@ extension SyllableParser {
                     return false
                 }
                 // Cross-category dep-vowel allow-list (TASK-028). On a
-                // single consonant anchor Burmese permits exactly one
-                // multi-scalar dep-vowel cluster among the aa / i / u
-                // / ai families: `102D 102F` (the "o" / "ou" cluster,
-                // i + u). Every other cross-category pairing in those
-                // families (`aa + i`, `aa + u`, `i + uu`, `ii + u`,
-                // `aa + ai`, …) is malformed.
+                // single consonant anchor Burmese permits exactly two
+                // multi-scalar dep-vowel cluster shapes:
+                //   - `102D 102F` (the "o" / "ou" cluster — i + u),
+                //   - `1031 102B` / `1031 102C` (leading e-kar Unicode
+                //     storage order for the `aw` / `aung` / `aing`
+                //     family — only the aa-family scalars `102B` /
+                //     `102C` may follow `1031` on the same anchor).
                 //
-                // The leading e-kar `1031` (cat 4) participates in
-                // its own legal multi-scalar shape `1031 102B / 102C`
-                // (the `aw`/`aung`/`aing` Unicode storage order) which
-                // is unaffected by the rule below. Walks where either
-                // side is `1031` are excluded because the e-kar's own
-                // placement constraints are handled by the dedicated
-                // `current == 0x1031` rule above and by the engine's
-                // per-cluster orphan injector — `kayoo`-style inputs
-                // emit `1031 102D 102F 102D 102F`, where the second
-                // `o`-cluster is anchor-injected to produce a clean
-                // `<C> e-kar + အို + အို` rendering.
+                // TASK-053: the previous shape of this rule excluded
+                // `currentCategory == 4` and `wCategory == 4` from the
+                // walk, which permitted any non-aa dep-vowel to walk
+                // back over an `1031` predecessor (`kayoo` →
+                // `1000 1031 102D 102F`, `kayee` → `1000 1031 102E`,
+                // …). Narrow the carve-out so only an aa-family
+                // (cat 1) walking back over `1031` is admitted; every
+                // other cross-category walk reaching a `1031`
+                // predecessor must reject. Same-category dep-vowels
+                // are already rejected by the rule above.
                 if currentCategory != 0,
-                   currentCategory != 4,
                    isDependentVowel(w),
                    depVowelCategory(w) != currentCategory,
-                   depVowelCategory(w) != 0,
-                   depVowelCategory(w) != 4 {
+                   depVowelCategory(w) != 0 {
                     let isOClusterUpstream = (w == 0x102D && current == 0x102F)
-                    if !isOClusterUpstream {
+                    let isAungUpstream = (w == 0x1031 && currentCategory == 1)
+                    if !(isOClusterUpstream || isAungUpstream) {
                         return false
                     }
                 }
