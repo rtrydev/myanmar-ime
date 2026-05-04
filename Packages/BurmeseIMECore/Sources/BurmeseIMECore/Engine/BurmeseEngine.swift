@@ -350,6 +350,17 @@ public final class BurmeseEngine: @unchecked Sendable {
         // filter pass can promote it past the malformed Myanmar
         // candidates.
         injected.candidates = Self.sanitizeToneOrphanAsat(injected.candidates)
+        // TASK-056: same pattern — re-run the interleaved-composing-
+        // punct sanitizer with the literal fallback in place. The
+        // doubled `**`, `''`, `::`, `..` runs (and trailing-singleton
+        // `'`) leak literal ASCII scalars between Myanmar scalars
+        // through the materialize / affix-merge path; once the
+        // literal fallback is injected the panel has a clean sibling
+        // (the raw buffer verbatim) so the filter pass can drop the
+        // violating Myanmar candidate without leaving the panel
+        // empty. Trailing punct (no Myanmar to the right) is still
+        // permitted by the predicate.
+        injected.candidates = Self.sanitizeInterleavedComposingPunct(injected.candidates)
         return injected
     }
 
@@ -2196,7 +2207,7 @@ public final class BurmeseEngine: @unchecked Sendable {
         let sanitizedAffixed4 = Self.sanitizeDoubledCodaChain(sanitizedAffixed3)
         let sanitizedAffixed5 = Self.sanitizeDigitOrphanAsat(sanitizedAffixed4)
         let sanitizedAffixed6 = Self.sanitizeToneOrphanAsat(sanitizedAffixed5)
-        let sanitizedWithAffixes = Self.sanitizeToneOrphanAsat(sanitizedAffixed5)
+        let sanitizedWithAffixes = Self.sanitizeInterleavedComposingPunct(sanitizedAffixed6)
         let finalCandidates: [Candidate]
         if leadingLiteral.isEmpty,
            digitPrefix.isEmpty,

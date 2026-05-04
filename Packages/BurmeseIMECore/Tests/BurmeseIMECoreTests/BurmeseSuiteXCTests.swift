@@ -331,6 +331,10 @@ final class AsatAfterDepVowelXCTests: XCTestCase {
     func testAll() { runSuite(AsatAfterDepVowelSuite.suite, xctest: self) }
 }
 
+final class DoubledLiteralPunctXCTests: XCTestCase {
+    func testAll() { runSuite(DoubledLiteralPunctSuite.suite, xctest: self) }
+}
+
 final class OrphanAsatAfterToneXCTests: XCTestCase {
     func testAll() { runSuite(OrphanAsatAfterToneSuite.suite, xctest: self) }
 }

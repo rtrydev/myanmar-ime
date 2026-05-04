@@ -505,6 +505,95 @@ extension BurmeseEngine {
         return false
     }
 
+    /// TASK-056: drop any candidate whose surface contains a run of
+    /// two or more contiguous composing-punct scalars sitting
+    /// between Myanmar scalars (U+1000–U+109F), where the run
+    /// includes at least one strict-consume punct (`*` U+002A or
+    /// `'` U+0027). The asterisk is the asat marker and the
+    /// apostrophe is the silent inherent-vowel separator — both
+    /// have specific consume-or-fail roles in the romanization
+    /// scheme, and a doubled run cannot satisfy those roles. The
+    /// pre-fix parser leaked the doubled run as raw ASCII into the
+    /// rendered surface (`k**ar` → `က**အာ`, `kar''ka` → `ကာ''က`,
+    /// `k*'ar` → `က*'အာ`), violating the script-purity invariant
+    /// from CLAUDE.md.
+    ///
+    /// Doubled `:`/`.` runs WITHOUT a `*`/`'` companion are NOT
+    /// filtered — those are legitimate document punctuation
+    /// (ellipsis `..`, double-colon `::`) that the user can type
+    /// between Myanmar segments via
+    /// `splitAtLastEmbeddedComposingPunct` (`ka..tar` → `က..တာ`).
+    /// Single `*`/`'` between Myanmar is also legitimate (`k*ar`
+    /// → `က်အာ` where `*` plays its asat role on the previous
+    /// syllable).
+    ///
+    /// Same fallback policy as the other sanitizers: only filter
+    /// when at least one clean candidate exists.
+    internal static func sanitizeInterleavedComposingPunct(_ candidates: [Candidate]) -> [Candidate] {
+        let cleanFiltered = candidates.filter {
+            !surfaceContainsInterleavedComposingPunct($0.surface)
+        }
+        if !cleanFiltered.isEmpty {
+            return cleanFiltered
+        }
+        return candidates
+    }
+
+    @_spi(Testing) public static func surfaceContainsInterleavedComposingPunct(_ surface: String) -> Bool {
+        let scalars = Array(surface.unicodeScalars).map(\.value)
+        guard scalars.count >= 4 else { return false }
+        @inline(__always) func isMyanmar(_ v: UInt32) -> Bool {
+            v >= 0x1000 && v <= 0x109F
+        }
+        @inline(__always) func isStrictConsumePunct(_ v: UInt32) -> Bool {
+            v == 0x002A || v == 0x0027
+        }
+        @inline(__always) func isComposingPunct(_ v: UInt32) -> Bool {
+            v == 0x002A || v == 0x0027 || v == 0x003A || v == 0x002E
+        }
+        // Walk for runs of contiguous composing-punct scalars where
+        // the run contains TWO OR MORE strict-consume chars. A
+        // single strict-consume + a single document-punct (`*.`,
+        // `'.`, `*:`, `':`) is NOT flagged because the strict char
+        // gets consumed by the previous syllable's asat / separator
+        // path, and the trailing `.`/`:` is the legitimate split
+        // point. Two strict-consume chars (`**`, `''`, `*'`, `'*`)
+        // can't both be consumed and the leak is the bug class.
+        var i = 0
+        while i < scalars.count {
+            guard isComposingPunct(scalars[i]) else {
+                i += 1
+                continue
+            }
+            var runEnd = i + 1
+            var strictConsumeCount = isStrictConsumePunct(scalars[i]) ? 1 : 0
+            while runEnd < scalars.count, isComposingPunct(scalars[runEnd]) {
+                if isStrictConsumePunct(scalars[runEnd]) { strictConsumeCount += 1 }
+                runEnd += 1
+            }
+            guard strictConsumeCount >= 2 else {
+                i = runEnd
+                continue
+            }
+            // Scan left for a Myanmar scalar.
+            var leftHasMyanmar = false
+            var j = i - 1
+            while j >= 0 {
+                if isMyanmar(scalars[j]) { leftHasMyanmar = true; break }
+                j -= 1
+            }
+            // Scan right for a Myanmar scalar past the run.
+            var rightHasMyanmar = false
+            var k = runEnd
+            while k < scalars.count {
+                if isMyanmar(scalars[k]) { rightHasMyanmar = true; break }
+                k += 1
+            }
+            if leftHasMyanmar && rightHasMyanmar { return true }
+            i = runEnd
+        }
+        return false
+    }
 
     /// TASK-057: drop any candidate whose surface contains a `<tone>`
     /// marker (U+1037 creaky / U+1038 visarga) immediately followed by
