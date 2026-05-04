@@ -326,4 +326,8 @@ final class EkarCrossCategoryClusterXCTests: XCTestCase {
 final class ExplicitPlusVowelChainXCTests: XCTestCase {
     func testAll() { runSuite(ExplicitPlusVowelChainSuite.suite, xctest: self) }
 }
+
+final class AsatAfterDepVowelXCTests: XCTestCase {
+    func testAll() { runSuite(AsatAfterDepVowelSuite.suite, xctest: self) }
+}
 #endif

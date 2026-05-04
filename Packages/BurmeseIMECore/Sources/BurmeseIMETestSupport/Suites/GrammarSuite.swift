@@ -1,4 +1,4 @@
-import BurmeseIMECore
+@_spi(Testing) import BurmeseIMECore
 
 /// Assert that typing `input` does not produce a legitimate kinzi
 /// candidate with `lower` as the subscript. The task allows two
@@ -691,9 +691,21 @@ public enum GrammarSuite {
         },
 
         TestCase("parse_asatOnIndependentVowel_iiStar_isIllegal") { ctx in
-            let result = SyllableParser().parseCandidates("ii*", maxResults: 1).first
-            ctx.assertEqual(result?.legalityScore ?? -1, 0,
-                "ii*: asat on independent vowel U+1024 must not score as legal")
+            // Direct legality-scan test for the asat-on-independent-vowel
+            // shape. Post-TASK-055, the parser may reach a different
+            // rank-0 parse for `ii*` (e.g. a `<dep-vowel><consonant><asat>`
+            // recovery), so the per-input top-parse legality is no longer
+            // a reliable guard for the underlying scalar invariant. The
+            // direct scan against the malformed scalar sequence remains
+            // the load-bearing assertion: U+1024 is an independent vowel
+            // (outside `isConsonantBase`'s `0x1000..0x1021` range), so
+            // `<1024><103A>` has no legitimate consonant base for the
+            // asat to anchor.
+            let s = String(String.UnicodeScalarView(
+                [0x1024, 0x103A].compactMap(Unicode.Scalar.init)
+            ))
+            ctx.assertFalse(SyllableParser.scanOutputLegality(s),
+                "1024 103A: asat on independent vowel must fail scanOutputLegality")
         },
 
         TestCase("parse_asatOnIndependentVowel_u2Star_isIllegal") { ctx in
@@ -709,9 +721,18 @@ public enum GrammarSuite {
         },
 
         TestCase("parse_doubleAsat_kaStarStar_isIllegal") { ctx in
-            let result = SyllableParser().parseCandidates("ka**", maxResults: 1).first
-            ctx.assertEqual(result?.legalityScore ?? -1, 0,
-                "ka**: two consecutive asats must not score as legal")
+            // Direct legality-scan test. Post-TASK-055 the parser
+            // collapses `103A 103A` runs to a single asat in
+            // `materialize`, so the top-parse output for `ka**` is now
+            // the legal `<C><103A>` (`က်`) — not the malformed
+            // doubled-asat shape. The architectural invariant the test
+            // is enforcing is that the doubled-asat scalar sequence
+            // itself fails `scanOutputLegality`; check that directly.
+            let s = String(String.UnicodeScalarView(
+                [0x1000, 0x103A, 0x103A].compactMap(Unicode.Scalar.init)
+            ))
+            ctx.assertFalse(SyllableParser.scanOutputLegality(s),
+                "1000 103A 103A: two consecutive asats must fail scanOutputLegality")
         },
 
         TestCase("parse_leadingAsat_StarKa_isIllegal") { ctx in

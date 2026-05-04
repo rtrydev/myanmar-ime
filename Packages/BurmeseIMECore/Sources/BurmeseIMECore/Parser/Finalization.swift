@@ -402,6 +402,39 @@ extension SyllableParser {
                 }
             } else if v == 0x103A {
                 var j = i - 1
+                // TASK-055: a dependent vowel sitting between the asat
+                // and the consonant base is NOT generally skippable.
+                // The only legal `<C><dep-vowel><103A>` shape is the
+                // `aw`-cluster `<C><1031><102B|102C><103A>` — every
+                // other dep-vowel (short/long i, short/long u, the
+                // o-cluster `102D 102F`, lone aa `102B|102C`, lone
+                // e-kar `1031` without aa, the ai-vowel `1032`) does
+                // not legitimately take a trailing asat. The walk
+                // therefore handles dep-vowels via a structured
+                // window check: peel the optional aw-cluster, then
+                // continue through medials / U+1036 to the consonant
+                // base.
+                if j >= 0 {
+                    let w0 = indices[j].value
+                    if w0 >= 0x102B && w0 <= 0x1032 {
+                        // Try the aw-cluster: `1031 (102B|102C) 103A`.
+                        if (w0 == 0x102B || w0 == 0x102C),
+                           j >= 1, indices[j - 1].value == 0x1031 {
+                            // Walked across the aw-cluster; resume the
+                            // medial/anusvara walk from before `1031`.
+                            j -= 2
+                        } else {
+                            // Any other dep-vowel before the asat —
+                            // including short/long i (102D/E),
+                            // short/long u (102F/30), the o-cluster
+                            // (102D 102F), bare aa (102B/C without
+                            // 1031), bare e-kar (1031 with no aa),
+                            // and the ai-vowel (1032) — yields a
+                            // malformed `<C><dep-vowel><103A>` shape.
+                            return false
+                        }
+                    }
+                }
                 while j >= 0 {
                     let w = indices[j].value
                     // Visarga U+1038 closes the syllable — its legal
@@ -433,8 +466,14 @@ extension SyllableParser {
                         }
                         return false
                     }
-                    let isSkippable = (w >= 0x102B && w <= 0x1032)
-                        || w == 0x1036
+                    // After the structured aw-cluster peel above,
+                    // dep-vowels in the U+102B..U+1032 range cannot
+                    // legitimately appear between the asat and the
+                    // base. Reject any encountered here.
+                    if w >= 0x102B && w <= 0x1032 {
+                        return false
+                    }
+                    let isSkippable = w == 0x1036
                         || (w >= 0x103B && w <= 0x103E)
                     if isSkippable { j -= 1 } else { break }
                 }
@@ -790,7 +829,58 @@ extension SyllableParser {
         let strippedBoundaries = Self.remapBoundariesAfterStripAsat(
             raw: canonicalized, processed: stripped, boundaries: canonicalizedBoundaries
         )
-        return (stripped, reading, strippedBoundaries)
+        let collapsed = Self.collapseDoubledAsat(stripped)
+        let collapsedBoundaries = Self.remapBoundariesAfterStripAsat(
+            raw: stripped, processed: collapsed, boundaries: strippedBoundaries
+        )
+        return (collapsed, reading, collapsedBoundaries)
+    }
+
+    /// Collapse runs of consecutive U+103A asat scalars to a single
+    /// asat. The DP can pair up an asat-bearing vowel rule (e.g.
+    /// `aw` → `ော်` ending in `103A`, `aung` → `ောင်` ending in
+    /// `103A`) with a redundant trailing `*` that the user typed,
+    /// emitting `<C><…>103A 103A` in the materialised surface. Each
+    /// `103A` past the first is structurally redundant — they all
+    /// suppress the same inherent vowel — and the chain fails the
+    /// post-finalize legality scan. Collapsing the run to a single
+    /// asat preserves the user's syllable closure intent and lets
+    /// the asat-after-asat-vowel-rule case (`naung*`, `kaw*`,
+    /// `kyaw*ka`, `min*ka`) round-trip cleanly. The same collapse
+    /// also handles the doubled-`*` (`ka**`) case the existing
+    /// `RedundantExplicitAsatSuite` covered before TASK-055
+    /// tightened `scanOutputLegality`.
+    internal static func collapseDoubledAsat(_ text: String) -> String {
+        // Fast path: scalar walk without array materialization. Most
+        // surfaces never have a doubled asat — return the input
+        // string verbatim with no allocation when the cheap scan
+        // confirms no `103A 103A` adjacency.
+        var sawDouble = false
+        var prevWasAsat = false
+        for scalar in text.unicodeScalars {
+            if scalar.value == 0x103A {
+                if prevWasAsat { sawDouble = true; break }
+                prevWasAsat = true
+            } else {
+                prevWasAsat = false
+            }
+        }
+        guard sawDouble else { return text }
+        let scalars = Array(text.unicodeScalars)
+        var output: [Unicode.Scalar] = []
+        output.reserveCapacity(scalars.count)
+        for s in scalars {
+            if s.value == 0x103A, output.last?.value == 0x103A {
+                continue
+            }
+            output.append(s)
+        }
+        var result = ""
+        result.unicodeScalars.reserveCapacity(output.count)
+        for s in output {
+            result.unicodeScalars.append(s)
+        }
+        return result
     }
 
     /// Used inside `materialize` when leading-A promotion fires: the

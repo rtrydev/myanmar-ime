@@ -95,11 +95,15 @@ public enum DigitAsatLiteralSuite {
     ]
 
     /// Regression-guard cases: existing intentional `*`-as-asat paths
-    /// that must keep their pre-fix rank-0 surface.
+    /// that must keep their pre-fix rank-0 surface. `kar*` updated for
+    /// TASK-055 — the tightened legality scan rejects the malformed
+    /// `<C><102C><103A>` shape (`ကာ်`), so the legitimate
+    /// `<C><consonant><103A>` sibling (`ကရ်` = `1000 101B 103A`)
+    /// wins at rank 0.
     private static let asatPaths: [(buffer: String, expected: String)] = [
         ("*",   "*"),      // bare `*` → literal asterisk
         ("k*",  "က်"),     // explicit asat on `k` → 1000 103A
-        ("kar*", "ကာ်"),   // tall-aa + asat → 1000 102C 103A
+        ("kar*", "ကရ်"),   // post-TASK-055 → 1000 101B 103A
         // `ai*` parses as `အိုင်` — the engine prefers the
         // diphthong-reading where the trailing `*` is absorbed as
         // the asat that closes the syllable.

@@ -68,9 +68,14 @@ public enum RedundantExplicitAsatSuite {
     ]
 
     /// Counter-examples that work today and must continue to work.
+    /// `kyar*` updated for TASK-055: the malformed
+    /// `<C><medial><dep-vowel><103A>` shape (`ကျာ်`) is rejected by
+    /// the tightened legality scan, so the legitimate
+    /// `<C><medial><consonant><103A>` sibling (`ကျရ်` =
+    /// `1000 103B 101B 103A`) wins at rank 0.
     private static let counterExamples: [(buffer: String, expected: String)] = [
         ("ka*",     "\u{1000}\u{103A}"),                                                    // က်
-        ("kyar*",   "\u{1000}\u{103B}\u{102C}\u{103A}"),                                    // ကျာ်
+        ("kyar*",   "\u{1000}\u{103B}\u{101B}\u{103A}"),                                    // ကျရ်
         ("kya*kar", "\u{1000}\u{103B}\u{103A}\u{1000}\u{102C}"),                            // ကျ်ကာ
         ("ka***",   "\u{1000}\u{103A}"),                                                    // က်
     ]

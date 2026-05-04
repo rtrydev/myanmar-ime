@@ -839,11 +839,22 @@ public final class SyllableParser: Sendable {
             if bestLegal < 0 && bestIllegal < 0 { continue }
 
             var probeAccepted = false
+            // TASK-055: track whether the rejected probe surface looks
+            // like the asat-after-dep-vowel shape so the recovery
+            // path below runs `finalizeStates` only when the cheap
+            // probe rejection is plausibly due to a sibling parse
+            // being needed. Cheap shape check: surface ends in
+            // U+103A and the scalar before is a dep-vowel
+            // (U+102B..U+1032). Skipping the recovery on other
+            // rejections keeps `+`-chain and cluster-alias-heavy
+            // inputs on the fast path.
+            var probeHasAsatAfterDepVowel = false
             for idx in [bestLegal, bestIllegal] where idx >= 0 {
                 let s = arena[Int(idx)]
                 let (output, reading, _) = materialize(stateIdx: idx, arena: arena)
+                let adjusted = adjustLeadingVowel(output)
                 let probe = SyllableParse(
-                    output: adjustLeadingVowel(output),
+                    output: adjusted,
                     reading: reading,
                     aliasCost: s.aliasCost,
                     legalityScore: s.isLegal ? s.legalityScore : 0,
@@ -856,6 +867,42 @@ public final class SyllableParser: Sendable {
                     probeAccepted = true
                     break
                 }
+                if !probeHasAsatAfterDepVowel {
+                    let scalars = Array(adjusted.unicodeScalars).map(\.value)
+                    if scalars.count >= 2,
+                       scalars.last == 0x103A,
+                       let prev = scalars.dropLast().last,
+                       prev >= 0x102B && prev <= 0x1032 {
+                        probeHasAsatAfterDepVowel = true
+                    }
+                }
+            }
+            // TASK-055: a DP-best-legal state can materialize to a
+            // surface that fails post-materialization checks (the
+            // asat-after-dep-vowel `<C><102C><103A>` shape — DP marks
+            // it legal because each transition's per-rule legality
+            // is positive, but `scanOutputLegality` rejects the
+            // assembled cluster). When the cheap probe rejects AND
+            // the rejected surface matches the asat-after-dep-vowel
+            // signature, run the full `finalizeStates` materialization
+            // (legality re-scan, leading-vowel adjust) and re-test
+            // acceptability against every top-K parse. This recovers
+            // legitimate sibling parses (e.g. `kar*`'s `ကရ်`) that
+            // were dominated by the malformed `ကာ်` in the cheap DP
+            // comparator but materialize cleanly. Gated on the shape
+            // signature so `+`-chain / cluster-alias-heavy inputs
+            // don't pay the recovery cost on every right-shrink step.
+            if !probeAccepted, bestLegal >= 0, probeHasAsatAfterDepVowel {
+                let parses = finalizeStates(
+                    arena: arena,
+                    finalIndices: dp[k].stateIndices,
+                    limit: finalizationLimit,
+                    requestedReading: String(chars.prefix(k))
+                )
+                if parses.contains(where: acceptable) {
+                    return (k, Array(parses.prefix(maxResults)))
+                }
+                continue
             }
             guard probeAccepted else { continue }
 
