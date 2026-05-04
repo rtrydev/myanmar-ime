@@ -140,6 +140,41 @@ public enum PropertySuite {
         }
     }
 
+    /// True iff `surface` contains a `<digit>` (ASCII or Myanmar)
+    /// scalar immediately followed by U+103A (asat). The asat needs a
+    /// consonant base on its left; digits never serve as one, so this
+    /// adjacency is a structural orthography violation.
+    private static func surfaceContainsDigitBeforeAsat(_ surface: String) -> Bool {
+        let scalars = Array(surface.unicodeScalars).map(\.value)
+        guard scalars.count >= 2 else { return false }
+        for i in 1..<scalars.count {
+            let prev = scalars[i - 1]
+            let isDigit = (prev >= 0x30 && prev <= 0x39)
+                || (prev >= 0x1040 && prev <= 0x1049)
+            guard isDigit else { continue }
+            if scalars[i] == 0x103A { return true }
+        }
+        return false
+    }
+
+    /// True iff `surface` contains a `<digit><1021><103A>` adjacency —
+    /// the indirect-via-`အ` shape that TASK-052 targets. The orphan-
+    /// mark anchor injector inserts U+1021 to satisfy an asat that has
+    /// no consonant base; when the asat sits after a digit the
+    /// injection produces this signature cluster (`1*` → `၁အ်`).
+    private static func surfaceContainsDigitIndependentAAsat(_ surface: String) -> Bool {
+        let scalars = Array(surface.unicodeScalars).map(\.value)
+        guard scalars.count >= 3 else { return false }
+        for i in 2..<scalars.count {
+            let prev = scalars[i - 2]
+            let isDigit = (prev >= 0x30 && prev <= 0x39)
+                || (prev >= 0x1040 && prev <= 0x1049)
+            guard isDigit else { continue }
+            if scalars[i - 1] == 0x1021 && scalars[i] == 0x103A { return true }
+        }
+        return false
+    }
+
     public static let suite: TestSuite = {
         var cases: [TestCase] = []
 
@@ -323,6 +358,50 @@ public enum PropertySuite {
                            "slidingWindow_knownDivergent_drift",
                            detail: "these buffers are no longer divergent and can be " +
                                "promoted to the whitelist: \(stillConverged)")
+        })
+
+        // MARK: - Property 4b: no `<digit>(1021)?103A` adjacency in any
+        // candidate (TASK-052). Asat requires a consonant base on its
+        // left — digits never serve as one. The randomly-generated
+        // buffer set used by other property cases never includes
+        // digits or `*`, so this case generates its own corpus from
+        // an alphabet that DOES include both.
+        cases.append(TestCase("property_noDigitBeforeAsat_acrossSources") { ctx in
+            var rng = SeededRandom(seed: 0xD162_A5A7_8FAC_5252)
+            let engine = BurmeseEngine()
+            // Curated reproductions from TASK-052 plus a deterministic
+            // random sample drawn from {a-z, 0-9, *, +, :, .}.
+            var buffers: [String] = [
+                "1*", "1*1", "12*34", "1*2*3", "12*",
+                "1*ka", "ka1*", "ka12*", "1*+ka", "1*ka1*",
+                "min1*ga", "0*0", "9*9*9", "*1*",
+            ]
+            let alphabet: [Character] = Array("abcdefghijklmnopqrstuvwxyz0123456789*+:.")
+            for _ in 0..<800 {
+                let len = Int(rng.next() % 18) + 2
+                var chars: [Character] = []
+                chars.reserveCapacity(len)
+                for _ in 0..<len { chars.append(rng.pick(alphabet)) }
+                buffers.append(String(chars))
+            }
+            var failures = 0
+            var firstFailure: String?
+            for buffer in buffers {
+                let state = engine.update(buffer: buffer, context: [])
+                for cand in state.candidates {
+                    if surfaceContainsDigitIndependentAAsat(cand.surface)
+                        || surfaceContainsDigitBeforeAsat(cand.surface) {
+                        failures += 1
+                        if firstFailure == nil {
+                            firstFailure =
+                                "buffer=\(buffer) surface=\(cand.surface) source=\(cand.source)"
+                        }
+                        break
+                    }
+                }
+            }
+            ctx.assertEqual(failures, 0,
+                            "digitBeforeAsat_\(firstFailure ?? "ok")")
         })
 
         // MARK: - Property 5: anchor monotonicity (bounded tolerance)

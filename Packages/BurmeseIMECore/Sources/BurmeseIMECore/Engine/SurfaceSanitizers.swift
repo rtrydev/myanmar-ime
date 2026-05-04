@@ -465,6 +465,46 @@ extension BurmeseEngine {
         return candidates
     }
 
+    /// TASK-052: drop any candidate whose surface contains a `<digit>`
+    /// (ASCII U+0030..U+0039 or Myanmar U+1040..U+1049) immediately
+    /// followed by U+103A (asat), or by U+1021 then U+103A (the
+    /// indirect-via-`အ` orphan-anchor shape). Asat needs a consonant
+    /// base on its left to anchor the U+103A scalar — digits never
+    /// serve as that base, so both adjacencies are structural
+    /// orthography violations. Like the other sanitizers, the filter
+    /// only runs when at least one clean candidate exists; otherwise
+    /// the panel keeps the violating candidates so the user is not
+    /// left without a Myanmar surface to commit.
+    internal static func sanitizeDigitOrphanAsat(_ candidates: [Candidate]) -> [Candidate] {
+        let cleanFiltered = candidates.filter {
+            !surfaceContainsDigitOrphanAsat($0.surface)
+        }
+        if !cleanFiltered.isEmpty {
+            return cleanFiltered
+        }
+        return candidates
+    }
+
+    @_spi(Testing) public static func surfaceContainsDigitOrphanAsat(_ surface: String) -> Bool {
+        let scalars = Array(surface.unicodeScalars).map(\.value)
+        @inline(__always) func isDigit(_ v: UInt32) -> Bool {
+            (v >= 0x30 && v <= 0x39) || (v >= 0x1040 && v <= 0x1049)
+        }
+        if scalars.count >= 2 {
+            for i in 1..<scalars.count {
+                guard isDigit(scalars[i - 1]) else { continue }
+                if scalars[i] == 0x103A { return true }
+            }
+        }
+        if scalars.count >= 3 {
+            for i in 2..<scalars.count {
+                guard isDigit(scalars[i - 2]) else { continue }
+                if scalars[i - 1] == 0x1021 && scalars[i] == 0x103A { return true }
+            }
+        }
+        return false
+    }
+
     @_spi(Testing) public static func surfaceContainsDoubledCodaChain(_ surface: String) -> Bool {
         let scalars = Array(surface.unicodeScalars).map(\.value)
         guard scalars.count >= 4 else { return false }

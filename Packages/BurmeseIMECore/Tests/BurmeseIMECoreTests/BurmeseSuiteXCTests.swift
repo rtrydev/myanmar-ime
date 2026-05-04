@@ -314,4 +314,8 @@ final class LiteralFallbackPrefixedRepetitionXCTests: XCTestCase {
 final class MultiStackTrailingToneXCTests: XCTestCase {
     func testAll() { runSuite(MultiStackTrailingToneSuite.suite, xctest: self) }
 }
+
+final class DigitAsatLiteralXCTests: XCTestCase {
+    func testAll() { runSuite(DigitAsatLiteralSuite.suite, xctest: self) }
+}
 #endif

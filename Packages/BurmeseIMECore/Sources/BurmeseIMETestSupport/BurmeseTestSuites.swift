@@ -97,5 +97,6 @@ public enum BurmeseTestSuites {
         MultiStackTrailingToneSuite.suite,
         BenchBaselineFormatSuite.suite,
         ClusterAliasRepeatPerfSuite.suite,
+        DigitAsatLiteralSuite.suite,
     ]
 }

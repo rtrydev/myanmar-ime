@@ -32,6 +32,17 @@ extension BurmeseEngine {
     /// both sides. Trailing-digit shapes (`u2`, `pa2`) and digits sitting
     /// beside non-letter composables (`u2:`, `u.2`, `min2+ga`) keep the
     /// existing literal-tail behaviour.
+    ///
+    /// TASK-052 guard: a digit run is also NOT extracted when its
+    /// trailing letter run (the chars between the digit run and the
+    /// next non-composing-letter boundary) contains a `*` (asat
+    /// marker). The `*` binds to its nearest preceding consonant in
+    /// the user's intended scalar order; extracting the digit collapses
+    /// the user's `<digit><letters with *>` shape into `<letters with
+    /// *>`, which the parser may then mis-segment so the asat anchors
+    /// to a phantom U+1021 instead of the consonant the user typed
+    /// after the digit. Keeping the digits literal in that case
+    /// preserves the positional context the parser needs.
     static func extractMidBufferDigits(
         _ buffer: String
     ) -> (cleaned: String, insertions: [(offset: Int, digit: Character)]) {
@@ -55,7 +66,10 @@ extension BurmeseEngine {
                 while j < chars.count, isAsciiDigit(chars[j]) { j += 1 }
                 let precededByLetter = i >= 1 && isAsciiLowerLetter(chars[i - 1])
                 let followedByLetter = j < chars.count && isAsciiLowerLetter(chars[j])
-                if precededByLetter && followedByLetter {
+                let trailingRunHasAsat = trailingLetterRunContainsAsterisk(
+                    chars: chars, from: j
+                )
+                if precededByLetter && followedByLetter && !trailingRunHasAsat {
                     for k in i..<j {
                         insertions.append((cleaned.count, chars[k]))
                     }
@@ -69,6 +83,26 @@ extension BurmeseEngine {
             }
         }
         return (String(cleaned), insertions)
+    }
+
+    /// True when the contiguous run of composing-letter chars starting
+    /// at `start` contains an `*` (asat marker) before hitting a
+    /// non-letter / non-`*` boundary or the end of `chars`. Used by
+    /// `extractMidBufferDigits` to skip extraction of a digit run that
+    /// sits immediately before a letter run carrying an explicit asat
+    /// marker — see the TASK-052 comment on `extractMidBufferDigits`
+    /// for the bug class this guard prevents.
+    private static func trailingLetterRunContainsAsterisk(
+        chars: [Character], from start: Int
+    ) -> Bool {
+        var k = start
+        while k < chars.count {
+            let ch = chars[k]
+            if isAsciiLowerLetter(ch) { k += 1; continue }
+            if ch == "*" { return true }
+            return false
+        }
+        return false
     }
 
     /// Splice mid-buffer digits back into candidate surfaces. For each
@@ -340,13 +374,17 @@ extension BurmeseEngine {
             }
             // Snap past a closing asat that is bound to the cluster on
             // its left. `prev` belonging to the cluster means: a
-            // consonant base, medial, dep-vowel sign, or anusvara.
-            // Without this the digit would land between (vowel | medial)
-            // and the asat that closes the same syllable.
+            // consonant base, medial, dep-vowel sign, anusvara, or a
+            // tone mark (creaky / visarga) that the parser placed
+            // before the asat as part of the same syllable. Without
+            // this the digit would land between (vowel | medial | tone)
+            // and the asat that closes the same syllable, producing the
+            // `<digit><asat>` shape MidBufferDigitAsatSplitSuite (and
+            // TASK-052) forbid.
             if cur == 0x103A,
                (prev >= 0x1000 && prev <= 0x1021)
                 || (prev >= 0x102B && prev <= 0x1032)
-                || (prev >= 0x1036 && prev <= 0x1036)
+                || (prev >= 0x1036 && prev <= 0x1038)
                 || (prev >= 0x103B && prev <= 0x103E) {
                 p += 1
                 continue
@@ -398,25 +436,86 @@ extension BurmeseEngine {
     /// Non-letter characters (digits, already-mapped punctuation) pass
     /// through unchanged; the caller handles digit→Myanmar conversion on
     /// the primary candidate variant.
+    ///
+    /// TASK-052: when a letter run starts with one or more `*` chars
+    /// AND the immediately preceding non-composing character was an
+    /// ASCII digit, peel those leading `*` chars and emit them
+    /// verbatim instead of letting `composedLetterRunSurface` strip
+    /// them. Asat needs a consonant base on its left to anchor the
+    /// U+103A scalar; digits never serve as that base, so the user's
+    /// typed asterisk must surface as a literal `*` rather than
+    /// silently disappearing (the pre-fix `ka1*` → `က၁` shape, which
+    /// dropped the typed `*` from the rank-0 surface entirely).
     internal func composeLetterRunsInTail(_ tail: String) -> String {
         guard !tail.isEmpty else { return tail }
         var result = ""
         var letterRun = ""
+        var prevNonComposingWasAsciiDigit = false
         for ch in tail {
             if Romanization.composingCharacters.contains(ch) {
                 letterRun.append(ch)
             } else {
                 if !letterRun.isEmpty {
-                    result += composedLetterRunSurface(letterRun)
+                    result += emitLetterRun(
+                        letterRun,
+                        preserveLeadingAsterisks: prevNonComposingWasAsciiDigit
+                    )
                     letterRun = ""
                 }
                 result.append(ch)
+                prevNonComposingWasAsciiDigit = Self.isAsciiDigit(ch)
             }
         }
         if !letterRun.isEmpty {
-            result += composedLetterRunSurface(letterRun)
+            result += emitLetterRun(
+                letterRun,
+                preserveLeadingAsterisks: prevNonComposingWasAsciiDigit
+            )
         }
         return result
+    }
+
+    /// Emit one letter run from the tail composer. When
+    /// `preserveLeadingAsterisks` is true, peel leading `*` chars off
+    /// the run and surface them verbatim before handing the remainder
+    /// to `composedLetterRunSurface` (which would otherwise strip
+    /// them as redundant asat closers — see TASK-008 / TASK-052).
+    ///
+    /// Also when `preserveLeadingAsterisks` is true and the composed
+    /// surface for the run begins with the orphan-anchor cluster
+    /// `1021 103A`, fall back to the literal run. The user typed
+    /// `<digit><letter-run-with-*>` and the parser produced an orphan
+    /// asat that the sanitizer anchored to a phantom `အ`; with a
+    /// digit on the left side (the run's previous emit) the resulting
+    /// `<digit>1021103A` adjacency is the TASK-052 violation we are
+    /// guarding against. Surfacing the run verbatim keeps the
+    /// invariant intact while still preserving the user's keystrokes.
+    private func emitLetterRun(
+        _ run: String,
+        preserveLeadingAsterisks: Bool
+    ) -> String {
+        guard preserveLeadingAsterisks else {
+            return composedLetterRunSurface(run)
+        }
+        var preserved = ""
+        var rest = run
+        while rest.first == "*" {
+            preserved.append("*")
+            rest.removeFirst()
+        }
+        if rest.isEmpty { return preserved }
+        let composed = composedLetterRunSurface(rest)
+        if composed.unicodeScalars.starts(with: [
+            Unicode.Scalar(0x1021)!,
+            Unicode.Scalar(0x103A)!,
+        ]) {
+            // Orphan-anchor cluster would land immediately after the
+            // digit. Fall back to the original run so the user's
+            // keystrokes round-trip cleanly instead of materialising
+            // the malformed `<digit>1021103A` adjacency.
+            return preserved + rest
+        }
+        return preserved + composed
     }
 
     internal func composedLetterRunSurface(_ run: String) -> String {
@@ -590,5 +689,50 @@ extension BurmeseEngine {
             return (String(buffer[..<firstNonDigit]), String(buffer[firstNonDigit...]))
         }
         return (buffer, "")
+    }
+
+    /// TASK-052 extension of `splitLeadingDigits`. When the buffer
+    /// starts with at least one ASCII digit, this peels the digit run
+    /// AND any immediately-following `*` (asat-marker) chars and
+    /// further interleaved digit runs into a single literal prefix.
+    /// The `*` chars surface verbatim because asat needs a consonant
+    /// base on its left, which digits never provide.
+    ///
+    /// Examples:
+    ///   `1*`     → ("1*",     "")
+    ///   `12*`    → ("12*",    "")
+    ///   `1*1`    → ("1*1",    "")
+    ///   `12*34`  → ("12*34",  "")
+    ///   `1*2*3`  → ("1*2*3",  "")
+    ///   `1*ka`   → ("1*",     "ka")
+    ///   `12*ka`  → ("12*",    "ka")
+    ///
+    /// When the buffer does not start with a digit, behaves like
+    /// `splitLeadingDigits` (does not consume `*`s, since a leading
+    /// `*` without preceding digits is handled by `splitLeadingLiteral`
+    /// upstream or is part of an `<letter>*` asat-marker pair).
+    internal static func splitLeadingDigitsAndAdjacentAsterisks(
+        _ buffer: String
+    ) -> (digits: String, remainder: String) {
+        let (head, tail) = splitLeadingDigits(buffer)
+        guard !head.isEmpty else { return (head, tail) }
+        var prefix = head
+        var rest = tail
+        while true {
+            var consumed = false
+            while rest.first == "*" {
+                prefix.append("*")
+                rest.removeFirst()
+                consumed = true
+            }
+            let (moreDigits, after) = splitLeadingDigits(rest)
+            if !moreDigits.isEmpty {
+                prefix += moreDigits
+                rest = after
+                consumed = true
+            }
+            if !consumed { break }
+        }
+        return (prefix, rest)
     }
 }

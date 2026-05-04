@@ -291,6 +291,15 @@ public final class BurmeseEngine: @unchecked Sendable {
         // sibling, and the filter pass can promote the legal
         // candidates above the violators.
         injected.candidates = Self.sanitizeDoubledCodaChain(injected.candidates)
+        // TASK-052: same pattern — re-run the digit-orphan-asat
+        // sanitizer with the literal fallback in place. Inside
+        // `updateInternal` the panel may not yet contain a candidate
+        // free of the `<digit>(1021)?103A` adjacency (every parser
+        // surface for a `<digit><vowel-letter>*` shape carries the
+        // orphan-anchor cluster). Once the literal-fallback (raw
+        // buffer verbatim) lands, the filter sees a clean sibling and
+        // can promote it past the malformed Myanmar candidates.
+        injected.candidates = Self.sanitizeDigitOrphanAsat(injected.candidates)
         return injected
     }
 
@@ -469,7 +478,20 @@ public final class BurmeseEngine: @unchecked Sendable {
         // Strip leading ASCII digits — they convert directly to Myanmar
         // digits and are prepended to candidate surfaces after the
         // composable portion is parsed.
-        let (digitPrefix, postDigitBuffer) = Self.splitLeadingDigits(postLeadingLiteralBuffer)
+        //
+        // TASK-052: when digits are present at the head, also peel any
+        // immediately-following `*` (asat-marker) chars and any further
+        // interleaved digit runs into the prefix. The asat marker
+        // requires a consonant base on its left to anchor the U+103A
+        // scalar — digits never serve as that base. Letting `*` reach
+        // the parser in this position produces a `200C 103A` orphan
+        // that the orphan-mark sanitizer then anchors to a phantom
+        // U+1021 (`အ`), surfacing the malformed `<digit> 1021 103A`
+        // cluster (`1*` → `၁အ်`). Folding the `*` chars into the
+        // digit-prefix run treats them as literal pass-throughs:
+        // `1*` → `၁*`, `1*ka` → `၁*က`, `12*34` → `၁၂*၃၄`.
+        let (digitPrefix, postDigitBuffer) =
+            Self.splitLeadingDigitsAndAdjacentAsterisks(postLeadingLiteralBuffer)
         // Candidates are generated only from the leading run of composing
         // characters. Anything after the first non-composing character
         // (punctuation, whitespace, etc.) is held aside and emitted verbatim
@@ -2120,7 +2142,8 @@ public final class BurmeseEngine: @unchecked Sendable {
         let sanitizedAffixed = Self.sanitizeMalformedMyanmarMarks(mergedWithAffixes)
         let sanitizedAffixed2 = Self.sanitizeIndepVowelVirama(sanitizedAffixed)
         let sanitizedAffixed3 = Self.sanitizeAdjacentIndependentVowels(sanitizedAffixed2)
-        let sanitizedWithAffixes = Self.sanitizeDoubledCodaChain(sanitizedAffixed3)
+        let sanitizedAffixed4 = Self.sanitizeDoubledCodaChain(sanitizedAffixed3)
+        let sanitizedWithAffixes = Self.sanitizeDigitOrphanAsat(sanitizedAffixed4)
         let finalCandidates: [Candidate]
         if leadingLiteral.isEmpty,
            digitPrefix.isEmpty,
