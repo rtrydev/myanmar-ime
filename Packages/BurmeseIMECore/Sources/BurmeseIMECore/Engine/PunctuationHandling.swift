@@ -137,6 +137,38 @@ extension BurmeseEngine {
         return (toned, remainder)
     }
 
+    /// TASK-049: split a composed tail of shape `<Myanmar-body><:|.>`
+    /// off into its body and trailing tone marker so the engine can
+    /// attach the tone scalar to `candidate.surface + body` rather
+    /// than to `candidate.surface` alone. Returns `nil` when the
+    /// tail does not end in a tone marker, when the tone is
+    /// preceded by an ASCII letter (mid-buffer literal — same
+    /// guard `applyBareConsonantToneFromTail` itself applies), or
+    /// when the body still contains ASCII letters (composition
+    /// failed; routing through tone attachment would interleave
+    /// scripts).
+    internal static func splitTrailingComposedTaggedTone(
+        _ tail: String
+    ) -> (body: String, tone: String)? {
+        guard let last = tail.last else { return nil }
+        guard last == ":" || last == "." else { return nil }
+        let body = String(tail.dropLast())
+        if let prev = body.last, prev.isLetter, prev.isASCII {
+            return nil
+        }
+        // Reject when the body still has ASCII letters — that means
+        // the parser couldn't compose the tail cleanly and there is
+        // residual romanization present. Attaching a tone scalar to
+        // such a mixed-script surface would entrench the
+        // interleaved-Latin invariant violation.
+        if body.unicodeScalars.contains(where: {
+            ($0.value >= 0x41 && $0.value <= 0x5A) || ($0.value >= 0x61 && $0.value <= 0x7A)
+        }) {
+            return nil
+        }
+        return (body, String(last))
+    }
+
     /// Insert `toneScalar` into a candidate surface at the
     /// orthographically correct position for Burmese tone marking.
     /// Returns nil if the surface does not match a tone-eligible

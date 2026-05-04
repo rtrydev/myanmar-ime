@@ -444,6 +444,27 @@ extension BurmeseEngine {
         // `အယ်`, not `အအယ်`).
         let parses = parser.parseCandidates(normalized, maxResults: 4, isFullBuffer: false)
         guard !parses.isEmpty else { return run }
+        // TASK-049: detect the case where the tail's parser parse
+        // silently absorbed a trailing tone marker via a `.skip` arc
+        // (parses[0].score < 0 with input ending in `:` or `.`),
+        // and route through `composedLetterRunSurface` against the
+        // pre-tone body so the tone can be re-attached by the
+        // engine's affix-merge branch instead of vanishing.
+        let topScore = parses.first?.score ?? 0
+        if topScore < 0,
+           let last = normalized.last,
+           last == ":" || last == "." {
+            let body = String(normalized.dropLast())
+            // Don't recurse on an empty body (a bare tone marker —
+            // there is no anchor in this tail to attach to). Return
+            // the marker verbatim so the engine's affix-merge branch
+            // sees `:` / `.` at the start of effectiveTail and routes
+            // through `applyBareConsonantToneFromTail` against the
+            // candidate surface.
+            if body.isEmpty { return run }
+            let bodySurface = composedLetterRunSurface(body)
+            return bodySurface + String(last)
+        }
         // Pick the highest-ranked parse whose surface is orthographically
         // clean. We accept legality 0 here (the tail couldn't be DP-legal
         // anyway, otherwise it wouldn't be in the dropped tail), but the

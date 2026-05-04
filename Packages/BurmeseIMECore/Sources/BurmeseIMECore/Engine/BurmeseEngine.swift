@@ -2045,6 +2045,18 @@ public final class BurmeseEngine: @unchecked Sendable {
                     // typing of `<C>:` / `<C>.` is the heavy / creaky
                     // tone; the literal fallback stays accessible for
                     // English-text-mid-buffer cases.
+                    //
+                    // TASK-049: extend the same logic to a tail of
+                    // shape `<Myanmar-prefix><:|.>` — when the right-
+                    // shrink probe drops a longer tail
+                    // (`+ka:` for `ka+ka+ka:`) and the tail composer
+                    // renders the prefix verbatim while preserving
+                    // the trailing tone marker, the tone still
+                    // belongs to the END of the full surface
+                    // (candidate.surface + tail-prefix). Try
+                    // attaching the tone to the combined surface
+                    // first, falling back to the candidate-only
+                    // attachment when that doesn't apply.
                     if let toned = Self.applyBareConsonantToneFromTail(
                         candidateSurface: candidate.surface,
                         tail: candidateTail
@@ -2057,6 +2069,32 @@ public final class BurmeseEngine: @unchecked Sendable {
                                 source: candidate.source,
                                 score: candidate.score
                             ))
+                        }
+                    } else if let split = Self.splitTrailingComposedTaggedTone(candidateTail),
+                              !split.body.isEmpty {
+                        // TASK-049: the right-shrink probe peeled a
+                        // longer tail (`+ka:`-shape from
+                        // `ka+ka+ka:`) which the tail composer
+                        // rendered as Myanmar body + trailing tone
+                        // marker. Treat the candidate's combined
+                        // surface (candidate.surface + composed-tail
+                        // body) as the toned target and attach the
+                        // scalar at its end, instead of dropping
+                        // the tone or wedging it as a literal.
+                        let combined = candidate.surface + split.body
+                        if let toned = Self.applyBareConsonantToneFromTail(
+                            candidateSurface: combined,
+                            tail: split.tone
+                        ) {
+                            let tonedSurface = leadingLiteral + digitPrefix + toned.surface + toned.remainder
+                            if seen.insert(tonedSurface).inserted {
+                                expanded.append(Candidate(
+                                    surface: tonedSurface,
+                                    reading: fullReading,
+                                    source: candidate.source,
+                                    score: candidate.score
+                                ))
+                            }
                         }
                     }
                     if seen.insert(surface).inserted {

@@ -310,4 +310,8 @@ final class AsatAfterToneXCTests: XCTestCase {
 final class LiteralFallbackPrefixedRepetitionXCTests: XCTestCase {
     func testAll() { runSuite(LiteralFallbackPrefixedRepetitionSuite.suite, xctest: self) }
 }
+
+final class MultiStackTrailingToneXCTests: XCTestCase {
+    func testAll() { runSuite(MultiStackTrailingToneSuite.suite, xctest: self) }
+}
 #endif

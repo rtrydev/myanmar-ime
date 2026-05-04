@@ -94,6 +94,7 @@ public enum BurmeseTestSuites {
         LiteralFallbackIllegalSurfaceSuite.suite,
         LiteralFallbackPrefixedRepetitionSuite.suite,
         AsatAfterToneSuite.suite,
+        MultiStackTrailingToneSuite.suite,
         BenchBaselineFormatSuite.suite,
         ClusterAliasRepeatPerfSuite.suite,
     ]
