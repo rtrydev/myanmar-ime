@@ -306,4 +306,8 @@ final class LiteralFallbackIllegalSurfaceXCTests: XCTestCase {
 final class AsatAfterToneXCTests: XCTestCase {
     func testAll() { runSuite(AsatAfterToneSuite.suite, xctest: self) }
 }
+
+final class LiteralFallbackPrefixedRepetitionXCTests: XCTestCase {
+    func testAll() { runSuite(LiteralFallbackPrefixedRepetitionSuite.suite, xctest: self) }
+}
 #endif

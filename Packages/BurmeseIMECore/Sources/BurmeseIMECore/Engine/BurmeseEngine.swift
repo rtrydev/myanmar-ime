@@ -2226,20 +2226,37 @@ public final class BurmeseEngine: @unchecked Sendable {
             // small buffers (e.g. `kya` → `ကျ`, `kac` → `ကc`); the
             // floor keeps those on the ASCII-ratio path.
             guard rawCount >= 5 else { return false }
-            // Distinguish "extreme right-shrink collapse" (a small
-            // alphabet of repeating letters plus separators) from
-            // legitimate compact Burmese (real consonant variety).
-            // A buffer with ≤2 distinct non-separator characters is
-            // a pure-repetition gibberish shape (`kaaaaaaaaa`,
-            // `aaaaa`, `k+k+k+k+k+k`); a buffer with more distinct
-            // letters carries real variety (`kya`, `tablet`,
-            // `ka+ta+pa`, `mingalarpar`) and stays on the ASCII-
-            // ratio path.
+            // Compute the pathological-collapse signals: long
+            // same-letter run, separator-bound repetition shape,
+            // and (after the collapse-ratio gate) the rank-0
+            // surface dropped most of the buffer's keystrokes.
+            //
+            // The set of distinct non-separator characters used to
+            // gate Class B at `count <= 2`. That gate excluded a
+            // family of buffers that match every other Class B
+            // signal — short consonant-cluster prefixes followed
+            // by a long same-letter run (`thaaaaaa`, `myaaaaaa`,
+            // `mnyaaaaa`, `tha+a+a+a+a+a+a+a`) carry 3+ distinct
+            // letters even though the bulk of the buffer is one
+            // repeating letter. The collapse-ratio gate
+            // (`scalarCount * 3 < rawCount`) and the same-letter-
+            // run gate (`maxSameLetterRun >= 5`) together already
+            // identify these as pathological; the distinct-char
+            // ceiling is dropped to cover them. Task 50.
             var distinctContentChars: Set<Character> = []
             var separatorCount = 0
             var maxSameLetterRun = 0
             var currentRun = 0
             var lastChar: Character? = nil
+            // Track the same-letter run on the *separator-stripped*
+            // content as well — buffers like `tha+a+a+a+a+a+a+a`
+            // keep resetting the in-buffer run on every `+` even
+            // though the underlying letter-only content
+            // (`thaaaaaaaa`) has a long run. Both views participate
+            // in the shape gate below. Task 50.
+            var maxSameLetterRunStripped = 0
+            var currentRunStripped = 0
+            var lastCharStripped: Character? = nil
             for ch in rawBuffer {
                 let isSeparator = ch == "+" || ch == "'"
                     || ch == ":" || ch == "." || ch == "*"
@@ -2258,28 +2275,69 @@ public final class BurmeseEngine: @unchecked Sendable {
                     if currentRun > maxSameLetterRun {
                         maxSameLetterRun = currentRun
                     }
+                    if ch == lastCharStripped {
+                        currentRunStripped += 1
+                    } else {
+                        currentRunStripped = 1
+                        lastCharStripped = ch
+                    }
+                    if currentRunStripped > maxSameLetterRunStripped {
+                        maxSameLetterRunStripped = currentRunStripped
+                    }
                 }
             }
-            guard distinctContentChars.count <= 2 else { return false }
-            // Conservative collapse threshold: `3 * scalar_count <
-            // buffer_count`. Catches the truly pathological cases
-            // (`aaaaa` 5→1, `kaaaaaaaaa` 10→2, `k+k+k+k+k+k` 11→3)
-            // while sparing borderline gibberish like `kaakaa`
-            // (6→2, ratio 0.33) where the Myanmar surface preserves
-            // enough of the user's typed structure that it remains
-            // a useful rank-0 candidate.
+            // Collapse threshold. The default is `3 * scalar_count
+            // < buffer_count` (≥67% loss): catches `aaaaa` 5→1,
+            // `kaaaaaaaaa` 10→2, `k+k+k+k+k+k` 11→3 while sparing
+            // borderline `kaakaa` (6→2, max-run=2, blocked by the
+            // same-letter-run shape gate anyway) and well-behaved
+            // Burmese (`tablet` 6→5, `aungc` 5→6, `kya` 3→2).
+            //
+            // When the buffer carries a long same-letter run
+            // (≥5 letters in a row, ignoring separators), the
+            // pathological signal is strong enough that 50% loss
+            // (`2 * scalar_count < buffer_count`) is the right
+            // pivot — that catches the consonant-prefix +
+            // long-vowel-run family `myaaaaaa` 8→3, `kyaaaaaa`
+            // 8→3, `mnyaaaaa` 8→3, `mngaaaaa` 8→3, `akhaaaaa`
+            // 8→3 (TASK-050). The 3-scalar surfaces sit at ratio
+            // 2.67×, just below the strict 3× line; the looser
+            // gate is gated on `maxSameLetterRunStripped >= 5` so
+            // it does not promote redundant-mark shapes like
+            // `ka***` (5→2) where the underlying repetition is in
+            // the separator-mark count rather than in any letter.
             let scalarCount = topSurface.unicodeScalars.count
-            guard scalarCount * 3 < rawCount else { return false }
+            let collapseGatePasses: Bool = {
+                if scalarCount * 3 < rawCount { return true }
+                if maxSameLetterRunStripped >= 5, scalarCount * 2 < rawCount {
+                    return true
+                }
+                return false
+            }()
+            guard collapseGatePasses else { return false }
             // Shape gate: the buffer must look like a pathological
-            // repetition. Two qualifying shapes:
+            // repetition. Three qualifying shapes:
             //   1. Long same-letter run (≥5): `aaaaa`, `kaaaaaaaaa`,
-            //      `mmmmmmm`. The right-shrink probe truncates
-            //      everything past the first syllable.
-            //   2. Three-or-more separator-bound short tokens with
+            //      `mmmmmmm`, `thaaaaaa`. The right-shrink probe
+            //      truncates everything past the first syllable.
+            //      This shape covers the consonant-prefix +
+            //      long-vowel-run family (TASK-050).
+            //   2. Long same-letter run on the *separator-stripped*
+            //      content (≥5): `tha+a+a+a+a+a+a+a`. Each
+            //      separator resets the in-buffer run, but the
+            //      underlying letter-only content (`thaaaaaaaa`)
+            //      shows the same pathological repetition; the
+            //      explicit `+` between every `a` doesn't change
+            //      the user-visible collapse outcome (TASK-050).
+            //   3. Three-or-more separator-bound short tokens with
             //      one distinct letter: `k+k+k+k+k+k`. Each `k`
             //      attempts a virama stack, but the parser collapses
-            //      all but the first pair.
+            //      all but the first pair. The single-distinct-
+            //      letter constraint stays because mixed-letter
+            //      separator-bound buffers (`ka+ta+pa+...`) are
+            //      not pathological — they carry real variety.
             let pathologicalShape = maxSameLetterRun >= 5
+                || maxSameLetterRunStripped >= 5
                 || (separatorCount >= 3 && distinctContentChars.count <= 2)
             return pathologicalShape
         }()
