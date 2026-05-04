@@ -330,4 +330,8 @@ final class ExplicitPlusVowelChainXCTests: XCTestCase {
 final class AsatAfterDepVowelXCTests: XCTestCase {
     func testAll() { runSuite(AsatAfterDepVowelSuite.suite, xctest: self) }
 }
+
+final class OrphanAsatAfterToneXCTests: XCTestCase {
+    func testAll() { runSuite(OrphanAsatAfterToneSuite.suite, xctest: self) }
+}
 #endif

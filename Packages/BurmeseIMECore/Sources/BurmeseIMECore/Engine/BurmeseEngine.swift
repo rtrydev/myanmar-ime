@@ -340,6 +340,16 @@ public final class BurmeseEngine: @unchecked Sendable {
         // buffer verbatim) lands, the filter sees a clean sibling and
         // can promote it past the malformed Myanmar candidates.
         injected.candidates = Self.sanitizeDigitOrphanAsat(injected.candidates)
+        // TASK-057: same pattern — re-run the tone-orphan-asat
+        // sanitizer with the literal fallback in place. Pre-fix the
+        // engine fabricated `<tone> 1021 103A` for inputs like
+        // `kar:.*`, `ka:*`, `o:.*` where the orphan-mark anchor
+        // injector wedged a phantom independent-vowel between the
+        // tone closure and the unanchored asat. Once the literal
+        // fallback is injected the panel has a clean sibling, so the
+        // filter pass can promote it past the malformed Myanmar
+        // candidates.
+        injected.candidates = Self.sanitizeToneOrphanAsat(injected.candidates)
         return injected
     }
 
@@ -2184,7 +2194,9 @@ public final class BurmeseEngine: @unchecked Sendable {
         let sanitizedAffixed2 = Self.sanitizeIndepVowelVirama(sanitizedAffixed)
         let sanitizedAffixed3 = Self.sanitizeAdjacentIndependentVowels(sanitizedAffixed2)
         let sanitizedAffixed4 = Self.sanitizeDoubledCodaChain(sanitizedAffixed3)
-        let sanitizedWithAffixes = Self.sanitizeDigitOrphanAsat(sanitizedAffixed4)
+        let sanitizedAffixed5 = Self.sanitizeDigitOrphanAsat(sanitizedAffixed4)
+        let sanitizedAffixed6 = Self.sanitizeToneOrphanAsat(sanitizedAffixed5)
+        let sanitizedWithAffixes = Self.sanitizeToneOrphanAsat(sanitizedAffixed5)
         let finalCandidates: [Candidate]
         if leadingLiteral.isEmpty,
            digitPrefix.isEmpty,

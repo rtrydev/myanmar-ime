@@ -505,6 +505,41 @@ extension BurmeseEngine {
         return false
     }
 
+
+    /// TASK-057: drop any candidate whose surface contains a `<tone>`
+    /// marker (U+1037 creaky / U+1038 visarga) immediately followed by
+    /// `<U+1021><U+103A>` — the phantom-`အ`-anchor shape produced by
+    /// the orphan-mark anchor injector when the user's `*` lands after
+    /// a tone-closed vowel rule. The triplet `<tone> 1021 103A` has
+    /// no legitimate Burmese spelling: a tone closes the syllable, so
+    /// any following `1021 103A` (independent-`အ` + asat) reflects
+    /// engine fabrication rather than user-typed content. Mirrors
+    /// `sanitizeDigitOrphanAsat` (TASK-052) — same fallback policy:
+    /// only filter when at least one clean candidate exists, otherwise
+    /// keep violators so the panel is not empty.
+    internal static func sanitizeToneOrphanAsat(_ candidates: [Candidate]) -> [Candidate] {
+        let cleanFiltered = candidates.filter {
+            !surfaceContainsToneOrphanAsat($0.surface)
+        }
+        if !cleanFiltered.isEmpty {
+            return cleanFiltered
+        }
+        return candidates
+    }
+
+    @_spi(Testing) public static func surfaceContainsToneOrphanAsat(_ surface: String) -> Bool {
+        let scalars = Array(surface.unicodeScalars).map(\.value)
+        guard scalars.count >= 3 else { return false }
+        for i in 2..<scalars.count {
+            let preTone = scalars[i - 2]
+            guard preTone == 0x1037 || preTone == 0x1038 else { continue }
+            if scalars[i - 1] == 0x1021 && scalars[i] == 0x103A {
+                return true
+            }
+        }
+        return false
+    }
+
     @_spi(Testing) public static func surfaceContainsDoubledCodaChain(_ surface: String) -> Bool {
         let scalars = Array(surface.unicodeScalars).map(\.value)
         guard scalars.count >= 4 else { return false }
@@ -834,6 +869,26 @@ extension BurmeseEngine {
 
         let orphanPositions = orphanAttachableMarkIndices(in: scalars)
         guard !orphanPositions.isEmpty else { return nil }
+
+        // TASK-057: refuse to anchor an orphan asat whose immediate
+        // predecessor scalar is a tone marker (U+1037 creaky / U+1038
+        // visarga). The tone closes the syllable; injecting a U+1021
+        // between the tone and the asat fabricates a phantom `အ` base
+        // for an asat the user typed redundantly after the tone
+        // closure (`kar:.*`, `kar.:*`, `o:.*`). The legality scan
+        // would accept the rebuilt `<tone> 1021 103A` shape because
+        // `1021` is in `isConsonantBase`'s range, but the user did
+        // NOT type any `a` letter — the `1021` is an engine
+        // fabrication. Drop the rebuild so the engine falls through
+        // to the literal-fallback or a cleaner sibling.
+        for pos in orphanPositions {
+            guard scalars[pos].value == 0x103A else { continue }
+            guard pos >= 1 else { continue }
+            let prev = scalars[pos - 1].value
+            if prev == 0x1037 || prev == 0x1038 {
+                return nil
+            }
+        }
 
         // TASK-022: collapse contiguous orphan-mark scalars into a
         // single anchor per cluster, but split clusters whenever a

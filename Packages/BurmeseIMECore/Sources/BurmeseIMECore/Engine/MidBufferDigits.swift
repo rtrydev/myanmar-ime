@@ -535,6 +535,18 @@ extension BurmeseEngine {
         // and an all-`*` tail collapses to an empty string.
         while normalized.first == "*" { normalized.removeFirst() }
         guard !normalized.isEmpty else { return "" }
+        // TASK-057: strip `*` chars that immediately follow a tone
+        // marker (`:` or `.`). The tone closes the syllable and the
+        // trailing `*` cannot legally re-close it; without this strip
+        // the parser sees `:*` / `.*` / `:.*` and produces `200C 103A`,
+        // which the orphan-ZWNJ promoter rewrites to `1021 103A`,
+        // which the affix-concat step splices onto the prefix
+        // candidate as `<C> 1021 103A` (the phantom-anchor cluster
+        // for `ka:*`, `ka.*`, etc.). After the strip the run is just
+        // the tone marker(s), which the engine's affix-merge branch
+        // re-attaches via `applyBareConsonantToneFromTail`.
+        normalized = Self.stripAsatAfterToneRuns(normalized)
+        guard !normalized.isEmpty else { return "" }
         // The composed run is concatenated onto whatever surviving prefix
         // the right-shrink probe produced — it does not start at the
         // user's buffer origin. Suppress the leading-`အ` promotion so
@@ -593,6 +605,41 @@ extension BurmeseEngine {
     internal static func tailFallbackOutputIsClean(_ s: String) -> Bool {
         guard !s.isEmpty else { return false }
         return SyllableParser.scanOutputLegality(s)
+    }
+
+    /// TASK-057: strip every `*` that immediately follows a tone
+    /// marker (`:` visarga / `.` creaky) in the tail-run input. The
+    /// tone closes the syllable, so a trailing `*` is structurally
+    /// redundant — leaving it in the run causes the parser to emit
+    /// an orphan asat (`200C 103A`), which the orphan-ZWNJ promoter
+    /// then rewrites to `1021 103A`, and the engine splices the
+    /// phantom anchor onto the prefix surface (the `<C> 1021 103A`
+    /// shape for `ka:*`, `ka.*`, `ka:.*`, etc.).
+    ///
+    /// Only `*` chars that sit after a tone marker are removed:
+    /// `:**`, `.***`, `:.*`, `:**.*` all collapse to runs without
+    /// asat past the tone. Leading `*` chars are handled separately
+    /// by the existing strip in `composedLetterRunSurface`. Letters,
+    /// `+`, and `'` pass through unchanged.
+    internal static func stripAsatAfterToneRuns(_ s: String) -> String {
+        guard s.contains("*") else { return s }
+        var result = ""
+        var sawTone = false
+        for ch in s {
+            if ch == "*" && sawTone {
+                continue
+            }
+            if ch == ":" || ch == "." {
+                sawTone = true
+            } else if !(ch == "*") {
+                // A non-tone, non-asat char (letter, `+`, `'`, digit)
+                // resets the tone-context — `*` after such a char is
+                // not a tone-closure and should pass through.
+                sawTone = false
+            }
+            result.append(ch)
+        }
+        return result
     }
 
     /// Replace ASCII digits (0-9) with Myanmar digits (U+1040–U+1049),

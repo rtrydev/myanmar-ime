@@ -101,5 +101,6 @@ public enum BurmeseTestSuites {
         EkarCrossCategoryClusterSuite.suite,
         ExplicitPlusVowelChainSuite.suite,
         AsatAfterDepVowelSuite.suite,
+        OrphanAsatAfterToneSuite.suite,
     ]
 }
