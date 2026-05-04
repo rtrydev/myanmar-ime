@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from gi.repository import Adw, Gtk
 
-from ..history import HistoryEntry, list_entries, remove_entry
+from ..history import HistoryEntry, clear_all, list_entries, remove_entry
 
 
 def _build_row(entry: HistoryEntry, on_remove) -> Adw.ActionRow:
@@ -39,21 +39,35 @@ def build_history_page() -> Gtk.Widget:
         "ranking above other candidates for the same input."
     )
 
+    clear = Gtk.Button(label="Clear all")
+    clear.add_css_class("destructive-action")
+    clear.set_valign(Gtk.Align.CENTER)
+    clear.set_tooltip_text("Forget every learned entry")
+
     refresh = Gtk.Button(label="Refresh")
-    refresh.set_halign(Gtk.Align.END)
     refresh.add_css_class("flat")
-    group.set_header_suffix(refresh)
+    refresh.set_valign(Gtk.Align.CENTER)
+
+    # PreferencesGroup.set_header_suffix takes a single widget, so wrap
+    # the two buttons in a horizontal box.
+    suffix = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+    suffix.set_halign(Gtk.Align.END)
+    suffix.append(clear)
+    suffix.append(refresh)
+    group.set_header_suffix(suffix)
 
     page.add(group)
 
+    # Adw.PreferencesGroup wraps added rows in an internal listbox, so
+    # `get_first_child()` returns a layout container, not the rows. Track
+    # what we added and remove each one via the documented `group.remove()`
+    # entry point.
+    rows: list[Adw.ActionRow] = []
+
     def repopulate(_btn=None):
-        # Clear existing rows
-        child = group.get_first_child()
-        while child:
-            next_child = child.get_next_sibling()
-            if isinstance(child, Adw.ActionRow):
-                group.remove(child)
-            child = next_child
+        for row in rows:
+            group.remove(row)
+        rows.clear()
 
         entries = list_entries()
         if not entries:
@@ -61,14 +75,38 @@ def build_history_page() -> Gtk.Widget:
             empty.set_title("No learned entries yet")
             empty.set_subtitle("Pick candidates from the panel; they'll appear here.")
             group.add(empty)
+            rows.append(empty)
             return
 
         for entry in entries:
             def remover(e: HistoryEntry):
                 remove_entry(e.reading, e.surface)
                 repopulate()
-            group.add(_build_row(entry, remover))
+            row = _build_row(entry, remover)
+            group.add(row)
+            rows.append(row)
 
+    def on_clear(_b):
+        dlg = Adw.MessageDialog.new(
+            page.get_root(),
+            "Clear all learned history?",
+            "This forgets every remembered candidate selection. "
+            "This cannot be undone.",
+        )
+        dlg.add_response("cancel", "Cancel")
+        dlg.add_response("clear", "Clear all")
+        dlg.set_response_appearance("clear", Adw.ResponseAppearance.DESTRUCTIVE)
+        dlg.set_default_response("cancel")
+        dlg.set_close_response("cancel")
+
+        def handle(_d, response):
+            if response == "clear":
+                clear_all()
+                repopulate()
+        dlg.connect("response", handle)
+        dlg.present()
+
+    clear.connect("clicked", on_clear)
     refresh.connect("clicked", repopulate)
     repopulate()
     return page

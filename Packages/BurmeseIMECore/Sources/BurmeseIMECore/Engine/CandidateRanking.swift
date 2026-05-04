@@ -515,6 +515,33 @@ extension BurmeseEngine {
         return false
     }
 
+    /// If `input` begins with a `yaPinPreferredOnsetClusters` entry,
+    /// return the input rewritten to force the parser onto the ya-pin
+    /// disambiguator path (e.g. `kwyantaw…` → `kwy2antaw…`). Returns
+    /// `nil` when the prefix does not match a promotion cluster, so
+    /// callers can early-out without re-parsing.
+    ///
+    /// Why we need this: the parser's `Cy` / `Cwy` rules canonicalise
+    /// to ya-yit (alias-cost 0); the ya-pin variant is reachable only
+    /// via the digit-suffixed form (`Cy2`, `Cwy2`, alias-cost 1). The
+    /// DP comparator `isBetterDP` ranks states primarily by aliasCost,
+    /// so once enough syllables stack up the ya-pin sibling is
+    /// pruned out of the N-best beam — the engine never sees a ya-pin
+    /// candidate to feed `promoteYapinForExactBareReading`. Re-running
+    /// `parseCandidates` with the rewritten input forces the ya-pin
+    /// path through the DP and makes the candidate pool symmetric.
+    /// The rewrite preserves byte length exactly at the cluster-end
+    /// position (one inserted `2`) and leaves the rest of the buffer
+    /// untouched, so trailing syllables parse identically to the
+    /// original input.
+    internal static func yaPinDisambiguatedInput(_ input: String) -> String? {
+        for cluster in yaPinPreferredOnsetClusters where input.hasPrefix(cluster) {
+            let endIndex = input.index(input.startIndex, offsetBy: cluster.count)
+            return cluster + "2" + input[endIndex...]
+        }
+        return nil
+    }
+
     private static func promotionMatchKey(_ buffer: String) -> String {
         strippingTrailingToneMarkers(from: buffer)
             .replacingOccurrences(of: "yw", with: "wy")

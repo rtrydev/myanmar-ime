@@ -104,5 +104,6 @@ public enum BurmeseTestSuites {
         DoubledLiteralPunctSuite.suite,
         OrphanAsatAfterToneSuite.suite,
         CwyClusterPromotionSuite.suite,
+        LongBufferYaPinPromotionSuite.suite,
     ]
 }

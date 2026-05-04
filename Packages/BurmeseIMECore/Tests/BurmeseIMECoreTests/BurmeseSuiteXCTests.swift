@@ -342,4 +342,8 @@ final class OrphanAsatAfterToneXCTests: XCTestCase {
 final class CwyClusterPromotionXCTests: XCTestCase {
     func testAll() { runSuite(CwyClusterPromotionSuite.suite, xctest: self) }
 }
+
+final class LongBufferYaPinPromotionXCTests: XCTestCase {
+    func testAll() { runSuite(LongBufferYaPinPromotionSuite.suite, xctest: self) }
+}
 #endif

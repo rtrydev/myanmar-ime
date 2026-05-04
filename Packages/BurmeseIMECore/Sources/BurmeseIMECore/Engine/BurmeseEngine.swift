@@ -881,6 +881,29 @@ public final class BurmeseEngine: @unchecked Sendable {
             isFullBuffer: !effectiveWindowed
         )
         grammarParses.removeAll { Self.hasInterleavedLatin($0.output) }
+        // Ya-pin disambiguator alt-parse: when the buffer starts with one
+        // of `yaPinPreferredOnsetClusters` (`khwy`/`ghwy`/`kwy`/`gwy`/
+        // `khy`/`ghy`/`ky`/`gy`), re-parse with the digit-suffixed form
+        // (`kwy2…`, `ky2…`) and merge the resulting parses. The DP's
+        // aliasCost-first ordering would otherwise prune the ya-pin
+        // sibling out of the N-best beam once enough syllables stack
+        // up — leaving `promoteYapinForExactBareReading` nothing to
+        // promote. Forcing the ya-pin path through a parallel parse
+        // restores the symmetric candidate pool that the short-buffer
+        // promotion (TASK-058) was designed to operate on.
+        if let disambiguated = Self.yaPinDisambiguatedInput(effectiveParseInput) {
+            let disambiguatedParses = parser.parseCandidates(
+                disambiguated,
+                maxResults: Self.grammarCandidateBudget(for: effectiveParseInput),
+                isFullBuffer: !effectiveWindowed
+            )
+            let existingOutputs = Set(grammarParses.map(\.output))
+            for parse in disambiguatedParses
+            where !Self.hasInterleavedLatin(parse.output)
+               && !existingOutputs.contains(parse.output) {
+                grammarParses.append(parse)
+            }
+        }
         // Parser-level orphan promotion (task 01): generate implicit-အ
         // siblings for parses whose surface has an unanchored mark. The
         // leading-ZWNJ case swaps the ZWNJ for အ; the mid-surface case

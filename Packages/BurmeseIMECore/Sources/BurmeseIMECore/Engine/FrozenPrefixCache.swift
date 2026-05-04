@@ -66,6 +66,27 @@ extension BurmeseEngine {
         cacheLock.unlock()
 
         var parses = parser.parseCandidates(prefix, maxResults: Self.frozenPrefixCandidatePool)
+        // Ya-pin disambiguator alt-parse for the frozen prefix. Mirrors
+        // the engine-level merge in `BurmeseEngine.update`: once the
+        // buffer crosses `compositionWindowSize` the user-visible
+        // rendering is single-best from this prefix's parse pool, and
+        // the DP's aliasCost-first ordering prunes ya-pin out of the
+        // N-best (`kwy2…` carries an extra alias-cost digit). Forcing
+        // a parallel parse with the digit-suffixed form lifts the
+        // ya-pin onset back into the pool so the LM rescoring below
+        // can pick the corpus-dominant rendering. Without this,
+        // `kwyantawkahtamin:masar:` and similar "I…" sentences lock
+        // the wrong cluster (`ကြွ`) into every windowed candidate.
+        if let disambiguated = Self.yaPinDisambiguatedInput(prefix) {
+            let disambiguatedParses = parser.parseCandidates(
+                disambiguated,
+                maxResults: Self.frozenPrefixCandidatePool
+            )
+            let existingOutputs = Set(parses.map(\.output))
+            for parse in disambiguatedParses where !existingOutputs.contains(parse.output) {
+                parses.append(parse)
+            }
+        }
         // Apply the same orphan-mark promotions the main pipeline runs on
         // its grammar parses (BurmeseEngine.swift ~700-717). Without this,
         // a frozen prefix composed entirely of bare-vowel syllables whose
@@ -155,18 +176,29 @@ extension BurmeseEngine {
             // Dedup parses by output (different parses can render identically),
             // score each via the LM, sort high-to-low, keep top K.
             var seen: Set<String> = []
-            var scored: [(branch: FrozenPrefixBranch, isOOV: Bool, isStrictInferredStack: Bool)] = []
+            var scored: [(branch: FrozenPrefixBranch, isOOV: Bool, isStrictInferredStack: Bool, isYaPinPromoted: Bool)] = []
             let unkFloor = languageModel.unknownLogProb
             let oovEpsilon = 0.01
+            // When the prefix starts with a `yaPinPreferredOnsetClusters`
+            // entry, the cluster table (CandidateRanking.swift) treats
+            // ya-pin as the corpus-dominant rendering. Mark the
+            // disambiguator-injected ya-pin parses so the sort below can
+            // tiebreak in their favor — without it, two-syllable cold-
+            // start prefixes (e.g. `kwyan`) tie on isOOV/lmScore because
+            // both `ကြွန်` and `ကျွန်` are partial words, and the
+            // arbitrary tied-sort order can lock the wrong cluster
+            // into the windowed candidate render.
+            let prefersYaPin = Self.yaPinDisambiguatedInput(prefix) != nil
             for parse in parses where seen.insert(parse.output).inserted {
                 let lm = scoreSurfaceCached(parse.output, context: baseContext, cache: &lmCache)
                 let isOOV = unkFloor.isFinite && abs(lm - unkFloor) < oovEpsilon
+                let isYaPinPromoted = prefersYaPin && Self.isYapinReading(parse.reading)
                 scored.append((FrozenPrefixBranch(
                     output: parse.output,
                     reading: parse.reading,
                     lmScore: lm,
                     contextWords: baseContext + [parse.output]
-                ), isOOV, strictInferredStackOutputs.contains(parse.output)))
+                ), isOOV, strictInferredStackOutputs.contains(parse.output), isYaPinPromoted))
             }
             // OOV-aware ordering (task 04): an in-vocab parse always beats an
             // OOV parse regardless of raw LM score. The LM `<unk>` floor is
@@ -194,6 +226,13 @@ extension BurmeseEngine {
             }
             scored.sort { lhs, rhs in
                 if lhs.isOOV != rhs.isOOV { return !lhs.isOOV }
+                // Promotion-cluster prefixes prefer ya-pin over ya-yit
+                // before falling through to the LM signal. The cluster
+                // table is the authoritative ranking source for these
+                // eight clusters; the LM is only a secondary tiebreaker.
+                if lhs.isYaPinPromoted != rhs.isYaPinPromoted {
+                    return lhs.isYaPinPromoted
+                }
                 if lhs.isStrictInferredStack != rhs.isStrictInferredStack {
                     return lhs.isStrictInferredStack
                 }
