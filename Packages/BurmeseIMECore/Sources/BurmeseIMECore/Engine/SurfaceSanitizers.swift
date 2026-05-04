@@ -506,26 +506,39 @@ extension BurmeseEngine {
     }
 
     /// TASK-056: drop any candidate whose surface contains a run of
-    /// two or more contiguous composing-punct scalars sitting
-    /// between Myanmar scalars (U+1000–U+109F), where the run
-    /// includes at least one strict-consume punct (`*` U+002A or
-    /// `'` U+0027). The asterisk is the asat marker and the
-    /// apostrophe is the silent inherent-vowel separator — both
-    /// have specific consume-or-fail roles in the romanization
-    /// scheme, and a doubled run cannot satisfy those roles. The
-    /// pre-fix parser leaked the doubled run as raw ASCII into the
-    /// rendered surface (`k**ar` → `က**အာ`, `kar''ka` → `ကာ''က`,
-    /// `k*'ar` → `က*'အာ`), violating the script-purity invariant
-    /// from CLAUDE.md.
+    /// contiguous **pure strict-consume** punct scalars (`*` U+002A
+    /// or `'` U+0027 only — no `.`/`:` mixed in) sitting between
+    /// Myanmar scalars (U+1000–U+109F), where the run satisfies one
+    /// of two leak signatures:
     ///
-    /// Doubled `:`/`.` runs WITHOUT a `*`/`'` companion are NOT
-    /// filtered — those are legitimate document punctuation
-    /// (ellipsis `..`, double-colon `::`) that the user can type
-    /// between Myanmar segments via
-    /// `splitAtLastEmbeddedComposingPunct` (`ka..tar` → `က..တာ`).
-    /// Single `*`/`'` between Myanmar is also legitimate (`k*ar`
-    /// → `က်အာ` where `*` plays its asat role on the previous
-    /// syllable).
+    /// 1. **Run contains `*` (asterisk).** Asterisk is the asat
+    ///    marker — its only legitimate semantic role is to be
+    ///    consumed into U+103A. If `*` survives as raw ASCII
+    ///    between Myanmar with no `.`/`:` neighbour to justify a
+    ///    document-punct interpretation, the parser failed. This
+    ///    fires for `k**ar` → `က**အာ` (run `**`, both Myanmar
+    ///    sides), `kar.*ar` → `ကာ့*အာ` (`.` consumed as tone
+    ///    U+1037, leaving `*` directly between Myanmar), and
+    ///    `kar:*ar` → `ကား*အာ` (same shape with visarga U+1038).
+    /// 2. **Two-or-more contiguous strict-consume chars.** Two
+    ///    strict-consume chars can never both fulfil their semantic
+    ///    role on a single boundary; the second leaks. This catches
+    ///    `''` (doubled apostrophe — `kar''ka` → `ကာ''က`) which
+    ///    rule (1) does not, since single `'` between Myanmar is
+    ///    silently consumed by the parser as a soft separator and
+    ///    never reaches the surface, but `''` doubled does.
+    ///
+    /// **Mixed-punct runs (containing `.` or `:`) are NOT
+    /// filtered** — those are legitimate document punctuation that
+    /// `splitAtLastEmbeddedComposingPunct` and
+    /// `MidBufferPunctuationSuite` route through verbatim
+    /// (`ka..tar` → `က..တာ`, `ka*.tar` → `က*.တာ`,
+    /// `ka'.tar` → `က'.တာ`). Doubled `..`/`::` runs without
+    /// `*`/`'` are likewise allowed (ellipsis, double-colon).
+    /// Trailing or leading `'` is also permitted by design
+    /// (`thar'`, `'thar`, `'thar'` — see `ApostropheLiteralSuite`);
+    /// the predicate only fires when the punct run sits BETWEEN
+    /// two Myanmar scalars, not at the surface boundary.
     ///
     /// Same fallback policy as the other sanitizers: only filter
     /// when at least one clean candidate exists.
@@ -540,25 +553,50 @@ extension BurmeseEngine {
     }
 
     @_spi(Testing) public static func surfaceContainsInterleavedComposingPunct(_ surface: String) -> Bool {
+        // Fast path: most candidate surfaces are pure Myanmar (no
+        // `*`/`'`/`:`/`.` scalars at all). A streaming scalar scan
+        // bails out without allocating the `scalars` array.
+        var sawComposingPunct = false
+        for scalar in surface.unicodeScalars {
+            let v = scalar.value
+            if v == 0x002A || v == 0x0027 || v == 0x003A || v == 0x002E {
+                sawComposingPunct = true
+                break
+            }
+        }
+        guard sawComposingPunct else { return false }
         let scalars = Array(surface.unicodeScalars).map(\.value)
-        guard scalars.count >= 4 else { return false }
+        guard scalars.count >= 3 else { return false }
+        // Myanmar letters / signs / vowel-marks / digits / tone
+        // marks. Excludes U+104A (little section ၊) and U+104B
+        // (section ။) — those are the Myanmar equivalents of `,`
+        // / `.` and act as document punctuation when
+        // `burmesePunctuationEnabled` maps `.` → `။` mid-buffer
+        // (e.g. `ka*.tar` → `က*။တာ`). Treating them as
+        // "Myanmar" would falsely flag the legitimate
+        // `<C><*><။><C>` shape as an interleaved leak.
         @inline(__always) func isMyanmar(_ v: UInt32) -> Bool {
-            v >= 0x1000 && v <= 0x109F
+            (v >= 0x1000 && v <= 0x109F) && v != 0x104A && v != 0x104B
+        }
+        @inline(__always) func isAsterisk(_ v: UInt32) -> Bool {
+            v == 0x002A
         }
         @inline(__always) func isStrictConsumePunct(_ v: UInt32) -> Bool {
             v == 0x002A || v == 0x0027
         }
-        @inline(__always) func isComposingPunct(_ v: UInt32) -> Bool {
-            v == 0x002A || v == 0x0027 || v == 0x003A || v == 0x002E
+        @inline(__always) func isDocPunct(_ v: UInt32) -> Bool {
+            v == 0x003A || v == 0x002E
         }
-        // Walk for runs of contiguous composing-punct scalars where
-        // the run contains TWO OR MORE strict-consume chars. A
-        // single strict-consume + a single document-punct (`*.`,
-        // `'.`, `*:`, `':`) is NOT flagged because the strict char
-        // gets consumed by the previous syllable's asat / separator
-        // path, and the trailing `.`/`:` is the legitimate split
-        // point. Two strict-consume chars (`**`, `''`, `*'`, `'*`)
-        // can't both be consumed and the leak is the bug class.
+        @inline(__always) func isComposingPunct(_ v: UInt32) -> Bool {
+            isStrictConsumePunct(v) || isDocPunct(v)
+        }
+        // Walk for runs of contiguous composing-punct scalars. A
+        // run is a leak when it is PURE strict-consume (no `.`/`:`
+        // mixed in — those make the run document-punct) AND either
+        // contains `*` (asterisk has no legitimate role outside
+        // asat-consumption) OR has ≥2 strict-consume chars (doubled
+        // apostrophe). Mixed runs (`*.`, `'.`, `*:`, `'*.`, …) are
+        // legitimate document punctuation.
         var i = 0
         while i < scalars.count {
             guard isComposingPunct(scalars[i]) else {
@@ -567,29 +605,40 @@ extension BurmeseEngine {
             }
             var runEnd = i + 1
             var strictConsumeCount = isStrictConsumePunct(scalars[i]) ? 1 : 0
+            var asteriskCount = isAsterisk(scalars[i]) ? 1 : 0
+            var docPunctCount = isDocPunct(scalars[i]) ? 1 : 0
             while runEnd < scalars.count, isComposingPunct(scalars[runEnd]) {
                 if isStrictConsumePunct(scalars[runEnd]) { strictConsumeCount += 1 }
+                if isAsterisk(scalars[runEnd]) { asteriskCount += 1 }
+                if isDocPunct(scalars[runEnd]) { docPunctCount += 1 }
                 runEnd += 1
             }
-            guard strictConsumeCount >= 2 else {
+            // Document-punct presence rescues the run. A `*` next
+            // to `.` or `:` is interpreted as part of a literal
+            // punct group (markdown emphasis, ellipsis, etc.), not
+            // as an orphaned asat marker.
+            guard docPunctCount == 0 else {
                 i = runEnd
                 continue
             }
-            // Scan left for a Myanmar scalar.
-            var leftHasMyanmar = false
-            var j = i - 1
-            while j >= 0 {
-                if isMyanmar(scalars[j]) { leftHasMyanmar = true; break }
-                j -= 1
+            // Pure strict-consume run. Leak when it contains `*`
+            // (any count) OR has ≥2 chars (doubled `''`).
+            guard asteriskCount >= 1 || strictConsumeCount >= 2 else {
+                i = runEnd
+                continue
             }
-            // Scan right for a Myanmar scalar past the run.
-            var rightHasMyanmar = false
-            var k = runEnd
-            while k < scalars.count {
-                if isMyanmar(scalars[k]) { rightHasMyanmar = true; break }
-                k += 1
-            }
-            if leftHasMyanmar && rightHasMyanmar { return true }
+            // Check IMMEDIATE adjacency: the scalar directly
+            // before the run start AND directly after the run end
+            // must be Myanmar (not Myanmar-punctuation U+104A /
+            // U+104B, which act as document punctuation just like
+            // ASCII `,` / `.`). This prevents false positives on
+            // legitimate `<C><*><။><C>` shapes where `*` is part
+            // of a literal-punct group with the mapped Myanmar
+            // full stop on its right (`ka*.tar` →
+            // `က*။တာ` under `burmesePunctuationEnabled`).
+            let hasLeftMyanmar = i > 0 && isMyanmar(scalars[i - 1])
+            let hasRightMyanmar = runEnd < scalars.count && isMyanmar(scalars[runEnd])
+            if hasLeftMyanmar && hasRightMyanmar { return true }
             i = runEnd
         }
         return false

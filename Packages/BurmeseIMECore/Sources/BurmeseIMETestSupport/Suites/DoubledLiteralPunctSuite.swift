@@ -45,21 +45,37 @@ public enum DoubledLiteralPunctSuite {
         v == 0x002A || v == 0x0027 || v == 0x003A || v == 0x002E
     }
 
-    /// True when `surface` contains a run of contiguous composing-
-    /// punct scalars between two Myanmar scalars where the run
-    /// includes TWO OR MORE strict-consume chars (`*` or `'`).
-    /// Two strict-consume chars in a run can't both fulfill their
-    /// semantic role (asat / inherent-vowel separator), so the
-    /// run leaks as raw ASCII — the bug shape. A single strict-
-    /// consume + a single document-punct (`*.`, `'.`) is NOT
-    /// flagged because the strict char gets consumed by the
-    /// previous syllable, and the trailing `.`/`:` is the
-    /// legitimate split point. Trailing punct (no Myanmar to its
-    /// right) is permitted as legitimate literal-tail
-    /// post-processing.
+    @inline(__always)
+    private static func isAsteriskScalar(_ v: UInt32) -> Bool {
+        v == 0x002A
+    }
+
+    @inline(__always)
+    private static func isDocPunctScalar(_ v: UInt32) -> Bool {
+        v == 0x003A || v == 0x002E
+    }
+
+    /// True when `surface` contains a PURE strict-consume run
+    /// (only `*`/`'`, no `.`/`:`) directly between two Myanmar
+    /// scalars where the run either contains `*` (asterisk has no
+    /// document-punct role) OR has ≥2 strict-consume chars
+    /// (doubled apostrophe leaks even though single `'` between
+    /// Myanmar is silently consumed).
+    ///
+    /// Mixed-punct runs (containing `.` or `:`) are LEGITIMATE
+    /// document punctuation per `MidBufferPunctuationSuite`
+    /// (`ka*.tar` → `က*.တာ`, `ka..tar` → `က..တာ`).
+    /// Trailing or leading punct (no Myanmar on the other side)
+    /// is permitted per `ApostropheLiteralSuite` (`thar'`,
+    /// `'thar`, `'thar'`). Myanmar punctuation U+104A / U+104B
+    /// (`၊` / `။`) is treated as document punct, NOT as Myanmar
+    /// for adjacency, so `<C><*><။><C>` is also allowed.
     private static func hasInterleavedComposingPunct(_ surface: String) -> Bool {
         let scalars = Array(surface.unicodeScalars).map(\.value)
-        guard scalars.count >= 4 else { return false }
+        guard scalars.count >= 3 else { return false }
+        @inline(__always) func isMyanmarLetter(_ v: UInt32) -> Bool {
+            (v >= 0x1000 && v <= 0x109F) && v != 0x104A && v != 0x104B
+        }
         var i = 0
         while i < scalars.count {
             guard isComposingPunctScalar(scalars[i]) else {
@@ -68,42 +84,51 @@ public enum DoubledLiteralPunctSuite {
             }
             var runEnd = i + 1
             var strictConsumeCount = isStrictConsumePunctScalar(scalars[i]) ? 1 : 0
+            var asteriskCount = isAsteriskScalar(scalars[i]) ? 1 : 0
+            var docPunctCount = isDocPunctScalar(scalars[i]) ? 1 : 0
             while runEnd < scalars.count, isComposingPunctScalar(scalars[runEnd]) {
                 if isStrictConsumePunctScalar(scalars[runEnd]) { strictConsumeCount += 1 }
+                if isAsteriskScalar(scalars[runEnd]) { asteriskCount += 1 }
+                if isDocPunctScalar(scalars[runEnd]) { docPunctCount += 1 }
                 runEnd += 1
             }
-            guard strictConsumeCount >= 2 else {
+            guard docPunctCount == 0 else {
                 i = runEnd
                 continue
             }
-            var leftHasMyanmar = false
-            var j = i - 1
-            while j >= 0 {
-                if isMyanmarScalar(scalars[j]) { leftHasMyanmar = true; break }
-                j -= 1
+            guard asteriskCount >= 1 || strictConsumeCount >= 2 else {
+                i = runEnd
+                continue
             }
-            var rightHasMyanmar = false
-            var k = runEnd
-            while k < scalars.count {
-                if isMyanmarScalar(scalars[k]) { rightHasMyanmar = true; break }
-                k += 1
-            }
-            if leftHasMyanmar && rightHasMyanmar { return true }
+            let hasLeftMyanmar = i > 0 && isMyanmarLetter(scalars[i - 1])
+            let hasRightMyanmar = runEnd < scalars.count && isMyanmarLetter(scalars[runEnd])
+            if hasLeftMyanmar && hasRightMyanmar { return true }
             i = runEnd
         }
         return false
     }
 
-    /// Reproduction inputs from TASK-056's bug class — runs of two or
-    /// more contiguous composing-punct scalars between Myanmar scalars
-    /// where the run includes a strict-consume punct (`*` asat marker
-    /// or `'` inherent-vowel separator). Doubled-`:`/`.` runs without
-    /// a `*`/`'` are EXCLUDED from this list because the existing
-    /// `MidBufferPunctuationSuite` enforces them as legitimate
-    /// document-punctuation passthroughs (`ka..tar` → `က..တာ`,
-    /// `ka::tar` → `က::တာ`); only the strict-consume class can leak
-    /// pathologically because those chars have no semantic role
-    /// outside their consume-as-asat / consume-as-separator paths.
+    /// Reproduction inputs from TASK-056's bug class. The shared
+    /// invariant: no candidate surface may contain a `*` or doubled
+    /// `'` directly between Myanmar letter scalars. Three sub-classes:
+    ///
+    /// 1. **Doubled `**` / `''` mid-buffer** — original bug
+    ///    (`k**ar` → leaked `က**အာ`, `kar''ka` → leaked `ကာ''က`).
+    /// 2. **Mixed `*'` / `'*` strict-consume runs** — same shape
+    ///    with a mixed-strict run.
+    /// 3. **Single `*` directly between Myanmar via tone consumption
+    ///    of a neighbouring `.`/`:`** (gap-fix coverage). When `.`
+    ///    or `:` consumes as a tone marker (U+1037 / U+1038 — both
+    ///    in the Myanmar range), an adjacent `*` ends up between
+    ///    `<tone> 002A <Myanmar>`, leaking the asterisk verbatim
+    ///    (`kar.*ar` → leaked `ကာ့*အာ`, `kar:*ar` → leaked
+    ///    `ကား*အာ`, etc.).
+    ///
+    /// Doubled-`:`/`.` runs without `*`/`'`, mixed runs containing
+    /// `.`/`:` (`*.`, `'.`, `*..`, `.*`, `:*.`), and trailing /
+    /// leading singleton `'` are EXCLUDED — those are legitimate
+    /// document-punctuation passthroughs enforced by
+    /// `MidBufferPunctuationSuite` and `ApostropheLiteralSuite`.
     private static let bugInputs: [String] = [
         // Doubled asterisk
         "k**ar", "k**ka", "k**a", "ka**ka", "ka**ar", "kar**ka", "kar**ar",
@@ -117,6 +142,12 @@ public enum DoubledLiteralPunctSuite {
         "k*'ar", "k'*ar",
         // Two real syllables joined with strict-consume run
         "kya**kar", "kya''kar",
+        // Gap-fix coverage: single `*` between Myanmar scalars
+        // where the neighbouring `.`/`:` got consumed as a tone
+        // marker (1037 / 1038), leaving `*` orphaned. The pre-fix
+        // pipeline left these as `<C><vowel><tone><002A><Myanmar>`.
+        "kar.*ar", "kar:*ar", "kya.*kar", "kya:*kar",
+        "ka.*ar", "ka:*ar",
     ]
 
     /// Inputs whose top surface must be pure Myanmar OR the literal
@@ -138,6 +169,19 @@ public enum DoubledLiteralPunctSuite {
         // resolution as `kar*` itself.
         ("kar**", "\u{1000}\u{101B}\u{103A}"),                            // ကရ်
         ("kar***", "\u{1000}\u{101B}\u{103A}"),                           // ကရ်
+        // Mixed-punct passthroughs (MidBufferPunctuationSuite invariants):
+        // `*` adjacent to `.`/`:` is interpreted as part of a literal
+        // document-punct group, not as an orphaned asat. The Myanmar
+        // candidate keeps the `*.`, `.*`, `*:`, `:*` shape verbatim.
+        ("ka*.tar", "\u{1000}\u{002A}\u{002E}\u{1010}\u{102C}"),           // က*.တာ
+        ("ka.*tar", "\u{1000}\u{002E}\u{002A}\u{1010}\u{102C}"),           // က.*တာ
+        ("ka..tar", "\u{1000}\u{002E}\u{002E}\u{1010}\u{102C}"),           // က..တာ
+        ("ka::tar", "\u{1000}\u{003A}\u{003A}\u{1010}\u{102C}"),           // က::တာ
+        // Trailing-singleton `'` survives as quote mark
+        // (ApostropheLiteralSuite invariant).
+        ("kar'", "\u{1000}\u{102C}\u{0027}"),                              // ကာ'
+        // Trailing-doubled `''` survives (no Myanmar to its right).
+        ("kar''", "\u{1000}\u{102C}\u{0027}\u{0027}"),                     // ကာ''
     ]
 
     public static let suite = TestSuite(name: "DoubledLiteralPunct", cases: [
