@@ -130,6 +130,46 @@ public final class BurmeseEngine: @unchecked Sendable {
     private var stackInferenceParseCache: [StackInferenceParseCache] = []
     private static let maxStackInferenceParseCache = 16
 
+    /// LRU cache for the strict (non-liberal) `parseCandidates` calls
+    /// the engine makes per keystroke against the active tail and the
+    /// full normalized buffer (TASK-051). The active-tail parse at
+    /// line ~816 and any window-fallback re-parse at line ~1080
+    /// dominate per-keystroke latency once the tail contains
+    /// nga-asat-emitting vowel rules in chains; without this cache
+    /// each iteration of a steady-state buffer (the bench's
+    /// `vowel_rule_chain_*` scenarios) repeats the same parse work.
+    /// Keyed by `(input, maxResults, isFullBuffer)` — `allowLiberalStacks`
+    /// is implicitly `false` here, since the liberal path lives in
+    /// `stackInferenceParseCache`.
+    private struct GrammarParseCache {
+        let input: String
+        let maxResults: Int
+        let isFullBuffer: Bool
+        let parses: [SyllableParse]
+    }
+    private var grammarParseCache: [GrammarParseCache] = []
+    private static let maxGrammarParseCache = 16
+
+    /// Window-split decision cache (TASK-051). For long buffers
+    /// `findSyllableSafeSplit` walks up to ~24 candidate split
+    /// positions, each running 4 parser passes — ~26ms per call on
+    /// the `vowel_rule_chain_aing_8` shape where every `aing`-`g`
+    /// boundary is structurally unsafe and the function falls
+    /// through to the target. Most of the work is wasted: the same
+    /// `(normalized, lowerBound)` pair always returns the same
+    /// answer. Memoising it eliminates the per-keystroke walk on
+    /// steady-state buffers. Capacity 8 covers the realistic
+    /// per-engine working set (one in-flight buffer plus its recent
+    /// length-extended siblings).
+    private struct WindowSplitCache {
+        let normalized: String
+        let lowerBound: Int
+        let split: Int
+    }
+    private var windowSplitCache: [WindowSplitCache] = []
+    private static let maxWindowSplitCache = 8
+
+
     /// History of anchors (checkpoints) ordered by `normalized.count`.
     /// When the latest/deepest anchor's tail can't parse standalone
     /// (e.g. a single "a" or ":"), we fall back to an earlier checkpoint
@@ -313,6 +353,8 @@ public final class BurmeseEngine: @unchecked Sendable {
             cacheLock.lock()
             anchorHistory.removeAll()
             stackInferenceParseCache.removeAll()
+            grammarParseCache.removeAll()
+            windowSplitCache.removeAll()
             lastHistoryKey = ""
             cacheLock.unlock()
             return CompositionState(committedContext: context)
@@ -717,7 +759,7 @@ public final class BurmeseEngine: @unchecked Sendable {
                 else { continue }
                 let tail = String(normalized.suffix(normalized.count - anchor.normalized.count))
                 guard tail.count >= minAnchorTailLen else { continue }
-                let probe = parser.parseCandidates(tail, maxResults: 1)
+                let probe = cachedGrammarParses(tail, maxResults: 1, isFullBuffer: true)
                 if probe.contains(where: { Self.isAcceptableParse($0) }) {
                     return anchor
                 }
@@ -785,9 +827,8 @@ public final class BurmeseEngine: @unchecked Sendable {
                 split = cached
             } else {
                 let splitLowerBound = max(cachedLen ?? 0, anchorCommitThreshold)
-                split = Self.findSyllableSafeSplit(
+                split = cachedFindSyllableSafeSplit(
                     in: normalized,
-                    parser: parser,
                     targetTail: compositionWindowSize,
                     lowerBound: splitLowerBound
                 )
@@ -813,7 +854,7 @@ public final class BurmeseEngine: @unchecked Sendable {
         var effectiveParseInput = parseInput
         var effectivePrefixBranches = prefixBranches
         var effectiveWindowed = windowed
-        var grammarParses = parser.parseCandidates(
+        var grammarParses = cachedGrammarParses(
             effectiveParseInput,
             maxResults: Self.grammarCandidateBudget(for: effectiveParseInput),
             isFullBuffer: !effectiveWindowed
@@ -1077,7 +1118,7 @@ public final class BurmeseEngine: @unchecked Sendable {
             effectivePrefixBranches = []
             effectiveWindowed = false
             windowFallback = true
-            grammarParses = parser.parseCandidates(
+            grammarParses = cachedGrammarParses(
                 effectiveParseInput,
                 maxResults: Self.grammarCandidateBudget(for: effectiveParseInput),
                 isFullBuffer: !effectiveWindowed
@@ -2704,6 +2745,96 @@ public final class BurmeseEngine: @unchecked Sendable {
         if stackInferenceParseCache.count > Self.maxStackInferenceParseCache {
             stackInferenceParseCache.removeLast(
                 stackInferenceParseCache.count - Self.maxStackInferenceParseCache
+            )
+        }
+        cacheLock.unlock()
+        return parses
+    }
+
+    /// LRU-cached strict (non-liberal) `parseCandidates`. TASK-051:
+    /// the active-tail and window-fallback parses run on the same
+    /// input every keystroke when the user holds a steady buffer
+    /// (the bench's `vowel_rule_chain_*` scenarios) and per-keystroke
+    /// re-parsing dominates latency on chains of nga-asat-emitting
+    /// vowel rules. Caching the result by `(input, maxResults,
+    /// isFullBuffer)` reduces the steady-state cost to a hash lookup.
+    /// LRU-cached `findSyllableSafeSplit`. TASK-051: the search loop
+    /// performs up to ~24 candidate-split parser passes when no safe
+    /// boundary exists in the active tail (e.g. `aing × N` chains
+    /// where every position fails `isImplicitNCodaSplit` /
+    /// `isConsonantVowelSplit`). The result depends only on
+    /// `(normalized, lowerBound)` so memoising it across keystrokes
+    /// turns the steady-state cost into a hash lookup.
+    internal func cachedFindSyllableSafeSplit(
+        in normalized: String,
+        targetTail: Int,
+        lowerBound: Int
+    ) -> Int {
+        cacheLock.lock()
+        if let idx = windowSplitCache.firstIndex(where: {
+            $0.normalized == normalized && $0.lowerBound == lowerBound
+        }) {
+            let entry = windowSplitCache.remove(at: idx)
+            windowSplitCache.insert(entry, at: 0)
+            cacheLock.unlock()
+            return entry.split
+        }
+        cacheLock.unlock()
+        let split = Self.findSyllableSafeSplit(
+            in: normalized,
+            parser: parser,
+            targetTail: targetTail,
+            lowerBound: lowerBound
+        )
+        cacheLock.lock()
+        windowSplitCache.insert(WindowSplitCache(
+            normalized: normalized,
+            lowerBound: lowerBound,
+            split: split
+        ), at: 0)
+        if windowSplitCache.count > Self.maxWindowSplitCache {
+            windowSplitCache.removeLast(
+                windowSplitCache.count - Self.maxWindowSplitCache
+            )
+        }
+        cacheLock.unlock()
+        return split
+    }
+
+    internal func cachedGrammarParses(
+        _ input: String,
+        maxResults: Int,
+        isFullBuffer: Bool
+    ) -> [SyllableParse] {
+        cacheLock.lock()
+        if let idx = grammarParseCache.firstIndex(where: {
+            $0.input == input
+                && $0.maxResults == maxResults
+                && $0.isFullBuffer == isFullBuffer
+        }) {
+            let entry = grammarParseCache.remove(at: idx)
+            grammarParseCache.insert(entry, at: 0)
+            cacheLock.unlock()
+            return entry.parses
+        }
+        cacheLock.unlock()
+
+        let parses = parser.parseCandidates(
+            input,
+            maxResults: maxResults,
+            isFullBuffer: isFullBuffer
+        )
+
+        cacheLock.lock()
+        grammarParseCache.insert(GrammarParseCache(
+            input: input,
+            maxResults: maxResults,
+            isFullBuffer: isFullBuffer,
+            parses: parses
+        ), at: 0)
+        if grammarParseCache.count > Self.maxGrammarParseCache {
+            grammarParseCache.removeLast(
+                grammarParseCache.count - Self.maxGrammarParseCache
             )
         }
         cacheLock.unlock()

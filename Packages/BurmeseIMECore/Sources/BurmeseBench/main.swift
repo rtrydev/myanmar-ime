@@ -69,6 +69,38 @@ let scenarios: [Scenario] = [
     Scenario(name: "repetition_tha30",
              kind: .fullBuffer(String(repeating: "tha", count: 30)),
              iterations: 200),
+    // TASK-051: repeated nga-asat-emitting vowel rules. Each `aing`,
+    // `aung`, `in` rule feeds the implicit-stack inference scan
+    // (`inferImplicitStackMarkers`) which in turn drives up to three
+    // parser passes per keystroke (full / strict-only / promotable-
+    // only siblings). Without per-onset memoisation the cost
+    // compounds super-linearly with the number of vowel-rule sites
+    // in the active tail. These three scenarios lock in a
+    // post-fix budget on the worst-case shapes.
+    Scenario(name: "vowel_rule_chain_aing_8",
+             kind: .fullBuffer(String(repeating: "aing", count: 8)),
+             iterations: 200),
+    // Slope-control sibling for `vowel_rule_chain_aing_8`. The
+    // TASK-051 acceptance criterion is `aing × 8` p50 ≤ 4 ×
+    // `aing × 4` p50, so this scenario locks in the linear-or-better
+    // scaling that the fix preserves. Pre-fix the ratio was ~7×
+    // and growing.
+    Scenario(name: "vowel_rule_chain_aing_4",
+             kind: .fullBuffer(String(repeating: "aing", count: 4)),
+             iterations: 200),
+    // No-regression floor sibling. The TASK-051 acceptance criterion
+    // requires `aing × 2` post-fix p50 to stay within 25% of the
+    // pre-fix number, so a fix that flattens the steep tail by
+    // adding constant-factor overhead to short inputs is rejected.
+    Scenario(name: "vowel_rule_chain_aing_2",
+             kind: .fullBuffer(String(repeating: "aing", count: 2)),
+             iterations: 200),
+    Scenario(name: "vowel_rule_chain_aung_8",
+             kind: .fullBuffer(String(repeating: "aung", count: 8)),
+             iterations: 200),
+    Scenario(name: "vowel_rule_chain_in_10",
+             kind: .fullBuffer(String(repeating: "in", count: 10)),
+             iterations: 200),
 ]
 
 // MARK: - Timing

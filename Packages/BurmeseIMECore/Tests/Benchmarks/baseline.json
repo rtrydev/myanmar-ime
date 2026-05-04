@@ -5,97 +5,142 @@
         {
     "scenario": "short",
     "iterations": 1000,
-    "p50_us": 279.03,
-    "p95_us": 289.11,
-    "p99_us": 311.51,
-    "max_us": 445.02,
+    "p50_us": 249.10,
+    "p95_us": 255.97,
+    "p99_us": 265.32,
+    "max_us": 515.08,
     "allocations": 0
   },
           {
     "scenario": "medium",
     "iterations": 1000,
-    "p50_us": 1119.69,
-    "p95_us": 1186.41,
-    "p99_us": 1451.10,
-    "max_us": 1716.71,
+    "p50_us": 405.48,
+    "p95_us": 434.25,
+    "p99_us": 440.18,
+    "max_us": 1384.61,
     "allocations": 0
   },
           {
     "scenario": "long",
     "iterations": 500,
-    "p50_us": 3539.23,
-    "p95_us": 3671.04,
-    "p99_us": 4064.32,
-    "max_us": 5937.97,
+    "p50_us": 703.07,
+    "p95_us": 710.79,
+    "p99_us": 719.05,
+    "max_us": 6942.96,
     "allocations": 0
   },
           {
     "scenario": "incremental",
     "iterations": 481,
-    "p50_us": 1983.76,
-    "p95_us": 4825.53,
-    "p99_us": 5068.16,
-    "max_us": 5156.52,
+    "p50_us": 2016.63,
+    "p95_us": 4888.61,
+    "p99_us": 5105.93,
+    "max_us": 5239.31,
     "allocations": 0
   },
           {
     "scenario": "garbage",
     "iterations": 200,
-    "p50_us": 883.48,
-    "p95_us": 1102.98,
-    "p99_us": 1238.25,
-    "max_us": 1273.13,
+    "p50_us": 804.86,
+    "p95_us": 814.55,
+    "p99_us": 911.30,
+    "max_us": 917.52,
     "allocations": 0
   },
           {
     "scenario": "garbage_incremental",
     "iterations": 496,
-    "p50_us": 648.89,
-    "p95_us": 858.71,
-    "p99_us": 890.53,
-    "max_us": 1058.33,
+    "p50_us": 585.88,
+    "p95_us": 790.73,
+    "p99_us": 810.29,
+    "max_us": 843.76,
     "allocations": 0
   },
           {
     "scenario": "repetition_t16",
     "iterations": 200,
-    "p50_us": 2773.87,
-    "p95_us": 2879.46,
-    "p99_us": 2979.77,
-    "max_us": 3284.89,
+    "p50_us": 1522.47,
+    "p95_us": 1549.21,
+    "p99_us": 1611.20,
+    "max_us": 2831.93,
     "allocations": 0
   },
           {
     "scenario": "plus_chain_30",
     "iterations": 200,
-    "p50_us": 708.81,
-    "p95_us": 726.48,
-    "p99_us": 835.35,
-    "max_us": 1130.64,
+    "p50_us": 667.63,
+    "p95_us": 677.24,
+    "p99_us": 683.38,
+    "max_us": 691.36,
     "allocations": 0
   },
           {
     "scenario": "cluster_alias_j16",
     "iterations": 200,
-    "p50_us": 3546.12,
-    "p95_us": 3642.39,
-    "p99_us": 3936.82,
-    "max_us": 3979.97,
+    "p50_us": 1863.68,
+    "p95_us": 1891.22,
+    "p99_us": 2021.81,
+    "max_us": 3644.80,
     "allocations": 0
   },
           {
     "scenario": "repetition_tha30",
     "iterations": 200,
-    "p50_us": 5811.27,
-    "p95_us": 6623.23,
-    "p99_us": 7130.19,
-    "max_us": 51594.07,
+    "p50_us": 2968.40,
+    "p95_us": 3082.15,
+    "p99_us": 3359.23,
+    "max_us": 51636.18,
+    "allocations": 0
+  },
+          {
+    "scenario": "vowel_rule_chain_aing_8",
+    "iterations": 200,
+    "p50_us": 1637.83,
+    "p95_us": 1691.92,
+    "p99_us": 1821.48,
+    "max_us": 35241.75,
+    "allocations": 0
+  },
+          {
+    "scenario": "vowel_rule_chain_aing_4",
+    "iterations": 200,
+    "p50_us": 1450.63,
+    "p95_us": 1537.07,
+    "p99_us": 1591.03,
+    "max_us": 4450.59,
+    "allocations": 0
+  },
+          {
+    "scenario": "vowel_rule_chain_aing_2",
+    "iterations": 200,
+    "p50_us": 269.04,
+    "p95_us": 278.69,
+    "p99_us": 282.18,
+    "max_us": 543.82,
+    "allocations": 0
+  },
+          {
+    "scenario": "vowel_rule_chain_aung_8",
+    "iterations": 200,
+    "p50_us": 873.32,
+    "p95_us": 879.15,
+    "p99_us": 900.44,
+    "max_us": 9622.34,
+    "allocations": 0
+  },
+          {
+    "scenario": "vowel_rule_chain_in_10",
+    "iterations": 200,
+    "p50_us": 4511.55,
+    "p95_us": 5001.92,
+    "p99_us": 5054.24,
+    "max_us": 29653.44,
     "allocations": 0
   }
     ],
     "meta": {
-      "commit": "d5eeeab",
-      "date": "2026-05-03T15:14:58Z"
+      "commit": "46e037f",
+      "date": "2026-05-04T07:21:44Z"
     }
   },
     "macos": {
