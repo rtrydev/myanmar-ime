@@ -103,5 +103,6 @@ public enum BurmeseTestSuites {
         AsatAfterDepVowelSuite.suite,
         DoubledLiteralPunctSuite.suite,
         OrphanAsatAfterToneSuite.suite,
+        CwyClusterPromotionSuite.suite,
     ]
 }

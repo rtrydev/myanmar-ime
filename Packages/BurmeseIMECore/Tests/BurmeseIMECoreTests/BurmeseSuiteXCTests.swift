@@ -338,4 +338,8 @@ final class DoubledLiteralPunctXCTests: XCTestCase {
 final class OrphanAsatAfterToneXCTests: XCTestCase {
     func testAll() { runSuite(OrphanAsatAfterToneSuite.suite, xctest: self) }
 }
+
+final class CwyClusterPromotionXCTests: XCTestCase {
+    func testAll() { runSuite(CwyClusterPromotionSuite.suite, xctest: self) }
+}
 #endif

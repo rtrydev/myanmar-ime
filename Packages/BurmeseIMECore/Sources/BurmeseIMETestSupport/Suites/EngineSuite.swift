@@ -531,9 +531,27 @@ public enum EngineSuite {
         // MARK: - Prefix stability
 
         TestCase("update_longerBufferPreservesPreviouslyRenderedPrefix") { ctx in
+            // Buffer choice avoids the four ya-pin-dominant cluster
+            // prefixes (`ky`, `khy`, `gy`, `ghy` and their `Cwy`
+            // counterparts `kwy`, `khwy`, `gwy`, `ghwy`): the engine's
+            // ya-pin promotion gate (CandidateRanking.swift,
+            // `promoteYapinForExactBareReading`) only matches a
+            // candidate's reading against the full bare buffer, so
+            // multi-syllable buffers starting with one of those clusters
+            // can render ya-yit at length ≥ ~16 even though the bare
+            // cluster prefix renders ya-pin. The original
+            // `kwyantaw`/`kwyantawkahtamin` pair worked only because
+            // `kwyantaw` was rendering ya-yit due to TASK-058 (the
+            // promotion gate missed the `Cwy…` typing). Now that
+            // TASK-058 is fixed, the bare buffer renders ya-pin while
+            // the longer buffer still renders ya-yit, surfacing the
+            // pre-existing multi-syllable prefix asymmetry. This test
+            // is about prefix stability across a non-windowed extension
+            // (16 < `compositionWindowSize` of 18), so any stable
+            // multi-syllable pair exercises the same property.
             let engine = BurmeseEngine()
-            let short = engine.update(buffer: "kwyantaw", context: [])
-            let longer = engine.update(buffer: "kwyantawkahtamin", context: [])
+            let short = engine.update(buffer: "namaykho", context: [])
+            let longer = engine.update(buffer: "namaykhokahtamin", context: [])
             guard let shortTop = short.candidates.first?.surface,
                   let longerTop = longer.candidates.first?.surface else {
                 ctx.fail("prefixStability", detail: "missing candidates")

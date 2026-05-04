@@ -389,8 +389,23 @@ extension BurmeseEngine {
     /// is mixed for those (e.g. `ဆျ` rare; `ရှ` is the canonical sh-
     /// cluster anyway) and the structural `Cy` → ya-yit rule there
     /// matches user expectation.
+    ///
+    /// The medial-w-first typing variants (`khwy`, `ghwy`, `kwy`, `gwy`)
+    /// are listed alongside their `Cy…` counterparts because the parser
+    /// canonicalises medial typing order before trie lookup
+    /// (`canonicalizeOnsetProbes` in `Parser/Matching.swift`) — both
+    /// `Cyw…` and `Cwy…` typings produce the same canonical onset
+    /// (`<C> 103B 103D` for ya-pin, `<C> 103C 103D` for ya-yit), so the
+    /// promotion gate must recognise both spellings of the same onset
+    /// (TASK-058). Excluded clusters and their `Cwy` typings
+    /// (`chwy` / `phwy` / `shwy`) remain unlisted and stay on the
+    /// existing structural `Cy` → ya-yit rule. Keys are listed longest-
+    /// first so `khwy` / `ghwy` are preferred over `kwy` / `gwy`, and
+    /// 3-char clusters over 2-char `ky` / `gy`.
     internal static let yaPinPreferredOnsetClusters: [String] = [
-        "khy", "ghy", "ky", "gy",
+        "khwy", "ghwy",
+        "khy", "ghy", "kwy", "gwy",
+        "ky", "gy",
     ]
 
     /// Typing-intent promotion for ya-pin readings: when the user buffer
@@ -485,13 +500,14 @@ extension BurmeseEngine {
 
     /// Returns true if `buffer`'s first onset cluster is in
     /// `yaPinPreferredOnsetClusters`. The cluster keys are listed
-    /// longest-first so `khy` / `ghy` are preferred over `ky` / `gy`
-    /// when both would prefix the buffer. The parser interprets the
-    /// cluster as the first onset regardless of what follows it
-    /// (consonant, vowel, digit, or end of buffer), so the prefix
-    /// match alone is the correct trigger — buffers like `gypan`
-    /// (`gy` onset + `pan` next syllable) and `kyaw` (`ky` onset +
-    /// `aw` vowel) both qualify.
+    /// longest-first so `khwy` / `ghwy` are preferred over the 3-char
+    /// variants, and 3-char clusters over `ky` / `gy` when both would
+    /// prefix the buffer. The parser interprets the cluster as the
+    /// first onset regardless of what follows it (consonant, vowel,
+    /// digit, or end of buffer), so the prefix match alone is the
+    /// correct trigger — buffers like `gypan` (`gy` onset + `pan` next
+    /// syllable), `kyaw` (`ky` onset + `aw` vowel), and `kwyantaw`
+    /// (`kwy` medial-w-first onset + `antaw`) all qualify.
     private static func bufferStartsWithYaPinCluster(_ buffer: String) -> Bool {
         for cluster in yaPinPreferredOnsetClusters where buffer.hasPrefix(cluster) {
             return true
