@@ -405,8 +405,37 @@ extension SyllableParser {
                 var j = i - 1
                 while j >= 0 {
                     let w = indices[j].value
+                    // Visarga U+1038 closes the syllable — its legal
+                    // co-occurrence with asat is `<C> 103A 1038`
+                    // (visarga AFTER asat, TASK-023). Encountering
+                    // `1038 103A` in a backward walk means the asat
+                    // is trailing a tone-closed cluster with no legal
+                    // anchor (`1000 102C 1038 103A` / `ကား်`). Reject.
+                    if w == 0x1038 {
+                        return false
+                    }
+                    // Creaky U+1037 may legitimately precede the asat
+                    // ONLY in the stop-coda shape `<C> 1037 103A`
+                    // (TASK-023) — i.e. the scalar immediately before
+                    // the creaky must be a consonant base. When the
+                    // creaky follows a dep-vowel, medial, or other
+                    // mark, the cluster has already received its
+                    // closing tone and the trailing asat has no
+                    // anchor (`1000 102C 1037 103A` / `ကာ့်` —
+                    // tone-closed `kar.` cannot accept a trailing
+                    // asat). The chained legal form `<C-base> <C-base>
+                    // 1037 103A` (e.g. `kan.` → `1000 1014 1037
+                    // 103A`) keeps working because j-1 is `1014`, a
+                    // consonant base. Task 48.
+                    if w == 0x1037 {
+                        if j >= 1, isConsonantBase(indices[j - 1].value) {
+                            j -= 1
+                            continue
+                        }
+                        return false
+                    }
                     let isSkippable = (w >= 0x102B && w <= 0x1032)
-                        || (w >= 0x1036 && w <= 0x1038)
+                        || w == 0x1036
                         || (w >= 0x103B && w <= 0x103E)
                     if isSkippable { j -= 1 } else { break }
                 }

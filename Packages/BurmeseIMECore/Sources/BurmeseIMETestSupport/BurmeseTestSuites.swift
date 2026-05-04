@@ -92,6 +92,7 @@ public enum BurmeseTestSuites {
         ConsonantDepVowelIndepVowelChainSuite.suite,
         AhConsonantBoundaryHSuite.suite,
         LiteralFallbackIllegalSurfaceSuite.suite,
+        AsatAfterToneSuite.suite,
         BenchBaselineFormatSuite.suite,
         ClusterAliasRepeatPerfSuite.suite,
     ]
