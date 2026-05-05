@@ -54,8 +54,15 @@ G_DEFINE_TYPE(IBusMyanglerEngine, ibus_myangler_engine, IBUS_TYPE_ENGINE)
 static gchar* resolve_data_file(const char* basename)
 {
     const gchar* env = g_getenv("MYANGLER_DATA_DIR");
+    if (env && *env) {
+        gchar* path = g_build_filename(env, basename, NULL);
+        if (g_file_test(path, G_FILE_TEST_EXISTS)) {
+            return path;
+        }
+        g_free(path);
+    }
+
     const gchar* candidates[] = {
-        env,
         "/usr/share/myangler",
         "/usr/local/share/myangler",
         NULL,

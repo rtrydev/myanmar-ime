@@ -1674,9 +1674,11 @@ public final class BurmeseEngine: @unchecked Sendable {
 
         let primaryGrammar = Array(grammarCandidates.prefix(3))
         let remainingGrammar = Array(grammarCandidates.dropFirst(3))
-        let exactAliasLexicon = uniqueLexiconCandidates.filter { $0.aliasReading == aliasPrefix }
+        let exactAliasPrefixes = Set(Romanization.lookupAliasReadings(for: normalized).map(\.aliasReading))
+        let exactComposePrefixes = Set(Romanization.lookupComposeReadings(for: normalized).map(\.composeReading))
+        let exactAliasLexicon = uniqueLexiconCandidates.filter { exactAliasPrefixes.contains($0.aliasReading) }
         let exactComposeLexicon = uniqueLexiconCandidates.filter {
-            $0.aliasReading != aliasPrefix && $0.composeReading == composePrefix
+            !exactAliasPrefixes.contains($0.aliasReading) && exactComposePrefixes.contains($0.composeReading)
         }
         let prioritizedLexicon = Array(
             (exactAliasLexicon.isEmpty ? exactComposeLexicon : exactAliasLexicon)

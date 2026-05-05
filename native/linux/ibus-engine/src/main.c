@@ -81,8 +81,14 @@ static int run_xml_mode(void)
 static gchar* find_data_file(const char* basename)
 {
     const gchar* env = g_getenv("MYANGLER_DATA_DIR");
+    if (env && *env) {
+        gchar* path = g_build_filename(env, basename, NULL);
+        if (g_file_test(path, G_FILE_TEST_EXISTS)) return path;
+        g_free(path);
+    }
+
     const gchar* candidates[] = {
-        env, "/usr/share/myangler", "/usr/local/share/myangler", NULL,
+        "/usr/share/myangler", "/usr/local/share/myangler", NULL,
     };
     for (int i = 0; candidates[i]; ++i) {
         gchar* path = g_build_filename(candidates[i], basename, NULL);

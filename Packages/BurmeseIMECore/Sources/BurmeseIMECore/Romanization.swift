@@ -448,10 +448,20 @@ public enum Romanization {
         package let aliasPenalty: Int
     }
 
+    package struct LookupAliasReading: Sendable, Equatable {
+        package let aliasReading: String
+        package let extraPenalty: Int
+    }
+
     package struct IndexedComposeReading: Sendable, Equatable {
         package let composeReading: String
         package let aliasPenalty: Int
         package let separatorPenalty: Int
+    }
+
+    package struct LookupComposeReading: Sendable, Equatable {
+        package let composeReading: String
+        package let extraPenalty: Int
     }
 
     package static func indexedAliasReadings(for canonical: String) -> [IndexedAliasReading] {
@@ -459,7 +469,7 @@ public enum Romanization {
             aliasReading: aliasReading(canonical),
             aliasPenalty: aliasPenaltyCount(for: canonical)
         )
-        return loanwordClusterAliasVariants(for: base)
+        return bareRaAsYaAliasVariants(for: loanwordClusterAliasVariants(for: base))
     }
 
     package static func indexedComposeReadings(for canonical: String) -> [IndexedComposeReading] {
@@ -472,12 +482,39 @@ public enum Romanization {
         }
     }
 
+    package static func lookupAliasReadings(for reading: String) -> [LookupAliasReading] {
+        bareYaAsRaLookupVariants(for: LookupAliasReading(
+            aliasReading: aliasReading(reading),
+            extraPenalty: 0
+        ))
+    }
+
+    package static func lookupComposeReadings(for reading: String) -> [LookupComposeReading] {
+        lookupAliasReadings(for: reading).map { variant in
+            LookupComposeReading(
+                composeReading: composeLookupKey(variant.aliasReading),
+                extraPenalty: variant.extraPenalty
+            )
+        }
+    }
+
     private struct LoanwordClusterAliasRule: Sendable {
         let canonical: String
         let aliases: [String]
     }
 
     private static let loanwordClusterAliasPenalty = 10
+    private static let bareRaAsYaAliasPenalty = 1
+
+    /// Conservative context for the native Burmese `ရ` / `ယ` homophony:
+    /// only rewrite a bare onset-like `r`/`y`, not the `r` inside `ar`
+    /// or the `y` used as a medial after another consonant.
+    private static let bareRaYaPreviousTerminators: Set<Character> = [
+        "a", "i", "u", "e", "o", ":", ".", "*"
+    ]
+    private static let bareRaYaFollowingVowelStarters: Set<Character> = [
+        "a", "i", "u", "e", "o"
+    ]
 
     private static let loanwordClusterAliasRules: [LoanwordClusterAliasRule] = [
         // Longest canonical onsets first so `khy` becomes `khr` before
@@ -522,6 +559,94 @@ public enum Romanization {
         }
 
         return variants
+    }
+
+    private static func bareRaAsYaAliasVariants(
+        for baseVariants: [IndexedAliasReading]
+    ) -> [IndexedAliasReading] {
+        var variants = baseVariants
+        var seen = Set(baseVariants.map(\.aliasReading))
+        var cursor = 0
+
+        while cursor < variants.count {
+            let variant = variants[cursor]
+            for rewritten in bareConsonantReplacementVariants(
+                in: variant.aliasReading,
+                from: "r",
+                to: "y"
+            ) where seen.insert(rewritten).inserted {
+                variants.append(IndexedAliasReading(
+                    aliasReading: rewritten,
+                    aliasPenalty: variant.aliasPenalty + bareRaAsYaAliasPenalty
+                ))
+            }
+            cursor += 1
+        }
+
+        return variants
+    }
+
+    private static func bareYaAsRaLookupVariants(
+        for base: LookupAliasReading
+    ) -> [LookupAliasReading] {
+        var variants = [base]
+        var seen: Set<String> = [base.aliasReading]
+        var cursor = 0
+
+        while cursor < variants.count {
+            let variant = variants[cursor]
+            for rewritten in bareConsonantReplacementVariants(
+                in: variant.aliasReading,
+                from: "y",
+                to: "r"
+            ) where seen.insert(rewritten).inserted {
+                variants.append(LookupAliasReading(
+                    aliasReading: rewritten,
+                    extraPenalty: variant.extraPenalty + bareRaAsYaAliasPenalty
+                ))
+            }
+            cursor += 1
+        }
+
+        return variants
+    }
+
+    private static func bareConsonantReplacementVariants(
+        in reading: String,
+        from source: Character,
+        to replacement: Character
+    ) -> [String] {
+        let chars = Array(reading)
+        guard !chars.isEmpty else { return [] }
+
+        var rewrites: [String] = []
+        for index in chars.indices where chars[index] == source {
+            guard isBareRaYaAliasSite(chars: chars, index: index) else { continue }
+            var rewritten = chars
+            rewritten[index] = replacement
+            rewrites.append(String(rewritten))
+        }
+        return rewrites
+    }
+
+    private static func isBareRaYaAliasSite(chars: [Character], index: Int) -> Bool {
+        if index > 0 {
+            let previous = chars[index - 1]
+            guard composeSeparators.contains(previous)
+                    || bareRaYaPreviousTerminators.contains(previous) else {
+                return false
+            }
+        }
+
+        if index + 1 < chars.count {
+            guard bareRaYaFollowingVowelStarters.contains(chars[index + 1]) else {
+                return false
+            }
+        } else if index > 0 {
+            return false
+        }
+
+        return true
     }
 
     static func aliasVariants(for canonical: String, baseAliasCost: Int = 0) -> [(key: String, aliasCost: Int)] {

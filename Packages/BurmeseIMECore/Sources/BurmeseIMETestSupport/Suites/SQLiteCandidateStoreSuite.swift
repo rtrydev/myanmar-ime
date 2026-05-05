@@ -86,5 +86,60 @@ public enum SQLiteCandidateStoreSuite {
             ctx.assertTrue(true, "skipped_noSQLite3")
             #endif
         },
+
+        TestCase("lookup_legacySchemaBuildsRaAsYaAlias") { ctx in
+            #if canImport(SQLite3)
+            let dbURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString + ".sqlite")
+            defer { try? FileManager.default.removeItem(at: dbURL) }
+            var db: OpaquePointer?
+            guard sqlite3_open(dbURL.path, &db) == SQLITE_OK else {
+                ctx.fail("openTempDB", detail: "sqlite3_open failed")
+                return
+            }
+            defer { sqlite3_close(db) }
+            let schema = """
+                CREATE TABLE entries (
+                    id INTEGER PRIMARY KEY,
+                    surface TEXT NOT NULL,
+                    canonical_reading TEXT NOT NULL,
+                    unigram_score REAL NOT NULL
+                );
+                CREATE TABLE reading_index (
+                    canonical_reading TEXT NOT NULL,
+                    entry_id INTEGER NOT NULL REFERENCES entries(id),
+                    rank_score REAL NOT NULL
+                );
+                INSERT INTO entries (id, surface, canonical_reading, unigram_score) VALUES
+                    (1, 'ဆရာ', 'hsarar', 1000.0),
+                    (2, 'ဆရာမ', 'hsararma', 900.0);
+                INSERT INTO reading_index (canonical_reading, entry_id, rank_score) VALUES
+                    ('hsarar', 1, 1000.0),
+                    ('hsararma', 2, 900.0);
+                """
+            guard sqlite3_exec(db, schema, nil, nil, nil) == SQLITE_OK else {
+                ctx.fail("schema", detail: "sqlite3_exec failed")
+                return
+            }
+            guard let store = SQLiteCandidateStore(path: dbURL.path) else {
+                ctx.fail("openStore", detail: "legacy-schema open failed")
+                return
+            }
+            let teacher = store.lookup(prefix: "hsayar", previousSurface: nil)
+            ctx.assertTrue(
+                teacher.contains(where: { $0.surface == "ဆရာ" }),
+                "hsayar_matches_hsarar",
+                detail: "got \(teacher)"
+            )
+            let teacherFemale = store.lookup(prefix: "hsayarma", previousSurface: nil)
+            ctx.assertTrue(
+                teacherFemale.contains(where: { $0.surface == "ဆရာမ" }),
+                "hsayarma_matches_hsararma",
+                detail: "got \(teacherFemale)"
+            )
+            #else
+            ctx.assertTrue(true, "skipped_noSQLite3")
+            #endif
+        },
     ])
 }

@@ -76,24 +76,37 @@ public final class SQLiteCandidateStore: CandidateStore, @unchecked Sendable {
     public func lookup(prefix: String, previousSurface: String?) -> [Candidate] {
         guard !prefix.isEmpty else { return [] }
 
-        let aliasPrefix = Romanization.aliasReading(prefix)
-        let composePrefix = Romanization.composeLookupKey(prefix)
-        let upperBound = prefixUpperBound(aliasPrefix)
-        let composeUpperBound = prefixUpperBound(composePrefix)
-
         var candidates: [Candidate] = []
-        candidates += lookupPrefix(prefix: aliasPrefix, upperBound: upperBound)
-        candidates += lookupComposePrefix(prefix: composePrefix, upperBound: composeUpperBound)
+        for variant in Romanization.lookupAliasReadings(for: prefix) {
+            let upperBound = prefixUpperBound(variant.aliasReading)
+            candidates += applyLookupPenalty(
+                lookupPrefix(prefix: variant.aliasReading, upperBound: upperBound),
+                variant.extraPenalty
+            )
+        }
+        for variant in Romanization.lookupComposeReadings(for: prefix) {
+            let upperBound = prefixUpperBound(variant.composeReading)
+            candidates += applyLookupPenalty(
+                lookupComposePrefix(prefix: variant.composeReading, upperBound: upperBound),
+                variant.extraPenalty
+            )
+        }
         return deduplicateCandidates(candidates)
     }
 
     public func lookupExactForLattice(reading: String) -> [(candidate: Candidate, aliasPenalty: Int)] {
         guard !reading.isEmpty else { return [] }
-        let aliasKey = Romanization.aliasReading(reading)
-        let composeKey = Romanization.composeLookupKey(reading)
         var results: [(candidate: Candidate, aliasPenalty: Int)] = []
-        results += lookupExactAliasWithPenalty(reading: aliasKey)
-        results += lookupExactComposeWithPenalty(reading: composeKey)
+        for variant in Romanization.lookupAliasReadings(for: reading) {
+            results += lookupExactAliasWithPenalty(reading: variant.aliasReading).map {
+                ($0.candidate, $0.aliasPenalty + variant.extraPenalty)
+            }
+        }
+        for variant in Romanization.lookupComposeReadings(for: reading) {
+            results += lookupExactComposeWithPenalty(reading: variant.composeReading).map {
+                ($0.candidate, $0.aliasPenalty + variant.extraPenalty)
+            }
+        }
         // Dedupe by surface, keeping the first (higher-ranked) entry.
         var seen: Set<String> = []
         var deduped: [(candidate: Candidate, aliasPenalty: Int)] = []
@@ -118,8 +131,18 @@ public final class SQLiteCandidateStore: CandidateStore, @unchecked Sendable {
         exactLookupCacheLock.unlock()
 
         var candidates: [Candidate] = []
-        candidates += lookupExactAlias(reading: aliasKey)
-        candidates += lookupExactCompose(reading: composeKey)
+        for variant in Romanization.lookupAliasReadings(for: reading) {
+            candidates += applyLookupPenalty(
+                lookupExactAlias(reading: variant.aliasReading),
+                variant.extraPenalty
+            )
+        }
+        for variant in Romanization.lookupComposeReadings(for: reading) {
+            candidates += applyLookupPenalty(
+                lookupExactCompose(reading: variant.composeReading),
+                variant.extraPenalty
+            )
+        }
         let deduped = deduplicateCandidates(candidates)
 
         exactLookupCacheLock.lock()
@@ -656,5 +679,18 @@ public final class SQLiteCandidateStore: CandidateStore, @unchecked Sendable {
         }
 
         return unique
+    }
+
+    private func applyLookupPenalty(_ candidates: [Candidate], _ penalty: Int) -> [Candidate] {
+        guard penalty > 0 else { return candidates }
+        let scorePenalty = Double(penalty) * 1000.0
+        return candidates.map {
+            Candidate(
+                surface: $0.surface,
+                reading: $0.reading,
+                source: $0.source,
+                score: $0.score - scorePenalty
+            )
+        }
     }
 }
