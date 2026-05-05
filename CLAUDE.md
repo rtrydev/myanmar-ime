@@ -160,12 +160,95 @@ run concurrently: use fresh `BurmeseEngine` instances and UUID-distinct
 state. `FUZZ_BUDGET_MS` caps the fuzz suite's wall-clock time (default
 1000 ms).
 
+### Engine layers — pick the right level for a probe or test
+
+`BurmeseEngine` is one type with three meaningfully different shapes
+depending on what you pass at construction time. Confusing them is the
+single most common way an agent reaches a wrong conclusion, because
+ranking, selection, and even which candidates appear in the panel
+differ between layers. **Match the probe (or test) to the layer the
+real bug lives at.**
+
+| Layer | Construction | What it covers | What it does *not* see |
+|---|---|---|---|
+| **Parser-only** | `SyllableParser()` | Onset/vowel rule matching, N-best DP, parser-level legality scoring | Engine post-processing (aa-shape, ZWNJ sanitizer, literal-fallback, frozen prefix), all ranking, lexicon, LM |
+| **Bare engine** | `BurmeseEngine()` (no args) | Full engine pipeline: post-processing + grammar/parser-tier ranking + alias cost + literal-fallback | LM context (`NullLanguageModel` returns constant scores), lexicon (`EmptyCandidateStore`), user history |
+| **Production-equivalent** | `BurmeseEngine(candidateStore: SQLiteCandidateStore(path: BundledArtifacts.lexiconPath!), languageModel: try TrigramLanguageModel(path: BundledArtifacts.trigramLMPath!))` | What the user sees: orthographic legality → alias cost → **LM log-prob → lexicon frequency** → parser tie-breaker | User history (still empty unless explicitly wired) |
+
+The macOS controller and the Linux FFI both load the bundled SQLite
+lexicon + trigram LM at startup
+([`BurmeseInputController.swift:18–69`](native/macos/BurmeseIME/BurmeseInputController.swift),
+[`FFI.swift:21–75`](native/linux/swift-shim/Sources/BurmeseIMEFFI/FFI.swift)),
+so production = production-equivalent. Anything else is below the user.
+
+**Decision rubric.** Default to the lowest layer that *can actually
+reproduce the bug.* Going lower (parser-only when the issue is engine
+post-processing) hides interactions; going higher (production-equivalent
+for a pure parser rule) buries the signal under LM noise.
+
+- Pure rule-table / DP / legality issue → **parser-only**.
+- Aa-shape, ZWNJ sanitizer, literal fallback, candidate composition,
+  affix re-merge, frozen-prefix split, *non-ranking* engine logic →
+  **bare engine** (LM/lexicon would only mask the signal).
+- Anything where the question is *"why did rank 0 come out as X
+  instead of Y"* — variant disambiguation, ya-pin/ya-yit medial
+  choice, lexicon-promoted candidates, multi-syllable buffers — use
+  **production-equivalent**. The bare-engine ranking can disagree
+  with what the user sees, sometimes dramatically. TASK-058 / TASK-059
+  are the canonical cautionary tales: a ya-pin promotion gate that
+  fired correctly under bare-engine on single-syllable inputs but
+  silently missed on multi-syllable ones — masked end-to-end by the
+  LM in production, only visible at the bare-engine layer. An agent
+  probing only at the bare layer would either over-claim a regression
+  (because the LM-masked production is fine) or under-claim a fix
+  (because the user-visible path was never broken).
+- Mid-buffer / multi-syllable composition, sentence-level cases,
+  lexicon-driven word boundary effects → **production-equivalent**,
+  full stop. The LM is the thing that resolves these in production,
+  and a bare engine answers a different question.
+
+When you write a *test*, the same layering applies. Most existing
+suites construct a bare engine — that's appropriate for the
+non-ranking invariants they assert (parse legality, sanitizer
+correctness, literal fallback shape). Suites whose claim is
+*"production rank 0 surface is X for input Y"* must use the
+production-equivalent constructor; the established pattern is a
+private `bundledEngine(_ ctx:)` helper that pulls
+`BundledArtifacts.lexiconPath` / `trigramLMPath` and skips cleanly
+when artifacts are absent (e.g.
+[`AnchorStabilitySuite.swift:6–15`](Packages/BurmeseIMECore/Sources/BurmeseIMETestSupport/Suites/AnchorStabilitySuite.swift),
+[`LexiconRankingSuite`](Packages/BurmeseIMECore/Sources/BurmeseIMETestSupport/Suites/LexiconRankingSuite.swift),
+`MedialStabilitySuite`, `MidBufferStackInferenceSuite`,
+`WindowingKinziAcrossThresholdSuite`). Copy that pattern; do not
+write `BurmeseEngine()` for a ranking claim and assume it generalises.
+
+If you cannot reproduce a bug at any layer with `BundledArtifacts`,
+that is meaningful information: the issue may live in the IMK / IBus
+keystroke layer (controller-level state, not engine-level), in user
+history (which neither layer wires up), or in a settings-driven
+parser rebuild path (`useClusterAliases`, etc.). In those cases the
+right move is *not* to keep probing — it is to test in the actual
+shell (`scripts/dev-install.sh` + `ibus restart` + type in `gedit` on
+Linux; install the .pkg and toggle the input source on macOS).
+
+> **Future direction — integration suites.** Today the
+> production-equivalent suites listed above are the closest thing to
+> an integration layer, and they only test the engine. There is no
+> automated coverage for the IMK keystroke loop or the IBus
+> `process_key_event` path; controller-level regressions are caught
+> by hand. A keystroke-driver suite (script a sequence of keysyms,
+> assert the committed string + preedit at each step) would close
+> that gap. Not built yet — file a task before adding one.
+
 ### Behavioral probes
 
 When validating task completion or debugging edge cases, a one-off probe
 linked against the built module is faster than writing a full test case.
 Probes are useful for inspecting scalars, scores, and ranked candidates
-interactively without adding noise to the suites.
+interactively without adding noise to the suites. **Read the *Engine
+layers* table above first** and pick the construction that matches the
+bug you're chasing — most ranking-related "bugs" found via bare-engine
+probes are not bugs at all under the production stack.
 
 1. Build the core package first (see above) — the probe links against
    the per-file `.swift.o` objects under `.build/arm64-apple-macosx/debug/`.
@@ -233,6 +316,53 @@ interactively without adding noise to the suites.
    'CSQLite'*. Probes that pull in `BurmeseIMETestSupport` also need
    that target's `.swift.o` glob added to the link line.
 
+**Production-equivalent probe (for ranking / multi-syllable / lexicon-
+sensitive questions).** When the question is "what does the user
+actually see at rank 0?", construct the engine the way the IMK / IBus
+shells do — wire in the bundled lexicon and trigram LM. The same
+`BundledArtifacts` helper used by the production-data test suites
+exposes the paths:
+
+```swift
+import Foundation
+import BurmeseIMECore
+import BurmeseIMETestSupport   // for BundledArtifacts
+
+guard let lexPath = BundledArtifacts.lexiconPath,
+      let store = SQLiteCandidateStore(path: lexPath),
+      let lmPath = BundledArtifacts.trigramLMPath,
+      let lm = try? TrigramLanguageModel(path: lmPath) else {
+    fatalError("bundled lexicon/LM missing — run corpus_builder first")
+}
+let engine = BurmeseEngine(candidateStore: store, languageModel: lm)
+
+for buf in ["kywantawkahtamin", "kwyantawkahtamin"] {
+    let top = engine.update(buffer: buf, context: []).candidates.first
+    let scalars = (top?.surface ?? "").unicodeScalars
+        .map { String(format: "%04X", $0.value) }.joined(separator: " ")
+    print("\(buf)\t\(top?.surface ?? "")\t\(scalars)")
+}
+```
+
+The probe link line must include `BurmeseIMETestSupport`'s `.swift.o`
+glob in addition to `BurmeseIMECore`'s. On Linux that's roughly:
+
+```bash
+swiftc \
+  -I .build/x86_64-unknown-linux-gnu/debug/Modules \
+  -I Sources/CSQLite \
+  /tmp/<name>-probe.swift \
+  .build/x86_64-unknown-linux-gnu/debug/BurmeseIMECore.build/*.swift.o \
+  .build/x86_64-unknown-linux-gnu/debug/BurmeseIMETestSupport.build/*.swift.o \
+  -L .build/x86_64-unknown-linux-gnu/debug -lsqlite3 \
+  -o /tmp/<name>-probe
+```
+
+If `BundledArtifacts.lexiconPath` returns `nil`, the data files have
+not been built yet — re-run `corpus_builder` (see *Lexicon and LM
+data*). Do not fall back to a bare engine and call the result
+"production"; that's the trap TASK-059 documents.
+
 Notes:
 - `SyllableParser.parse(_:)` returns only the top candidate;
   `parseCandidates(_:maxResults:)` exposes the ranked N-best if tie-breakers
@@ -244,10 +374,18 @@ Notes:
   the canonical key for a given consonant before building the input.
 - `SyllableParse.output` is the parser's raw emission. Engine-level
   post-processing (e.g. `correctAaShape` switching U+102C↔U+102B) runs
-  in `BurmeseEngine`, not here — instantiate the full engine if a probe
-  needs to match lexicon surfaces exactly.
+  in `BurmeseEngine`, not here — instantiate at least the bare engine
+  for a probe that needs to match shipped surfaces, and the
+  production-equivalent engine if ranking matters.
+- A bare-engine probe and a production-equivalent probe answering the
+  same question can disagree. When they do, the production-equivalent
+  result is what the user sees and is the one to write tests / make
+  decisions against; the bare-engine result tells you which layer the
+  divergence lives in (useful for diagnosis, not for product claims).
 - Keep probes under `/tmp/` — they are intentionally throwaway. A finding
-  worth keeping graduates to a `TestCase` under `Sources/BurmeseIMETestSupport/Suites/`.
+  worth keeping graduates to a `TestCase` under `Sources/BurmeseIMETestSupport/Suites/`,
+  using the bundled-engine helper pattern when the assertion is about
+  user-visible ranking.
 
 ### Benchmarks
 
@@ -761,9 +899,16 @@ never interprets a digit as a variant selector.
 
 - Core engine changes: edit under `Packages/BurmeseIMECore/Sources/BurmeseIMECore/`,
   run `swift run TestRunner` from the package dir.
-- Adding a test: prefer adding to both
-  `Tests/BurmeseIMECoreTests/` (XCTest) and `Tests/TestRunner/main.swift`
-  so it runs without Xcode.
+- Adding a test: pick the engine layer that matches the claim — see
+  *Engine layers — pick the right level for a probe or test* under
+  Build and Test. Suites under `Sources/BurmeseIMETestSupport/Suites/`
+  are auto-picked up by both `TestRunner` and the XCTest driver; you
+  do not need to register cases in two places. Bare `BurmeseEngine()`
+  is the right default for non-ranking invariants; assertions about
+  user-visible rank-0 surface should use the bundled-engine helper
+  pattern (`AnchorStabilitySuite.bundledEngine` is the canonical
+  shape — guard on `BundledArtifacts.lexiconPath` / `trigramLMPath`
+  and skip cleanly when artifacts are absent).
 - Keystroke behavior changes (macOS): edit
   `native/macos/BurmeseIME/BurmeseInputController.swift` and test in the
   running IME (no unit-test harness for IMK). For Linux, the equivalent

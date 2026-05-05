@@ -786,6 +786,22 @@ Suites under `Sources/BurmeseIMETestSupport/Suites/`:
   surface (round-trip stable).
 - Illegal consonant+medial pairs never appear in committed output.
 
+**Two engine layers, two test styles.** Most suites construct a bare
+`BurmeseEngine()` (no language model, no lexicon) and assert
+non-ranking invariants — parser legality, sanitizer behaviour, literal
+fallback shape. Suites whose claim is about *user-visible rank-0 output*
+load the same bundled SQLite lexicon (`native/macos/Data/BurmeseLexicon.sqlite`)
+and trigram LM (`native/macos/Data/BurmeseLM.bin`) the macOS / Linux
+shells use at runtime, via the `BundledArtifacts` helper — they skip
+cleanly when those artifacts are absent (e.g. on a fresh checkout
+before `corpus_builder` has run). Examples of the bundled-engine
+pattern: `AnchorStabilitySuite`, `LexiconRankingSuite`,
+`MedialStabilitySuite`, `MidBufferStackInferenceSuite`,
+`WindowingKinziAcrossThresholdSuite`. Contributors writing a test for
+a ranking-related claim should follow the same pattern; the bare
+engine and the production-equivalent engine can disagree, sometimes
+substantially, and only the latter matches what the user sees.
+
 ### Benchmarks
 
 ```bash
