@@ -147,7 +147,7 @@
   "meta" : {
     "commit" : "4a017c8",
     "date" : "2026-04-27T09:54:31Z",
-    "note" : "TASK-061: 7 scenarios (cluster_alias_j16, repetition_tha30, vowel_rule_chain_*) carry placeholder Linux values pending macOS regeneration via `swift run -c release BurmeseBench --update Tests/Benchmarks/baseline.json` on Apple Silicon. The drift guard in BenchBaselineFormatSuite passes once the names match the Linux section; the values become real once a macOS maintainer runs --update."
+    "note" : "TASK-061: 7 scenarios (cluster_alias_j16, repetition_tha30, vowel_rule_chain_*) are tagged `placeholder: true` so the cross-platform drift guard sees matching names while `BurmeseBench --check` treats them identically to absent entries (loud diagnostic, exit 1) — preventing the false-negative case where Linux numbers in the macOS section silently pass on Apple Silicon. To capture real macOS measurements, run `swift run -c release BurmeseBench --update Tests/Benchmarks/baseline.json` on an Apple Silicon host; --update re-emits the macos section without the placeholder flag."
   },
   "scenarios" : [
     {
@@ -229,6 +229,7 @@
       "p50_us" : 1863.68,
       "p95_us" : 1891.22,
       "p99_us" : 2021.81,
+      "placeholder" : true,
       "scenario" : "cluster_alias_j16"
     },
     {
@@ -238,6 +239,7 @@
       "p50_us" : 2968.40,
       "p95_us" : 3082.15,
       "p99_us" : 3359.23,
+      "placeholder" : true,
       "scenario" : "repetition_tha30"
     },
     {
@@ -247,6 +249,7 @@
       "p50_us" : 1637.83,
       "p95_us" : 1691.92,
       "p99_us" : 1821.48,
+      "placeholder" : true,
       "scenario" : "vowel_rule_chain_aing_8"
     },
     {
@@ -256,6 +259,7 @@
       "p50_us" : 1450.63,
       "p95_us" : 1537.07,
       "p99_us" : 1591.03,
+      "placeholder" : true,
       "scenario" : "vowel_rule_chain_aing_4"
     },
     {
@@ -265,6 +269,7 @@
       "p50_us" : 269.04,
       "p95_us" : 278.69,
       "p99_us" : 282.18,
+      "placeholder" : true,
       "scenario" : "vowel_rule_chain_aing_2"
     },
     {
@@ -274,6 +279,7 @@
       "p50_us" : 873.32,
       "p95_us" : 879.15,
       "p99_us" : 900.44,
+      "placeholder" : true,
       "scenario" : "vowel_rule_chain_aung_8"
     },
     {
@@ -283,6 +289,7 @@
       "p50_us" : 4511.55,
       "p95_us" : 5001.92,
       "p99_us" : 5054.24,
+      "placeholder" : true,
       "scenario" : "vowel_rule_chain_in_10"
     }
   ]

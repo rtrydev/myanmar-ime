@@ -410,6 +410,17 @@ if let path = checkPath {
             missingFromBaseline.append(m.scenario)
             continue
         }
+        if b.isPlaceholder {
+            // TASK-061 (gap fix): a placeholder entry exists in the
+            // JSON only to satisfy the cross-platform drift guard
+            // (scenario name parity). Its p95/p99 numbers are
+            // inherited from another host and have no calibration
+            // value here. Treat it identically to an absent entry
+            // so the gate surfaces the gap rather than silently
+            // false-negativing against synthetic numbers.
+            missingFromBaseline.append(m.scenario)
+            continue
+        }
         let p95Bound = b.p95Us * 1.20
         let p99Bound = b.p99Us * 1.30
         if m.p95Us > p95Bound {

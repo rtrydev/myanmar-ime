@@ -16,11 +16,27 @@ public enum BenchBaselineFormat {
         public let scenario: String
         public let p95Us: Double
         public let p99Us: Double
+        /// TASK-061: placeholder entries appear in the JSON solely so
+        /// the cross-platform drift guard can match scenario names
+        /// across platforms before real numbers exist for one of
+        /// them. They MUST NOT be used as a baseline by `--check` —
+        /// the gate has to surface the missing-measurement case as
+        /// loudly as a fully-absent entry. `BurmeseBench` filters
+        /// placeholder entries out of the comparison list and
+        /// reports them via the same "MISSING FROM <platform>
+        /// BASELINE" diagnostic it uses for absent scenarios.
+        public let isPlaceholder: Bool
 
-        public init(scenario: String, p95Us: Double, p99Us: Double) {
+        public init(
+            scenario: String,
+            p95Us: Double,
+            p99Us: Double,
+            isPlaceholder: Bool = false
+        ) {
             self.scenario = scenario
             self.p95Us = p95Us
             self.p99Us = p99Us
+            self.isPlaceholder = isPlaceholder
         }
     }
 
@@ -62,7 +78,13 @@ public enum BenchBaselineFormat {
                   let p95 = s["p95_us"] as? Double,
                   let p99 = s["p99_us"] as? Double
             else { return nil }
-            return ScenarioEntry(scenario: name, p95Us: p95, p99Us: p99)
+            let placeholder = (s["placeholder"] as? Bool) ?? false
+            return ScenarioEntry(
+                scenario: name,
+                p95Us: p95,
+                p99Us: p99,
+                isPlaceholder: placeholder
+            )
         }
     }
 

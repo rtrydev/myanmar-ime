@@ -150,6 +150,60 @@ public enum BenchBaselineFormatSuite {
             )
         },
 
+        // TASK-061 (gap fix): placeholder entries are visible to the
+        // parser with `isPlaceholder == true` so the bench gate can
+        // treat them as missing (exit 1 + loud diagnostic) while the
+        // drift guard still sees their scenario names for parity.
+        TestCase("parses_placeholderFlag_isExposed") { ctx in
+            let json: [String: Any] = [
+                "platforms": [
+                    "macos": [
+                        "scenarios": [
+                            [
+                                "scenario": "real_one",
+                                "p95_us": 100.0,
+                                "p99_us": 110.0,
+                            ],
+                            [
+                                "scenario": "placeholder_one",
+                                "p95_us": 200.0,
+                                "p99_us": 220.0,
+                                "placeholder": true,
+                            ],
+                            [
+                                "scenario": "absent_flag_defaults_false",
+                                "p95_us": 300.0,
+                                "p99_us": 330.0,
+                            ],
+                        ],
+                    ],
+                ],
+            ]
+            let entries = BenchBaselineFormat.entries(from: json, platformKey: "macos")
+            ctx.assertEqual(entries?.count ?? 0, 3, "placeholder_count")
+            let real = entries?.first(where: { $0.scenario == "real_one" })
+            let placeholder = entries?.first(where: { $0.scenario == "placeholder_one" })
+            let defaulted = entries?.first(where: { $0.scenario == "absent_flag_defaults_false" })
+            ctx.assertEqual(real?.isPlaceholder, false, "real_isPlaceholder_false")
+            ctx.assertEqual(placeholder?.isPlaceholder, true, "placeholder_isPlaceholder_true")
+            ctx.assertEqual(
+                defaulted?.isPlaceholder,
+                false,
+                "missing_flag_defaults_false"
+            )
+            // Placeholder entries are still listed by `scenarioNames`
+            // so the cross-platform drift guard sees them as part of
+            // the platform's name set — that is the whole point of
+            // the placeholder mechanism.
+            let names = BenchBaselineFormat.scenarioNames(from: json, platformKey: "macos")
+            ctx.assertEqual(names?.count ?? 0, 3, "drift_guard_sees_placeholder_names")
+            ctx.assertTrue(
+                names?.contains("placeholder_one") ?? false,
+                "drift_guard_includes_placeholder",
+                detail: "scenarioNames should include placeholder rows"
+            )
+        },
+
         // TASK-061: cross-platform baseline drift guard. When the
         // bench scenario list grows in `BurmeseBench/main.swift`,
         // both maintainers must capture the new numbers via
