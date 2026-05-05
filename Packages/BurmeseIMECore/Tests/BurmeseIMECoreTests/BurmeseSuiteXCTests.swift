@@ -346,4 +346,8 @@ final class CwyClusterPromotionXCTests: XCTestCase {
 final class LongBufferYaPinPromotionXCTests: XCTestCase {
     func testAll() { runSuite(LongBufferYaPinPromotionSuite.suite, xctest: self) }
 }
+
+final class MultiClusterDepVowelOnAnchorXCTests: XCTestCase {
+    func testAll() { runSuite(MultiClusterDepVowelOnAnchorSuite.suite, xctest: self) }
+}
 #endif

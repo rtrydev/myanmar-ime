@@ -361,6 +361,23 @@ public final class BurmeseEngine: @unchecked Sendable {
         // empty. Trailing punct (no Myanmar to the right) is still
         // permitted by the predicate.
         injected.candidates = Self.sanitizeInterleavedComposingPunct(injected.candidates)
+        // TASK-030: deliberately do NOT run the multi-cluster
+        // sanitizer here. Running it post-fallback (when the literal
+        // raw buffer has already been injected as a "clean" sibling)
+        // would drop every violator-carrying Myanmar candidate and
+        // leave only the literal at rank 0. That's the correct
+        // outcome for short bug-class buffers (`kayoo`, `kayii`, …)
+        // but breaks mid-typing of a longer sentence
+        // (`ComprehensiveRanking.sentence_longArticle_literaryInfluence`,
+        // prefixes `thueiooz`/`thueiooza`/…), where the violator
+        // surface is a multi-anchor parse whose orphan-anchor sub-
+        // cluster will be resolved by the next keystroke. The fix
+        // for the bug class instead lives at the Class A literal-
+        // promotion gate, which uses the tighter
+        // `surfaceIsWhollyMultiClusterOnSingleAnchor` predicate to
+        // distinguish "whole-buffer violator" (promote literal) from
+        // "multi-syllable surface with one orphan sub-cluster"
+        // (leave at rank 0; the next keystroke fixes it).
         return injected
     }
 
@@ -1688,6 +1705,7 @@ public final class BurmeseEngine: @unchecked Sendable {
         merged = Self.sanitizeIndepVowelVirama(merged)
         merged = Self.sanitizeAdjacentIndependentVowels(merged)
         merged = Self.sanitizeDoubledCodaChain(merged)
+        merged = Self.sanitizeMultiClusterOnSingleAnchor(merged)
 
         if !effectiveParseInput.contains("+"),
            !effectiveWindowed,
@@ -2231,12 +2249,17 @@ public final class BurmeseEngine: @unchecked Sendable {
         let sanitizedAffixed5 = Self.sanitizeDigitOrphanAsat(sanitizedAffixed4)
         let sanitizedAffixed6 = Self.sanitizeToneOrphanAsat(sanitizedAffixed5)
         let sanitizedAffixed7 = Self.sanitizeInterleavedComposingPunct(sanitizedAffixed6)
+        // TASK-030: drop candidates whose surface carries the multi-
+        // cluster-on-single-anchor shape (chained vowel-rule arcs that
+        // concatenate two dep-vowel clusters on one base, or same-
+        // category dep-vowel duplicates within a single base run).
+        let sanitizedAffixed8 = Self.sanitizeMultiClusterOnSingleAnchor(sanitizedAffixed7)
         // TASK-060: drop candidates whose surface concatenates a
         // prior syllable's dep-vowel cluster with a fabricated
         // `1021<single dep-vowel>` syllable produced by the
         // tail-compose path (e.g. `kou` right-shrunk to `ko` + tail
         // `u` → `ကို + အူ` = `1000 102D 102F 1021 1030`).
-        var sanitizedWithAffixes = Self.sanitizePhantomMidAnchor(sanitizedAffixed7)
+        var sanitizedWithAffixes = Self.sanitizePhantomMidAnchor(sanitizedAffixed8)
         // TASK-060: when the right-shrink probe dropped composing
         // letters (e.g. `kou` → prefix `ko` + tail `u`), the engine
         // composes the prefix and tail separately; the parser's
@@ -2631,6 +2654,25 @@ public final class BurmeseEngine: @unchecked Sendable {
         // `i:akar`, `kar.akar`) carry deliberate multi-syllable
         // structure and similarly stay on the engine's regular
         // ranking path.
+        // TASK-030: bug-class chained vowel-rule arcs (`<C>ay<vowel>`,
+        // `<C><vowel><vowel>`, onsetless `<vowel><vowel>`) produce a
+        // single-anchor surface whose entire syllable carries two
+        // dep-vowel clusters or a same-category duplicate (`ကေိုို`,
+        // `ကေီီ`, `ကေူူ`, `အီူူ`, `အူူ`, `အိုိုီ`). The
+        // surface is wholly the violator — there is no second
+        // syllable for the next keystroke to resolve into — so the
+        // literal-buffer commit is the right rank-0 even for
+        // consonant-bearing buffers (`kayoo`, `kayii`, `kuoo`,
+        // `kioo`, `thayoo`, `ngaii`, …). The wholly-single-anchor
+        // gate excludes mid-typing prefixes whose violator sits in
+        // an orphan sub-cluster of a multi-anchor surface (those
+        // resolve as the user keeps typing — see the
+        // `ComprehensiveRanking.sentence_longArticle_literaryInfluence`
+        // intermediate prefixes `thueiooz`/`thueiooza`/…). Runs
+        // BEFORE the vowel-only-alpha gate so consonant-bearing
+        // bug-class buffers reach the promotion path.
+        if Self.surfaceIsWhollyMultiClusterOnSingleAnchor(surface) { return true }
+
         let isVowelOnlyAlphaBuffer = !rawBuffer.isEmpty
             && rawBuffer.allSatisfy { ch in
                 ch == "a" || ch == "e" || ch == "i" || ch == "o"

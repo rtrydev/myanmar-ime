@@ -903,6 +903,194 @@ extension BurmeseEngine {
         return false
     }
 
+    /// TASK-030 dep-vowel category index — kept at file scope so the
+    /// inner walk in the predicate below doesn't need a nested
+    /// `@inline(__always)` closure (function-scope closures cannot be
+    /// reliably inlined under `-O` and the whole point of this file
+    /// is to make the predicate cheap on the hot `plus_chain_30`
+    /// path).
+    @inline(__always) internal static func task030DepVowelCategory(_ v: UInt32) -> Int {
+        switch v {
+        case 0x102B, 0x102C: return 1   // aa family
+        case 0x102D, 0x102E: return 2   // i family
+        case 0x102F, 0x1030: return 3   // u family
+        case 0x1031:         return 4   // e family
+        case 0x1032:         return 5   // ai family
+        default:             return 0
+        }
+    }
+
+    @inline(__always) internal static func task030IsBase(_ v: UInt32) -> Bool {
+        if v == 0x103F { return true }
+        if (0x1000...0x1021).contains(v) { return true }
+        if (0x1023...0x102A).contains(v) { return true }
+        return false
+    }
+
+    /// TASK-030: detect a single anchor (consonant base or independent
+    /// vowel) carrying either:
+    ///   (a) two distinct dep-vowel clusters back-to-back without a
+    ///       fresh base / virama / asat between them, or
+    ///   (b) a same-category dep-vowel duplicate within a single base
+    ///       run.
+    ///
+    /// This is the engine-level analogue of the parser's
+    /// `Parser/Finalization::scanOutputLegality` rejection: the parser
+    /// already refuses these shapes for its own DP, but production
+    /// ranking can promote violators from deeper buckets when the LM
+    /// has evidence for them.
+    ///
+    /// The legal multi-scalar dep-vowel cluster shapes are the
+    /// o-cluster (`102D 102F`, categories {2,3}) and the leading-`1031`
+    /// aung-order (`1031 102B|102C`, categories {4,1}). After a complete
+    /// cluster closes, ANY further dep-vowel scalar means a second
+    /// cluster on the same anchor — which never appears in attested
+    /// Burmese orthography.
+    ///
+    /// **Hot-path note.** Iterates `surface.unicodeScalars` directly
+    /// (no `Array` allocation). Bails out instantly when the surface
+    /// contains zero dep-vowel scalars in the U+102B..U+1032 range, so
+    /// non-matching `plus_chain_30` candidates pay only one scan.
+    @_spi(Testing) public static func surfaceContainsMultiClusterOnSingleAnchor(_ surface: String) -> Bool {
+        // Cheap pre-scan: a multi-cluster shape requires at least two
+        // dep-vowel scalars in the surface. Walk once; if we see <2
+        // (or any are same-category) we may early-exit.
+        let scalars = surface.unicodeScalars
+        var depVowelCount = 0
+        for scalar in scalars {
+            let v = scalar.value
+            if v >= 0x102B && v <= 0x1032 {
+                depVowelCount += 1
+                if depVowelCount >= 2 { break }
+            }
+        }
+        if depVowelCount < 2 { return false }
+
+        // Per-anchor walk. `clusterCats` is a fixed 5-slot bitset
+        // (categories 1..5) — no allocation, no closure.
+        var clusterBitset: UInt8 = 0
+        var clusterCount: Int = 0
+        var firstCat: Int = 0
+        var afterClusterClosed = false
+        for scalar in scalars {
+            let v = scalar.value
+            // Most scalars are outside the syllable-structure zone
+            // (e.g. ASCII passthrough, format controls, lexicon
+            // codepoints above U+103F). Reject early.
+            if v < 0x1000 || v > 0x103F {
+                continue
+            }
+            if Self.task030IsBase(v) {
+                clusterBitset = 0
+                clusterCount = 0
+                firstCat = 0
+                afterClusterClosed = false
+                continue
+            }
+            if v == 0x103A || v == 0x1039 {
+                clusterBitset = 0
+                clusterCount = 0
+                firstCat = 0
+                afterClusterClosed = false
+                continue
+            }
+            if v >= 0x103B && v <= 0x103E { continue } // medials
+            if v == 0x1036 || v == 0x1037 || v == 0x1038 { continue } // tones / anusvara
+            let cat = Self.task030DepVowelCategory(v)
+            if cat == 0 { continue }
+            if afterClusterClosed { return true }
+            let bit = UInt8(1) << cat
+            if (clusterBitset & bit) != 0 { return true } // same-cat duplicate
+            clusterBitset |= bit
+            clusterCount += 1
+            if clusterCount == 1 {
+                firstCat = cat
+                // i-family (2) may legally extend with u-family (3) → o-cluster.
+                // e-family (4) may legally extend with aa-family (1) → aung order.
+                // Other singletons close the cluster immediately.
+                if cat != 2 && cat != 4 {
+                    afterClusterClosed = true
+                }
+            } else if clusterCount == 2 {
+                let isOCluster = firstCat == 2 && cat == 3
+                let isAungOrder = firstCat == 4 && cat == 1
+                if isOCluster || isAungOrder {
+                    afterClusterClosed = true
+                } else {
+                    // Cross-category 2-cluster that isn't one of the
+                    // two legal multi-scalar shapes — already a single-
+                    // cluster cross-category violator (TASK-028).
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    /// TASK-030: tighter predicate — true when the surface carries the
+    /// multi-cluster shape AND the surface as a whole sits on a single
+    /// anchor (one base, no internal asat/virama/second-base). This is
+    /// the bug-class signature: short user-typed buffers like `kayoo`,
+    /// `kayii`, `iuu`, `uua` whose entire (unique) syllable happens to
+    /// be the violator, with no multi-syllable structure that could
+    /// resolve as the user keeps typing.
+    ///
+    /// Distinguishes:
+    /// - `kayoo` violator `1000 1031 102D 102F 102D 102F` — 1 base,
+    ///   single-anchor, BUG CLASS.
+    /// - `thueiooz` violator `101E 1030 101A 103A 102E 102D 102F …
+    ///   1007` — 3 bases, multi-anchor, MID-TYPING (a longer sentence
+    ///   prefix where the next keystroke can resolve the orphan
+    ///   sub-cluster).
+    ///
+    /// Used at the Class A literal-promotion gate so the literal goes
+    /// to rank 0 only when no future keystroke can rehabilitate the
+    /// surface (the buffer represents one typed unit, not a sentence
+    /// fragment).
+    @_spi(Testing) public static func surfaceIsWhollyMultiClusterOnSingleAnchor(_ surface: String) -> Bool {
+        // Walk once: count bases, look for asat/virama, then defer
+        // the dep-vowel-pattern check to the broader predicate.
+        var baseCount = 0
+        for scalar in surface.unicodeScalars {
+            let v = scalar.value
+            if v == 0x103A || v == 0x1039 { return false } // internal break
+            if Self.task030IsBase(v) {
+                baseCount += 1
+                if baseCount > 1 { return false }
+            }
+        }
+        if baseCount == 0 { return false }
+        return surfaceContainsMultiClusterOnSingleAnchor(surface)
+    }
+
+    /// TASK-030 sanitizer: drop candidates whose surface carries the
+    /// multi-cluster-on-single-anchor shape. Same fallback policy as
+    /// the other sanitizers: only filter when at least one clean
+    /// sibling exists, otherwise keep the violator so the panel is
+    /// not empty.
+    internal static func sanitizeMultiClusterOnSingleAnchor(_ candidates: [Candidate]) -> [Candidate] {
+        // Fast pre-check: skip the full filter pass if no candidate
+        // carries the violator shape. The hot `plus_chain_30` path
+        // produces zero violators per keystroke, so paying only one
+        // walk per candidate (and zero allocations when none match)
+        // keeps the per-keystroke budget within the perf gate.
+        var anyViolator = false
+        for candidate in candidates {
+            if surfaceContainsMultiClusterOnSingleAnchor(candidate.surface) {
+                anyViolator = true
+                break
+            }
+        }
+        if !anyViolator { return candidates }
+        let cleanFiltered = candidates.filter {
+            !surfaceContainsMultiClusterOnSingleAnchor($0.surface)
+        }
+        if !cleanFiltered.isEmpty {
+            return cleanFiltered
+        }
+        return candidates
+    }
+
     /// ZWSP is allowed as a lexicon word-boundary marker. ZWNJ/ZWJ are only
     /// tolerated for the parser's leading orphan-mark fallback; elsewhere in
     /// a lexicon surface they are corpus pollution and should not outrank a
