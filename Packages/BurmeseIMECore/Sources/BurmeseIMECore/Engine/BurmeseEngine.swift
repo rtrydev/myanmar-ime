@@ -2230,7 +2230,63 @@ public final class BurmeseEngine: @unchecked Sendable {
         let sanitizedAffixed4 = Self.sanitizeDoubledCodaChain(sanitizedAffixed3)
         let sanitizedAffixed5 = Self.sanitizeDigitOrphanAsat(sanitizedAffixed4)
         let sanitizedAffixed6 = Self.sanitizeToneOrphanAsat(sanitizedAffixed5)
-        let sanitizedWithAffixes = Self.sanitizeInterleavedComposingPunct(sanitizedAffixed6)
+        let sanitizedAffixed7 = Self.sanitizeInterleavedComposingPunct(sanitizedAffixed6)
+        // TASK-060: drop candidates whose surface concatenates a
+        // prior syllable's dep-vowel cluster with a fabricated
+        // `1021<single dep-vowel>` syllable produced by the
+        // tail-compose path (e.g. `kou` right-shrunk to `ko` + tail
+        // `u` → `ကို + အူ` = `1000 102D 102F 1021 1030`).
+        var sanitizedWithAffixes = Self.sanitizePhantomMidAnchor(sanitizedAffixed7)
+        // TASK-060: when the right-shrink probe dropped composing
+        // letters (e.g. `kou` → prefix `ko` + tail `u`), the engine
+        // composes the prefix and tail separately; the parser's
+        // top-1 of the FULL buffer (the canonical
+        // `<C><102D 102F><101A 103A><1026>` ya-asat-closer + 1026
+        // shape) never enters the candidate set. Acceptance
+        // criterion #2 of the task requires the clean form to be
+        // reachable somewhere in the panel. Inject the parser
+        // top-K parses of the un-shrunk buffer when (a) the
+        // right-shrink dropped composing letters, (b) at least one
+        // parse has `legalityScore > 0`, and (c) its surface (with
+        // affixes) is not already present. Restricted to the
+        // composing-letter-drop case so trailing-punct / digit
+        // right-shrinks (`kou.`, `kouka`) — which already go
+        // through the regular full-buffer path — are unaffected.
+        // Restrict to short drops (1-2 chars) to avoid the
+        // parse-on-every-keystroke cost on garbage inputs where the
+        // right-shrink probe peels long unparseable tails. The
+        // bug-shape signature requires only a single trailing
+        // non-standalone vowel rule (`u`, `i`, …) to be peeled, so
+        // the short-drop gate keeps the injection cheap.
+        let shouldInjectFullBufferParses = !droppedTail.isEmpty
+            && droppedTail.count <= 2
+            && droppedTailHasComposingChars
+            && !droppedTailHasComposingPunctuation
+            && !preTrimmedNormalized.isEmpty
+            && sanitizedWithAffixes.contains { c in
+                Self.candidateSurfaceCarriesOrphanAnchorAfterCluster(c.surface)
+            }
+        if shouldInjectFullBufferParses {
+            let fullParses = parser.parseCandidates(
+                preTrimmedNormalized,
+                maxResults: 8,
+                isFullBuffer: true
+            )
+            let existingSurfaces = Set(sanitizedWithAffixes.map(\.surface))
+            for parse in fullParses where parse.legalityScore > 0 {
+                let cleanSurface = Self.correctAaShape(parse.output)
+                guard SyllableParser.scanOutputLegality(cleanSurface) else { continue }
+                guard !Self.surfaceContainsPhantomMidAnchor(cleanSurface) else { continue }
+                let composed = leadingLiteral + digitPrefix + cleanSurface + literalTail
+                guard !existingSurfaces.contains(composed) else { continue }
+                sanitizedWithAffixes.append(Candidate(
+                    surface: composed,
+                    reading: displayBuffer,
+                    source: .grammar,
+                    score: Double(parse.score)
+                ))
+            }
+        }
         let finalCandidates: [Candidate]
         if leadingLiteral.isEmpty,
            digitPrefix.isEmpty,

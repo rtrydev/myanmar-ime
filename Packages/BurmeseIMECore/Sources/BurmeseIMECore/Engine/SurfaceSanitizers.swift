@@ -346,6 +346,120 @@ extension BurmeseEngine {
         return false
     }
 
+    /// TASK-060: detect the `<dep-mark><U+1021><single dep-mark>
+    /// <end-or-non-dep-mark>` shape — the engine-fabricated phantom
+    /// anchor between dep-vowel clusters. The bug arises when a
+    /// user types a non-standalone vowel rule (`u`, `i`, `e`, `aw`,
+    /// …) after a syllable whose dep-vowel cluster is already
+    /// anchored on its own consonant base — e.g. `kou` composes as
+    /// `1000 102D 102F` (prefix `ko`) plus the promoted tail
+    /// `1021 1030` (standalone `အူ`), which concatenates to
+    /// `1000 102D 102F 1021 1030` (`ကိုအူ`) — the visible bug.
+    ///
+    /// Discriminator vs. legitimate shapes:
+    ///   * Legitimate `marar` → `1019 102C 1021 102C` — `1021` is
+    ///     preceded by `102C` (single dep-mark of the prior
+    ///     syllable). predecessor's predecessor is `1019`
+    ///     (consonant base), so the prior syllable is fully formed
+    ///     before this fresh `1021` syllable. NOT flagged.
+    ///   * Legitimate two-cluster (TASK-022) `kayoo` →
+    ///     `1000 1031 1021 102D 102F 1021 102D 102F` — each `1021`
+    ///     is followed by a multi-scalar dep-mark cluster. NOT
+    ///     flagged.
+    ///   * Bug shape `kou` → `1000 102D 102F 1021 1030` — `1021`
+    ///     preceded by `102F`, whose own predecessor `102D` is a
+    ///     dep-mark, AND followed by single-scalar dep-mark `1030`
+    ///     terminating the surface. Flagged.
+    @_spi(Testing) public static func surfaceContainsPhantomMidAnchor(_ surface: String) -> Bool {
+        let scalars = Array(surface.unicodeScalars).map(\.value)
+        guard scalars.count >= 3 else { return false }
+        // Dep-mark categories for the predicate. Dep-vowels and the
+        // anusvara `1036` participate in the syllable's vowel
+        // cluster after the consonant onset; medials `103B..103E`
+        // are part of the consonant onset cluster, not a dep-vowel
+        // of a separate syllable. The predOfPred check below uses
+        // the narrower dep-vowel range to distinguish "predecessor
+        // is the second dep-vowel of the prior syllable" (bug case
+        // `kou` → `1000 102D 102F 1021 1030`) from "predecessor is
+        // the first dep-vowel of a medial-bearing syllable"
+        // (legitimate `kyaa+Aa` → `1000 103C 102C 1021 102C`).
+        @inline(__always)
+        func isDepMarkAny(_ v: UInt32) -> Bool {
+            (v >= 0x102B && v <= 0x1032)
+                || v == 0x1036
+                || (v >= 0x103B && v <= 0x103E)
+        }
+        @inline(__always)
+        func isDepVowelOrTone(_ v: UInt32) -> Bool {
+            (v >= 0x102B && v <= 0x1032) || v == 0x1036
+        }
+        for i in 1..<(scalars.count - 1) {
+            guard scalars[i] == 0x1021 else { continue }
+            let prev = scalars[i - 1]
+            let next = scalars[i + 1]
+            guard isDepMarkAny(prev) && isDepMarkAny(next) else { continue }
+            guard i >= 2 else { continue }
+            let predOfPred = scalars[i - 2]
+            // Only flag when the prior syllable already has a dep-
+            // vowel before the predecessor — i.e. predecessor is
+            // the second-or-later dep-vowel of its syllable, the
+            // signature of the o-cluster + orphan-u bug shape.
+            guard isDepVowelOrTone(predOfPred) else { continue }
+            if i + 2 >= scalars.count {
+                return true
+            }
+            let nextNext = scalars[i + 2]
+            if !isDepMarkAny(nextNext) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// TASK-060 sanitizer: drop candidates whose surface carries the
+    /// phantom-mid-anchor shape detected by
+    /// `surfaceContainsPhantomMidAnchor`. Like the other anchor
+    /// sanitizers, the filter only fires when at least one
+    /// non-flagged sibling exists in the panel.
+    internal static func sanitizePhantomMidAnchor(_ candidates: [Candidate]) -> [Candidate] {
+        let cleanFiltered = candidates.filter {
+            !surfaceContainsPhantomMidAnchor($0.surface)
+        }
+        if !cleanFiltered.isEmpty && cleanFiltered.count != candidates.count {
+            return cleanFiltered
+        }
+        return candidates
+    }
+
+    /// TASK-060: cheap surface check used to gate the full-buffer
+    /// reparse injection. Returns true when `surface` contains a
+    /// `<dep-mark><U+1021><dep-mark>` adjacency anywhere — including
+    /// the legitimate ya-asat-closer + 1021 form
+    /// (`...103A 1021 1030`). The full-buffer reparse only runs when
+    /// at least one panel candidate carries this signature, since
+    /// only those buffers need the clean ya-asat-closer + U+1026
+    /// sibling injected. Keeps the parse-on-every-keystroke cost off
+    /// the garbage-input fast path.
+    internal static func candidateSurfaceCarriesOrphanAnchorAfterCluster(_ surface: String) -> Bool {
+        let scalars = Array(surface.unicodeScalars).map(\.value)
+        guard scalars.count >= 3 else { return false }
+        for i in 1..<(scalars.count - 1) {
+            guard scalars[i] == 0x1021 else { continue }
+            let prev = scalars[i - 1]
+            let next = scalars[i + 1]
+            let prevIsDepMark = (prev >= 0x102B && prev <= 0x1032)
+                || prev == 0x1036
+                || (prev >= 0x103A && prev <= 0x103E)
+            let nextIsDepMark = (next >= 0x102B && next <= 0x1032)
+                || next == 0x1036
+                || (next >= 0x103B && next <= 0x103E)
+            if prevIsDepMark && nextIsDepMark {
+                return true
+            }
+        }
+        return false
+    }
+
     /// TASK-022 detector helper. Returns true when `scalars` contains
     /// a bridged orphan-mark anchor chain whose final cluster is a
     /// bare orphan-mark anchor (no terminating consonant-asat coda).
