@@ -1,489 +1,25 @@
 # Myanmar IME
 
-A native Input Method Editor (IME) for typing Burmese/Myanmar script
-using a standard Latin (QWERTY) keyboard. Built in Swift on top of the
-**Hybrid Burmese** romanization scheme — a grammar-aware engine that
-enforces orthographic legality and ranks candidates through grammar
-alternatives, a trigram language model, bundled lexicon frequency, and a
-learned per-user history.
+A native Input Method Editor for typing Burmese/Myanmar script from a
+standard Latin keyboard. The shared engine is written in Swift and uses a
+grammar-aware Hybrid Burmese romanization: it parses the whole composing
+buffer, filters illegal orthography, and ranks candidates with parser
+scores, a bundled SQLite lexicon, a trigram language model, and learned
+per-user history.
 
-**Platform status.** Both shells ship. macOS uses InputMethodKit + a
-SwiftUI Preferences app + an unsigned `.pkg` installer. Linux uses an
-IBus engine binary + a GTK4/libadwaita Preferences app, packaged as
-`ibus-myangler.deb` (see [`native/linux/README.md`](native/linux/README.md)).
-The core engine builds and tests cleanly on both platforms (975/975
-cases pass on Ubuntu 24.04 with Swift 6.3.1).
-
----
-
-## Overview
-
-The engine is built around formal Burmese orthographic rules: if a
-consonant cannot legally take a vowel or medial pattern, the combination
-never reaches the output, and spelling ambiguities are resolved through
-the candidate window.
-
-The core (`BurmeseIMECore`) is a pure Swift package with no macOS-only
-dependencies — it builds and runs anywhere Swift runs. All platform glue
-lives under `native/`: `native/macos/` is the IMK + SwiftUI shell;
-`native/linux/` is the IBus + GTK4 shell.
+**Current status.** The core package is shared by both native shells.
+macOS ships an InputMethodKit bundle plus a SwiftUI Preferences app and
+unsigned `.pkg` installer. Linux ships an IBus engine plus a GTK4 /
+libadwaita Preferences app packaged as `ibus-myangler.deb`; see
+[`native/linux/README.md`](native/linux/README.md). On this checkout,
+`swift run TestRunner` passes **1355/1355 cases** and **5721/5721
+assertions**.
 
 ---
 
-## Features
+## Quick Start
 
-### Grammar-Aware Composition
-The engine validates every candidate against a formal orthographic
-legality table before it reaches the candidate window. Consonant–medial–
-vowel triples are checked against allowed onset classes, medial rules,
-and vowel realizations, ensuring no malformed Burmese syllable is ever
-emitted.
-
-### N-Best Viterbi Syllable Parser
-Incremental composition uses a weighted Viterbi dynamic-programming
-search across syllable states. The parser scores the globally best parse
-over the entire buffer — not syllable by syllable — enabling multi-
-syllable phrase candidates. The default beam width is
-`max(maxResults × 16, 64)`.
-
-### Sliding-Window Composition
-Straight N-best DP is quadratic in buffer length. For buffers longer
-than ~16 characters (`maxOnsetLen + maxVowelLen + 4`), the engine splits
-input into a `frozenPrefix` + `activeTail`:
-
-- The prefix is rendered once with a single-best parse and memoized in a
-  small cache. Typing left-to-right gives one cache miss per window-
-  boundary advance.
-- Only the active tail hits the N-best path; candidates are reconstructed
-  by prepending the cached prefix.
-- Because no romanization rule spans more than
-  `maxOnsetLen + maxVowelLen` characters, the window boundary is always
-  outside any possible rule match, so freezing the prefix is safe.
-
-### Candidate Ranking Pipeline
-Candidates are ranked by:
-1. **Grammar legality** — Orthographically legal forms score highest
-   (hard filter).
-2. **Language model log-prob** — Kneser-Ney trigram score from the
-   bundled `BurmeseLM.bin`, including frozen-prefix + active-tail
-   concatenation when the sliding window is active.
-3. **Alias cost** — Canonical spellings rank above shortcut aliases
-   (used as a tiebreaker within an LM tier).
-4. **Parser score** — Best Viterbi path score over the buffer.
-5. **Lexicon frequency** — Bundled unigram priors from the SQLite store.
-6. **User history** — Previously committed picks for the same alias key
-   are promoted to the top of the panel. Can be disabled per user.
-
-Candidates trailing the LM leader by more than a configurable margin
-are pruned to keep the panel focused on plausible interpretations.
-
-### Candidate Disambiguation
-Users type a base reading (`kyar`, `thar`) and choose among grammar and
-lexicon candidates such as `ကြား` / `ကျား` or `သာ` / `သါ` from the
-candidate panel.
-
-Several Burmese letters share a reading — တ/ဋ both sound as `t`,
-လ/ဠ as `l`, ဥ/ဦ as `oo`, ပ/ဋ as `p`, ထ/ဌ as `ht`, သ/ဿ as `th`, and so
-on. **The user types the digit-less reading;** both (or all) variants
-appear as separate entries in the candidate panel, ranked by lexicon
-frequency and LM context. Typing `ta` surfaces တာ as the top candidate
-and ဋ as an alternate; the user picks whichever fits. Commits are
-remembered per alias key so the next same-reading input promotes the
-previous pick.
-
-**ASCII digits are always literal — never variant selectors.** The user
-types the digit-less reading and always disambiguates via the candidate
-panel. Digits the user types anywhere in the buffer are preserved at
-the position they were typed and rendered as either Myanmar numerals
-(၀–၉) or ASCII digits depending on which candidate is selected — the
-engine offers both. So:
-
-- `min+galar2par2` renders `မင်္ဂလာ၂ပါ၂` / `မင်္ဂလာ2ပါ2` — the two
-  `2`s are literal Myanmar/Arabic digits, never variant pickers for ါ.
-- `ky2an` renders `ကယ်၂အန်` or `က၂အန်` (raw composition around the
-  literal `2`), **never** ကျန်. `y2` is an internal token, not a
-  user-facing way to ask for ya-pin (ျ). Users who want ကျန် type
-  `kyan` or `jan` and pick ကျန် from the panel.
-- `t2ote`, `nay2day`, `u2`, `pa2` — every `2`/`3` in these buffers is
-  literal and stays at its position.
-
-The `2` / `3` suffixes visible in internal rule tables (`t2`, `p2`,
-`oo2`, `ky2`, …) are code-internal tokens used to distinguish variants
-that share a reading. They are **not** part of the romanization scheme
-exposed to the user and the user→parser path never interprets a digit
-as a variant selector — even if the surrounding letters happen to
-match an internal variant key.
-
-### Hybrid Burmese Romanization
-The romanization scheme maps 33 base consonants × medial combinations ×
-97 vowel/final tokens. The structural encoding follows the pattern:
-
-```
-[h] <consonant> [w] [y|y2] <vowel_suffix>
-```
-
-| Prefix/Suffix | Myanmar sign | Meaning |
-|---|---|---|
-| `h` prefix | ှ | ha-htoe medial |
-| `y` suffix | ြ | ya-yit medial |
-| `y2` suffix | ျ | ya-pin medial |
-| `w` suffix | ွ | wa-hswe medial |
-
-**Examples:**
-
-| Roman input | Myanmar output | Notes |
-|---|---|---|
-| `thar` | သာ | onset `th` + vowel `ar` |
-| `kyaw` | ကြော် | onset `k` + ya-yit + vowel `aw` |
-| `min+galarpar` | မင်္ဂလာပာ | multi-syllable with virama stack |
-| `hkwy2` | ကျွှ | onset with three medials |
-| `gha` | ဃ | consonant `gh` (gha) + inherent vowel |
-| `ssa` | ဿ | great-sa consonant `ss` with inherent vowel |
-| `ii.` / `ii` | ဣ / ဤ | short / long independent i, no onset needed |
-| `oo` / `oo:` | ဩ / ဪ | independent o, plain and tonal |
-| `ywe` | ၍ | standalone locative/conjunctive particle |
-| `ei` | ၏ | standalone genitive particle |
-
-### 11 Medial Combinations
-```
-[h]  [w]  [h,w]  [y2]  [h,y2]  [w,y2]  [h,w,y2]  [y]  [h,y]  [w,y]  [h,w,y]
-```
-
-### Cluster-Sound Shortcuts
-In addition to the structural romanization, common cluster sounds have
-phonetic shortcuts that save keystrokes:
-
-| Shortcut | Myanmar | Structural equivalent |
-|---|---|---|
-| `j` / `jw` | ကျ / ကျွ | `ky2` / `kwy2` |
-| `ch` / `chw` | ချ / ချွ | `khy2` / `khwy2` |
-| `gy` / `gyw` | ဂျ / ဂျွ | `gy2` / `gwy2` |
-| `sh` / `shw` | ရှ / ရှွ | `hr` / `hrw` |
-
-So `jwantaw` → ကျွန်တော်, `chit` → ချစ်, `gypan` → ဂျပန်. Shortcuts coexist
-with structural typing — canonical input is unchanged, and alternative
-readings still appear in the candidate list.
-
-Aspirated sonorants already fall out of the `h`-prefix medial scheme:
-`hma` → မှ, `hla` → လှ, `hnga` → ငှ, `hna` → နှ.
-
-### Unicode Canonical Output
-Output characters are emitted in Unicode canonical order (ျ < ြ < ွ < ှ).
-No Latin characters ever appear in committed output.
-
-**Orphan dependent-vowel policy.** Burmese orthography has no valid
-form where a dependent vowel or combining mark stands alone — every
-such mark must attach to a consonant base. When the parser has no onset
-to anchor a bare vowel input (e.g. `u`, `ay`), it can technically emit
-`U+200C` (zero-width non-joiner) as an invisible base so the mark
-renders; this is a Unicode rendering kludge, not Burmese text. The
-engine applies an orthographic sanitizer after ranking: **any candidate
-whose surface begins with `U+200C` followed by a combining mark is
-dropped from the panel whenever at least one legal-structure candidate
-survives.** Only when the buffer would otherwise produce no candidate
-does the ZWNJ form reach the user, as a pedagogical fallback for
-inserting a bare combining mark. Inputs like `u` / `u:` / `ay` surface
-the independent vowels ဦ / ဦး / ဧ exclusively; the ZWNJ sibling is
-never offered alongside them.
-
-### Bundled SQLite Lexicon
-The lexicon is compiled from a TSV source file into a bundled read-only
-SQLite database:
-
-- `entries(id, surface, canonical_reading, unigram_score)` — log-scale
-  frequency
-- `reading_index(canonical_reading, entry_id, rank_score)` — prefix
-  lookup index
-- `reading_alias_index(alias_reading, canonical_reading, entry_id, rank_score, alias_penalty)`
-  — digitless compose lookup index
-
-Contextual phrase ranking is supplied at runtime by the trigram language
-model (`LanguageModel/FORMAT.md`, `TrigramLanguageModel`), not by the
-SQLite schema.
-
-### Learned Typing History
-Every commit is written through `SQLiteUserHistoryStore` keyed on the
-alias-normalized reading. On subsequent keystrokes with the same reading,
-past picks are promoted to the top of the candidate panel. Learning can
-be toggled off, and individual entries can be inspected and deleted from
-the Preferences app. The database lives at
-`~/Library/Application Support/BurmeseIME/UserHistory.sqlite`.
-
-### Burmese Digits and Measure-Word Suggestions
-Leading ASCII digits convert directly to Myanmar digits (U+1040–U+1049),
-with the Arabic form offered as an alternate candidate. When measure-
-word suggestions are enabled, pure-digit buffers produce contextual
-pairings — `၂၀၂၄ ခုနှစ်` (year), `၁၀၀ ကျပ်` (currency), `၁၅ ရက်` (day),
-etc. The suggestion table lives at
-`Packages/BurmeseIMECore/Sources/BurmeseIMECore/Data/NumberMeasureWords.tsv`
-and is hot-reloadable without a Swift rebuild.
-
-### Burmese Punctuation Auto-Mapping
-Optional feature that substitutes ASCII `. , ! ? ;` with their Myanmar
-equivalents (`။` / `၊`) when the surrounding context is Myanmar. Off by
-default; enable from Preferences → Text output.
-
-### Mixed-Script Input
-Like Pinyin, Kotoeri, and other system IMEs, Myanmar output can be
-freely interlaced with Latin letters, digits, punctuation, or any other
-characters present in the user's input. Each composition run converts
-what it can and leaves the rest verbatim, so the surrounding document
-ends up as a natural mix of Myanmar and non-Myanmar text:
-
-- Unparseable trailing characters (digits, punctuation, symbols) peel
-  off the composable prefix as a **literal tail** and are emitted
-  alongside the Myanmar surface — `thar.` commits as `သာ.`,
-  `min+galar!` as `မင်္ဂလာ!`.
-- Typing English in the middle of a Myanmar sentence just means the
-  Latin run has no legal Burmese parse, so the engine emits the raw
-  buffer verbatim as a **literal-fallback candidate** (see the policy
-  below). Users can freely alternate: compose a Burmese word, commit,
-  type `OK`, commit, compose another Burmese word.
-- Switching the menu-bar input mode from **က** to **ABC** disables
-  conversion entirely for passthrough typing.
-
-The only constraint is *within a single composed run*: output never
-contains Latin characters interleaved between Myanmar ones. Mixing
-scripts across runs in the surrounding document is the expected flow.
-
-**Literal-fallback policy.** The candidate panel is never empty for a
-non-empty composable buffer, and the user always has a commit-as-typed
-escape hatch. After the main pipeline runs, the engine synthesizes a
-candidate whose surface is the **raw buffer** — exactly what the user
-typed, ASCII digits preserved as ASCII (`comp2`, never `comp၂`), no
-alias folding — and positions it by how much of the input could be
-converted to Myanmar:
-
-- **Empty panel after sanitizers** (e.g. `computer`, `facebook`, `fb`)
-  → the literal is the only candidate, so the user can still see and
-  commit what they typed.
-- **Mostly unconvertible** (≥ 50% of the input has no Myanmar parse)
-  → literal goes to rank 0, any Myanmar candidates follow.
-- **Mostly convertible** (< 50% unconvertible — e.g. `aungc` →
-  `အောင်c`, or fully consumed but no lexicon hit like
-  `tablet` → `တဘလက်`) → Myanmar stays at rank 0, literal is appended
-  at the bottom.
-- **Lexicon hit at rank 0** (e.g. `mingalarpar` → `မင်္ဂလာပါ`,
-  `kar` → `ကား`) → no literal is added. A lexicon hit signals the
-  user is composing intentional Burmese; cluttering the panel with the
-  romanization echo would degrade the common path.
-
-### Native macOS Integration
-- Built on **InputMethodKit** (`IMKInputController`).
-- Uses the native **IMKCandidates** panel
-  (`kIMKSingleColumnScrollingCandidatePanel`).
-- Marked text via `setMarkedText`, committed text via `insertText`.
-- Two input modes: **Compose** (က) and **Roman** (ABC).
-- Configurable candidate page size (3 / 5 / 9 / 12), with arrow-key and
-  Tab/Shift-Tab navigation. Tab is translated to Down-arrow; Shift-Tab
-  to Up-arrow so users familiar with CJK IMEs get expected behaviour.
-- Companion **Preferences** app (`/Applications/BurmeseIMEPreferences.app`)
-  surfaces every setting live — cluster-alias shortcuts, LM prune
-  margin, anchor commit threshold, punctuation mapping, measure words,
-  learning toggle, history browser, and diagnostic paths. Changes
-  propagate to the running IME via the shared `UserDefaults` suite.
-
----
-
-## Architecture
-
-```
-myanmar-ime/
-├── Packages/BurmeseIMECore/              # Swift Package (core library)
-│   ├── Sources/
-│   │   ├── BurmeseIMECore/
-│   │   │   ├── Engine/                        # BurmeseEngine, split by topic:
-│   │   │   │   ├── BurmeseEngine.swift             #   class decl + update()/commit()/recordSelection()/cancel()
-│   │   │   │   ├── CandidateRanking.swift          #   comparators, composite score, alias/ya-pin promotion, LM pruning
-│   │   │   │   ├── FrozenPrefixCache.swift         #   prefix cache, anchor/LM-score cache, syllable-safe split finder
-│   │   │   │   ├── PunctuationHandling.swift       #   mapped-punct splits, creaky-tone, leading-literal extraction
-│   │   │   │   ├── MidBufferDigits.swift           #   digit extraction/splice, tail letter-run composition
-│   │   │   │   ├── InputNormalization.swift        #   parser input prep, stack inference, acceptable-parse checks
-│   │   │   │   └── SurfaceSanitizers.swift         #   aa-shape correction, orphan ZWNJ, Pali/bare-vowel overrides
-│   │   │   ├── Parser/                        # SyllableParser, split by topic:
-│   │   │   │   ├── SyllableParser.swift            #   class decl + init + public API + nested DP types
-│   │   │   │   ├── NBestDP.swift                   #   runDP hot loop, virama/soft-boundary context, DP scoring
-│   │   │   │   ├── Matching.swift                  #   onset/vowel trie walks + medial-order canonicalizer
-│   │   │   │   └── Finalization.swift              #   materialize, output post-processing, top-K ranking
-│   │   │   ├── Grammar.swift                  # Orthographic legality tables
-│   │   │   ├── Romanization.swift             # Consonant/medial/vowel mappings + cluster aliases
-│   │   │   ├── ReverseRomanizer.swift         # Myanmar → romanization (tests + lexicon building)
-│   │   │   ├── Unicode.swift                  # Myanmar block constants and char classification
-│   │   │   ├── Types.swift                    # Public API types
-│   │   │   ├── CandidateStore.swift           # Protocol: lookup(prefix:previousSurface:)
-│   │   │   ├── SQLiteCandidateStore.swift     # SQLite-backed lexicon store
-│   │   │   ├── UserHistoryStore.swift         # Protocol + default paths for learned history
-│   │   │   ├── SQLiteUserHistoryStore.swift   # SQLite-backed user-history store
-│   │   │   ├── IMESettings.swift              # UserDefaults-suite settings shared across processes
-│   │   │   ├── IMEResources.swift             # Bundle-aware resource locator
-│   │   │   ├── PunctuationMapper.swift        # ASCII → Myanmar punctuation mapping
-│   │   │   ├── NumberMeasureWords.swift       # Measure-word suggestion table loader
-│   │   │   ├── Data/
-│   │   │   │   └── NumberMeasureWords.tsv     # Bundled measure-word table
-│   │   │   └── LanguageModel/
-│   │   │       ├── FORMAT.md                  # Binary format spec for BurmeseLM.bin
-│   │   │       ├── LanguageModel.swift        # Protocol for language model scoring
-│   │   │       └── TrigramLanguageModel.swift # Kneser-Ney trigram LM loader
-│   │   ├── BurmeseIMETestSupport/        # Shared test framework + suites
-│   │   ├── BurmeseBench/                 # Benchmark executable + regression check
-│   │   └── LexiconBuilder/main.swift     # TSV → SQLite compilation step (run by corpus_builder)
-│   ├── Tests/
-│   │   ├── BurmeseIMECoreTests/          # XCTest drivers (one file iterating every suite)
-│   │   ├── TestRunner/main.swift         # CLI runner (works without XCTest)
-│   │   └── Benchmarks/baseline.json      # Committed perf baseline for --check
-│   ├── Tools/corpus_builder/             # Offline data pipeline (TSV + SQLite + LM, do not edit outputs)
-│   └── Data/
-│       └── BurmeseLexiconSource.tsv      # Generated by corpus_builder — do not hand-edit
-├── native/macos/                        # Shipping macOS shell
-│   ├── BurmeseIME/                       # Headless IMK bundle → ~/Library/Input Methods/
-│   ├── BurmeseIMEPreferences/            # SwiftUI settings app → /Applications/
-│   ├── installer/                        # build.sh + postinstall for the unsigned .pkg
-│   ├── BurmeseIME.xcworkspace            # Xcode workspace with all schemes
-│   ├── BurmeseIMEApp.xcodeproj           # Project holding both apps + installer target
-│   └── Data/
-│       ├── BurmeseLexicon.sqlite         # Generated by corpus_builder — do not hand-edit
-│       └── BurmeseLM.bin                 # Generated by corpus_builder — do not hand-edit
-└── native/linux/                        # Shipping IBus shell (.deb)
-    ├── ibus-engine/                      # C engine (`ibus-engine-myangler`) — meson build
-    ├── swift-shim/                       # Swift dynamic library exposing C ABI to the engine
-    ├── preferences/                      # GTK4 + libadwaita Preferences app (PyGObject)
-    ├── data/                             # gschema XML, .desktop, SVG icon, IBus component XML
-    ├── debian/                           # `dpkg-buildpackage` rules → `ibus-myangler.deb`
-    └── scripts/                          # build-swift-shim.sh, dev-install.sh, build-deb.sh
-```
-
-### Conversion pipeline
-
-A keystroke lands in `BurmeseInputController` (inside the IME bundle),
-which accumulates a raw Roman buffer and calls
-`BurmeseEngine.update(buffer:context:)` on every change.
-
-```
-buffer ─► BurmeseEngine.update (outer wrapper)
-            │
-            └─ updateInternal
-                 │
-                 ├─ splitComposablePrefix       composable chars vs. literal tail
-                                                (all ASCII digits break the composable run)
-                 ├─ Romanization.normalize      alias folding, digit stripping
-                 ├─ right-shrink probe loop     drop trailing chars until parse is legal
-                 ├─ sliding-window split        frozen prefix + active tail (long inputs)
-                 ├─ SyllableParser.parseCandidates
-                 │     (N-best Viterbi DP over onset+vowel rules)
-                 ├─ CandidateStore.lookup       lexicon prefix match
-                 └─ merge, rank, expand aa      returns CompositionState
-            │
-            └─ injectLiteralFallback       commit-as-typed escape hatch
-                                           (raw-buffer candidate — see Mixed-Script Input
-                                           policy above; runs once at the outermost call)
-```
-
-### Public API
-
-```swift
-enum InputMode { case compose, roman }
-
-struct CompositionState {
-    var rawBuffer: String
-    var selectedCandidateIndex: Int
-    var candidates: [Candidate]
-    var committedContext: [String]
-}
-
-struct Candidate {
-    let surface: String          // Myanmar text
-    let reading: String          // Romanization
-    let source: CandidateSource  // .grammar | .lexicon | .history
-    let score: Double
-}
-
-final class BurmeseEngine {
-    init(
-        candidateStore: any CandidateStore = EmptyCandidateStore(),
-        historyStore: any UserHistoryStore = EmptyUserHistoryStore(),
-        languageModel: any LanguageModel = NullLanguageModel(),
-        settings: IMESettings? = nil
-    )
-
-    func update(buffer: String, context: [String]) -> CompositionState
-    func commit(state: CompositionState) -> String
-    func recordSelection(state: CompositionState)
-    func cancel(state: CompositionState) -> String
-}
-
-protocol CandidateStore {
-    func lookup(prefix: String, previousSurface: String?) -> [Candidate]
-}
-
-protocol UserHistoryStore {
-    func lookup(prefix: String, previousSurface: String?) -> [Candidate]
-    func record(reading: String, surface: String)
-    func remove(reading: String, surface: String)
-    func listAll() -> [HistoryEntry]
-    func clearAll()
-}
-
-protocol LanguageModel {
-    func scoreSurface(_ surface: String, context: [String]) -> Double
-}
-```
-
----
-
-## Requirements
-
-### Core engine (Linux or macOS)
-
-- **Swift 6.0+** — Xcode 15+ on macOS, or `swiftly`-managed toolchain on Linux
-  (tested on Swift 6.3.1 / Ubuntu 24.04).
-- **SQLite 3** development headers.
-  - macOS: ships with the system SDK as the `SQLite3` module.
-  - Linux: `sudo apt install libsqlite3-dev` (the package adds a
-    `Sources/CSQLite` system-library shim that imports `<sqlite3.h>`
-    on Linux; `import SQLite3` continues to work on macOS).
-
-### macOS shell (shipping)
-
-- **macOS 14 (Sonoma)** or later
-- **Xcode 15+** for InputMethodKit + signing
-
-### Linux shell (IBus, Ubuntu 24.04 verified)
-
-The Linux shell has three pieces and so three dependency groups: the
-Swift shim (Swift compiler), the C IBus engine (libibus + glib +
-json-glib), and the GTK4 Preferences app (PyGObject + libadwaita).
-The Debian packaging adds debhelper / fakeroot / etc. on top.
-
-Install everything in one go:
-
-```bash
-sudo apt install \
-    libibus-1.0-dev libglib2.0-dev libsqlite3-dev libjson-glib-dev \
-    meson ninja-build pkg-config \
-    libgtk-4-dev libadwaita-1-dev gir1.2-adw-1 gir1.2-gtk-4.0 \
-    python3-gi python3 \
-    debhelper devscripts dpkg-dev fakeroot lintian \
-    ibus
-```
-
-Plus a Swift 6.x toolchain via [swiftly](https://swift.org/install) —
-`swiftly install 6.3.1` is the version this repo verifies against.
-
-Why each group:
-
-| Group | Packages | Used for |
-|---|---|---|
-| Swift shim | swift via swiftly | Builds `libBurmeseIMEFFI.so` (`swift build -c release -Xswiftc -static-stdlib`). `-static-stdlib` lets the resulting .so carry its own runtime; user systems do **not** need swiftly. |
-| C engine | `libibus-1.0-dev`, `libglib2.0-dev`, `libsqlite3-dev`, `libjson-glib-dev`, `meson`, `ninja-build`, `pkg-config` | Builds `ibus-engine-myangler` and the keymap unit test. `meson` ≥ 1.3 from noble's apt is the one to use; do not install via pip. |
-| Preferences GUI | `python3-gi`, `gir1.2-gtk-4.0`, `gir1.2-adw-1`, `libadwaita-1-0` | The GUI is pure Python; `libadwaita-1-dev` and `libgtk-4-dev` are only needed if you want to introspect bindings during dev. |
-| Debian packaging | `debhelper`, `devscripts`, `dpkg-dev`, `fakeroot`, `lintian` | `dpkg-buildpackage` driver, `dh` sequencer, packaging linter. |
-| Runtime (host) | `ibus` | Required at install time for the engine to register. |
-
----
-
-## Building
-
-### Core engine (primary dev loop, both platforms)
+### Core Engine
 
 ```bash
 cd Packages/BurmeseIMECore
@@ -491,42 +27,345 @@ swift build
 swift run TestRunner
 ```
 
-`TestRunner` is a hand-rolled CLI that exercises the same cases as the
-XCTest suite and prints `ALL N TESTS PASSED` at the end. It works with a
-plain SPM toolchain where `swift test` may fail with *no such module
-'XCTest'*. If you have the full Xcode toolchain, `swift test` runs the
-XCTest targets too.
+`TestRunner` is the primary development loop. It runs the same shared
+test suites as the XCTest target and works on plain Swift toolchains
+where `swift test` may not provide XCTest.
 
-Cases run in parallel (`DispatchQueue.concurrentPerform`) and output
-streams as they complete: `.` for each passing case (no name printed)
-and `F` for each failure. After the stream finishes, failing cases are
-listed by qualified name (`Suite.case`) with each failed assertion's
-label, detail, and source location, followed by a summary block. A
-clean run looks like:
+### macOS
 
+```bash
+open native/macos/BurmeseIME.xcworkspace
 ```
-.................................................
+
+Schemes:
+
+| Scheme | Builds |
+|---|---|
+| `BurmeseIME` | Headless IMK bundle installed under `~/Library/Input Methods/` |
+| `BurmeseIMEPreferences` | SwiftUI settings app installed under `/Applications/` |
+| `BurmeseIMEInstaller` | Aggregate target that builds both apps and writes `native/macos/build/BurmeseIME-Install.pkg` |
+
+Install the package by right-clicking it and choosing **Open**. Then add
+the input source in **System Settings -> Keyboard -> Text Input**.
+
+### Linux
+
+```bash
+cd native/linux
+./scripts/dev-install.sh
+ibus restart
+```
+
+The dev install stages the engine, Swift shim, schema, desktop file, and
+IBus component under `~/.local/`. Add **Myangler (Burmese, Romanized)**
+from your desktop's Region & Language / Input Sources panel. For a
+release-style package:
+
+```bash
+cd native/linux
+./scripts/build-deb.sh
+sudo apt install build/ibus-myangler_*.deb
+ibus restart
+```
+
+The `.deb` uses a release Swift shim built with `-static-stdlib`, so end
+user systems do not need Swift installed.
+
+---
+
+## What It Does
+
+### Grammar-Aware Composition
+
+The engine models Burmese syllable structure instead of doing plain
+string replacement. It checks onset, medial, vowel, coda, asat, virama,
+tone, and Unicode storage-order rules before a candidate reaches the
+panel. Illegal surfaces are either dropped in favor of clean siblings or
+fall back to the raw typed buffer when no Burmese interpretation is safe.
+
+Recent archived tasks tightened the durable invariants around:
+
+- no dependent vowel or combining mark without an anchor;
+- no medial after a vowel mark;
+- no second independent-vowel anchor inside an open cluster;
+- no duplicated ya-asat coda chains;
+- no asat after a tone mark, after a digit, or after an incompatible
+  dependent vowel;
+- no multi-cluster dependent-vowel run on one base, except the explicit
+  legal storage shapes such as `102D 102F` and `1031 + 102B/102C`;
+- no raw composing punctuation wedged between Myanmar scalars.
+
+### Whole-Buffer Parsing
+
+Composition uses an N-best Viterbi parser over syllable states. The
+parser scores the whole buffer, not one syllable at a time, so
+multi-syllable and phrase candidates can win when the lexicon and
+language model support them.
+
+Long buffers use a sliding window. A stable prefix is rendered once and
+memoized; only the active tail is re-parsed. Split guards avoid cutting
+inside onset digraphs, cluster aliases, coda sites, or other spans where
+a later keystroke could still change the syllable.
+
+### Ranking
+
+The production engine combines:
+
+1. orthographic legality and sanitizer results;
+2. parser score, structure cost, and alias cost;
+3. bundled SQLite lexicon frequency and alias rows;
+4. Kneser-Ney trigram LM scores from `BurmeseLM.bin`;
+5. learned user history keyed by alias-normalized reading.
+
+The macOS IMK controller and Linux IBus FFI both load the same bundled
+SQLite lexicon and trigram LM at startup, then attach a writable
+SQLite-backed user-history store. Ranking questions should therefore be
+validated with that production-equivalent stack, not with a bare
+`BurmeseEngine()` unless the claim is explicitly about parser or
+sanitizer behavior.
+
+### Literal Escape Hatch
+
+The candidate panel is never empty for non-empty typeable input. If the
+engine cannot find a clean Burmese parse, it synthesizes a raw literal
+candidate whose surface is exactly what the user typed.
+
+Policy:
+
+- if no candidates survive, the raw buffer is the only candidate;
+- if the top candidate still contains mostly unconverted ASCII, the raw
+  buffer is promoted to rank 0;
+- if a known lexicon entry is rank 0, the raw echo is skipped to keep the
+  common Burmese path clean;
+- otherwise the raw buffer is appended as a lower-ranked escape hatch.
+
+This is why users can type English, URLs, symbols, or partial Burmese
+inside the IME without losing keystrokes.
+
+---
+
+## Romanization
+
+The engine uses a spelling-aligned Hybrid Burmese romanization. Basic
+onset shape:
+
+```text
+[h] <consonant> [w] [y] <vowel/final suffix>
+```
+
+Key points:
+
+- `h` before a sonorant is ha-htoe: `hma`, `hna`, `hla`, `hnga`.
+  `mhar` is not "ma + ha-htoe"; the standard typing is `hmar`.
+- `y` after a consonant is the structural ya-yit medial. Common
+  ya-pin-dominant sounds are also reachable through shortcuts and
+  candidate alternates.
+- `+` is an explicit syllable / stack boundary. Recent fixes make
+  user-typed `+` at least as strong as inferred stack markers when the
+  LM tries to prefer a different segmentation.
+- User-facing digits are literal digits, not variant selectors. The
+  `2` and `3` suffixes in rule tables and reverse-romanizer output are
+  internal disambiguators only.
+
+Examples:
+
+| Input | Candidate | Notes |
+|---|---|---|
+| `thar` | `သာ` | `th` onset + long `ar` |
+| `kyaw` | `ကျော်` / `ကြော်` | ya-pin / ya-yit variants rank by context |
+| `jwantaw` | `ကျွန်တော်` | cluster shortcut |
+| `chit` | `ချစ်` | cluster shortcut |
+| `gypan` | `ဂျပန်` | loanword-friendly cluster shortcut |
+| `hma` | `မှ` | ha-htoe is prefix `h` |
+| `min+galarpar` | `မင်္ဂလာပါ` | explicit virama-stack boundary |
+| `ii.` / `ii` | `ဣ` / `ဤ` | independent vowels |
+| `oo` / `oo:` | `ဩ` / `ဪ` | independent o family |
+| `ywe` | `၍` | standalone particle |
+| `ei` | `၏` | standalone particle |
+
+### Cluster Shortcuts
+
+Shortcuts coexist with structural typing:
+
+| Shortcut | Typical surface | Structural family |
+|---|---|---|
+| `j`, `jw` | `ကျ`, `ကျွ` | ka + ya-pin, with ya-yit sibling reachable |
+| `ch`, `chw` | `ချ`, `ချွ` | kha + ya-pin, with ya-yit sibling reachable |
+| `gy`, `gyw` | `ဂျ`, `ဂျွ` | ga + ya-pin |
+| `sh`, `shw` | `ရှ`, `ရွှ` | ra + ha / wa + ha |
+
+The open task
+[`TASK-062`](tasks/TASK-062-multi-syllable-canonical-surface-not-reached.md)
+tracks a narrow missing alias: phonetic `y` should be able to reach
+some spelling-`r` lemmas such as `hsayar -> ဆရာ`. Broader loanword
+spellings from that task were validated as wrong-input artifacts and
+are not planned as fuzzy matching.
+
+### Variants and Digits
+
+Several letters share a reading: တ/ဋ, လ/ဠ, ဥ/ဦ, and others. Users type
+the digit-less reading and choose the desired surface from the candidate
+panel. History then promotes the chosen surface next time.
+
+ASCII digits typed by the user stay at the typed position and are
+offered as Myanmar-digit and ASCII-digit surfaces:
+
+- `min+galar2par2` -> `မင်္ဂလာ၂ပါ၂` / `မင်္ဂလာ2ပါ2`;
+- `ky2an` is `k` + literal `2` + `an`, never a request for ya-pin;
+- `t2ote`, `u2`, `pa2`, `kar2` keep the `2` as a literal digit.
+
+### Punctuation
+
+`.` and `:` are composing tone keys when they complete a Burmese
+syllable, so `thar.` correctly surfaces the creaky-tone form `သာ့`,
+with literal `သာ.` still reachable. Literal punctuation is preserved
+when it is clearly document punctuation or part of a literal tail.
+
+Optional punctuation mapping rewrites ASCII `. , ! ? ;` to Myanmar
+punctuation when the setting is enabled and the surrounding context is
+Myanmar. It is off by default.
+
+---
+
+## Architecture
+
+```text
+myanmar-ime/
+├── Packages/BurmeseIMECore/
+│   ├── Sources/BurmeseIMECore/
+│   │   ├── Engine/                 BurmeseEngine split by ranking,
+│   │   │                           normalization, punctuation, digits,
+│   │   │                           frozen-prefix cache, sanitizers
+│   │   ├── Parser/                 SyllableParser N-best DP
+│   │   ├── Grammar.swift           orthographic legality tables
+│   │   ├── Romanization.swift      rule tables and aliases
+│   │   ├── ReverseRomanizer.swift  Myanmar -> romanization
+│   │   ├── SQLiteCandidateStore.swift
+│   │   ├── SQLiteUserHistoryStore.swift
+│   │   ├── IMESettings.swift
+│   │   └── LanguageModel/
+│   ├── Sources/BurmeseIMETestSupport/
+│   │   └── Suites/                 single source of all test cases
+│   ├── Sources/BurmeseBench/       performance benchmark
+│   ├── Sources/LexiconBuilder/     TSV -> SQLite compiler
+│   ├── Tools/corpus_builder/       corpus -> TSV + SQLite + LM
+│   └── Tests/
+├── native/macos/                   IMK bundle, SwiftUI Preferences, pkg
+├── native/linux/                   IBus engine, Swift shim, GTK prefs, deb
+└── tasks/                          open and archived task notes
+```
+
+The core package has no macOS-only runtime dependency. SQLite imports use
+`SQLite3` on macOS and the `CSQLite` system-library target on Linux.
+
+### Conversion Pipeline
+
+```text
+raw buffer
+  -> split literal head / digit prefix / composable run / literal tail
+  -> normalize roman input
+  -> parse with N-best DP, stack inference, and sliding window as needed
+  -> merge grammar, lattice, lexicon, LM, and history candidates
+  -> apply sanitizer passes
+  -> attach literals and digit surfaces
+  -> inject raw-buffer fallback
+  -> return CompositionState
+```
+
+The native shells call `BurmeseEngine.update(buffer:context:)` on each
+keystroke, display `CompositionState.candidates`, then call
+`commit(state:)` and `recordSelection(state:)` when the user chooses a
+candidate.
+
+### Settings and History
+
+Shared settings:
+
+| Setting | Default |
+|---|---|
+| Candidate page size | `9` |
+| Commit on space | `false` |
+| Cluster aliases | `true` |
+| LM prune margin | `8.0` |
+| Anchor commit threshold | `8` |
+| Burmese punctuation mapping | `false` |
+| Number measure-word suggestions | `false` |
+| Learning | `true` |
+
+macOS stores settings in the shared
+`group.com.myangler.inputmethod.burmese` UserDefaults suite and history
+under `~/Library/Application Support/BurmeseIME/UserHistory.sqlite`.
+Linux mirrors settings through GSettings schema
+`com.myangler.inputmethod.burmese` and stores history at
+`~/.local/share/myangler/UserHistory.sqlite`.
+
+---
+
+## Building and Testing
+
+### Requirements
+
+- Swift 6.0+.
+- SQLite development headers. macOS gets SQLite from the SDK; Linux needs
+  `libsqlite3-dev`.
+- Linux native shell builds additionally need IBus, GLib, json-glib,
+  meson, ninja, GTK4, libadwaita, PyGObject, and Debian packaging tools;
+  see [`native/linux/README.md`](native/linux/README.md).
+
+### Tests
+
+All cases live in
+`Packages/BurmeseIMECore/Sources/BurmeseIMETestSupport/Suites/` and are
+registered once in `BurmeseTestSuites.all`. `TestRunner` and the XCTest
+driver both iterate that list.
+
+```bash
+cd Packages/BurmeseIMECore
+swift run TestRunner
+```
+
+The runner emits `.` for passes and `F` for failures. A clean run ends
+with:
+
+```text
 === Summary ===
-  Cases: 312/312 passed
-  Assertions: 4187/4187 passed
-ALL 4187 TESTS PASSED
+  Cases: 1355/1355 passed
+  Assertions: 5721/5721 passed
+ALL 5721 TESTS PASSED
 ```
 
-### Lexicon and LM data rebuild
+Use the right engine layer for a test:
 
-The TSV word list, compiled SQLite lexicon, and trigram LM binary are
-**generated together** by `Packages/BurmeseIMECore/Tools/corpus_builder/`
-and must not be hand-edited. `LexiconBuilder` compiles the TSV into
-SQLite, but it is invoked as the last stage of `corpus_builder` —
-running it against a modified TSV is not supported because it will
-drift the lexicon vocabulary out of sync with `BurmeseLM.bin`, producing
-silently wrong rankings at runtime. The `LexiconLMDriftSuite` test
-guards alignment between the two.
+- parser-only: rule matching and DP legality;
+- bare `BurmeseEngine()`: engine post-processing, sanitizer, literal
+  fallback, and non-ranking invariants;
+- production-equivalent engine with bundled SQLite + trigram LM:
+  user-visible rank-0 and multi-syllable ranking claims.
 
-To add, remove, or re-score words, change the relevant `corpus_builder`
-stage (`ingest.py`, `segmenter.py`, `vocab.py`, `lexicon.py`), extend
-the tests under `Tools/corpus_builder/tests/`, and re-run the full
-pipeline:
+### Benchmarks
+
+```bash
+cd Packages/BurmeseIMECore
+swift run -c release BurmeseBench
+swift run -c release BurmeseBench --check Tests/Benchmarks/baseline.json
+swift run -c release BurmeseBench --update Tests/Benchmarks/baseline.json
+```
+
+The baseline is per platform. `--check` compares only the current host's
+section and fails if p95 regresses more than 20% or p99 more than 30%.
+When adding a benchmark scenario, update every platform section already
+present in `baseline.json`; the drift suite enforces scenario parity.
+
+### Lexicon and LM Data
+
+These files are generated together and must not be hand-edited:
+
+- `Packages/BurmeseIMECore/Data/BurmeseLexiconSource.tsv`;
+- `native/macos/Data/BurmeseLexicon.sqlite`;
+- `native/macos/Data/BurmeseLM.bin`;
+- Linux staging copies/symlinks under `native/linux/data/staging/`.
+
+Regenerate through the corpus pipeline:
 
 ```bash
 cd Packages/BurmeseIMECore/Tools/corpus_builder
@@ -538,103 +377,9 @@ python -m corpus_builder.build all \
     --prune 0 10 20
 ```
 
-`--prune` tunes the LM file size by dropping rare n-grams. On the
-Myanmar-C4 corpus (34M sentences / 557M tokens) the cutoffs scale
-roughly as: `0 0 1` → ~750 MB, `0 2 3` → ~340 MB, `0 10 20` →
-50–70 MB (the shipping default), `0 20 40` → ~30 MB. IME ranking
-exercises only a thin slice of the trigram space per keystroke, so
-the long tail is mostly dead weight at inference.
-
-See `Packages/BurmeseIMECore/Tools/corpus_builder/README.md` for the
-individual stages (`ingest` / `vocab` / `lexicon` / `lm`). The TSV
-format emitted by the pipeline is:
-
-```
-surface<TAB>frequency[<TAB>override_reading]
-```
-
-- `surface` — Myanmar text (e.g. `မင်္ဂလာပါ`)
-- `frequency` — Raw corpus count used to compute log-scale unigram score
-- `override_reading` — Optional explicit romanization for irregular
-  entries, preserved across pipeline runs
-
-### Native shells
-
-#### macOS (shipping)
-
-Open the Xcode workspace and pick a scheme:
-
-```bash
-open native/macos/BurmeseIME.xcworkspace
-```
-
-| Scheme | What it builds |
-|---|---|
-| `BurmeseIME` | Headless IMK bundle (the IME itself) |
-| `BurmeseIMEPreferences` | SwiftUI settings app |
-| `BurmeseIMEInstaller` | Aggregate target: builds both and produces `build/BurmeseIME-Install.pkg` |
-
-`BurmeseIMEInstaller` uses Xcode's automatic signing (stable team
-signature) — that's what lets TCC persist grants instead of re-prompting.
-A CLI equivalent is `native/macos/installer/build.sh`.
-
-Neither app is sandboxed. Shared settings live in
-`~/Library/Preferences/group.com.myangler.inputmethod.burmese.plist`,
-read by both processes via `UserDefaults(suiteName:)`.
-
-#### Linux (IBus)
-
-The `native/linux/` tree produces `ibus-myangler.deb`: a tiny C engine
-(`ibus-engine-myangler`) wrapping a Swift `libBurmeseIMEFFI.so` over a
-flat C ABI, plus a Python + GTK4 + libadwaita Preferences app that
-follows the system theme automatically. Settings cross processes via
-GSettings (schema `com.myangler.inputmethod.burmese`); user history
-lives at `~/.local/share/myangler/UserHistory.sqlite`.
-
-Two build modes:
-
-**Dev iteration** (no `dpkg`, fast turnaround). Stages the engine,
-shim, schema, and component XML under `~/.local/`:
-
-```bash
-cd native/linux
-./scripts/dev-install.sh
-ibus restart
-# Add "Myangler (Burmese, Romanized)" in
-# Settings → Region & Language → Manage Installed Languages.
-```
-
-The dev install builds a debug Swift shim (no `-static-stdlib`, ~1s
-incremental link) and points the IBus component XML's `<exec>` at the
-staged binary. Re-run after every code change.
-
-**Production .deb** (release shim, full Debian metadata):
-
-```bash
-cd native/linux
-./scripts/build-deb.sh
-sudo apt install build/ibus-myangler_<version>_amd64.deb
-ibus restart
-```
-
-The script:
-1. Builds the Swift shim with `-static-stdlib` (~30s release link).
-2. Configures + builds the C engine via meson under
-   `dpkg-buildpackage`'s control.
-3. Stages files into `debian/ibus-myangler/` and packages with
-   `dpkg-deb`.
-4. Relocates the `.deb`, `.changes`, and `.buildinfo` from
-   `native/` (where `dpkg-buildpackage` writes them by convention)
-   into `native/linux/build/` so the repo's top-level stays tidy.
-
-The resulting .deb is ~41 MB compressed (~140 MB installed; most of
-that is the bundled lexicon + LM at 23 MB / 42 MB respectively, and
-the static-stdlib Swift shim at 74 MB). End-user systems do **not**
-need a Swift toolchain — runtime deps are all stock Ubuntu/Debian.
-
-For full layout, schema details, and FFI shape see
-[`native/linux/README.md`](native/linux/README.md). The original
-design document is [`tasks/linux-ibus-port.md`](tasks/linux-ibus-port.md).
+`LexiconBuilder` is the final TSV -> SQLite stage, but it should not be
+run in isolation against hand-edited data because the SQLite IDs and LM
+word IDs must stay aligned. `LexiconLMDriftSuite` guards that contract.
 
 ---
 
@@ -642,266 +387,49 @@ design document is [`tasks/linux-ibus-port.md`](tasks/linux-ibus-port.md).
 
 ### macOS
 
-1. Build the pkg: in Xcode, select scheme **BurmeseIMEInstaller** → ⌘B.
-   Output lands at `native/macos/build/BurmeseIME-Install.pkg`.
-2. Right-click the pkg → **Open** (the pkg is unsigned, so a
-   double-click is blocked by Gatekeeper).
-3. The installer:
-   - Places `BurmeseIME.app` in `~/Library/Input Methods/`
-   - Places `BurmeseIMEPreferences.app` in `/Applications/`
-   - Launches the Preferences app to kick off IME self-registration
-4. Enable the input source:
-   - Open **System Settings → Keyboard → Text Input → Edit**.
-   - Click **+**, search for **Burmese**, add it.
-5. Switch input modes from the menu bar:
-   - **က** — Burmese Compose mode
-   - **ABC** — Roman passthrough mode
+1. Build `BurmeseIMEInstaller` in Xcode or run
+   `native/macos/installer/build.sh`.
+2. Right-click `native/macos/build/BurmeseIME-Install.pkg` -> **Open**.
+3. The installer places `BurmeseIME.app` in
+   `~/Library/Input Methods/` and `BurmeseIMEPreferences.app` in
+   `/Applications/`.
+4. Add **Burmese** in System Settings -> Keyboard -> Text Input.
+5. Switch between **က** compose mode and **ABC** passthrough mode from
+   the input-source menu.
 
-### Updating
-
-Re-run the pkg. Postinstall removes the previous IME bundle before
-installing the new one. No uninstall step needed.
-
-### Uninstall
+Uninstall:
 
 ```bash
 rm -rf "$HOME/Library/Input Methods/BurmeseIME.app"
 rm -rf /Applications/BurmeseIMEPreferences.app
 rm -f  "$HOME/Library/Preferences/group.com.myangler.inputmethod.burmese.plist"
 ```
-Then remove the input source in System Settings → Keyboard → Text Input.
 
 ### Linux
 
 ```bash
-sudo apt install ./ibus-myangler_<version>_amd64.deb
+sudo apt install ./native/linux/build/ibus-myangler_*.deb
 ibus restart
-# In GNOME Settings → Region & Language → Manage Installed Languages
-# → Input Sources → +, search for "Myangler (Burmese, Romanized)" and
-# add it. Switch to it via Super+Space (or your shortcut).
 ```
 
-#### Runtime dependencies
+Then add **Myangler (Burmese, Romanized)** from Region & Language /
+Input Sources. Runtime dependencies are declared by the package; a Swift
+toolchain is required only on the build host.
 
-The .deb declares everything it needs in `Depends:` and `Recommends:`
-so `apt install` resolves them automatically. End-user systems do
-**not** need a Swift toolchain — the shim is built with
-`-static-stdlib` and bundles its own Swift runtime inside
-`libBurmeseIMEFFI.so`.
-
-| Group | Packages auto-pulled | What they're for |
-|---|---|---|
-| Base toolchain runtime | `libc6 (≥ 2.38)`, `libgcc-s1 (≥ 3.3.1)`, `libstdc++6 (≥ 13.1)` | Standard C/C++ runtime for the engine binary |
-| GLib stack | `libglib2.0-0t64 (≥ 2.79)`, `libjson-glib-1.0-0 (≥ 1.5.2)` | GObject/GIO + JSON parsing across the FFI |
-| IBus | `ibus (≥ 1.5.20)`, `libibus-1.0-5 (≥ 1.5.20)`, `gir1.2-ibus-1.0` | The daemon that loads our engine + its client lib + Python typelib |
-| GSettings backend | `dconf-gsettings-backend \| gsettings-backend` | Persistence for the settings schema (dconf is the GNOME default) |
-| Lexicon storage | `libsqlite3-0 (≥ 3.6.11)` | Bundled lexicon + on-disk typing history |
-| Preferences GUI | `python3 (≥ 3.10)`, `python3-gi (≥ 3.42)`, `libgtk-4-1`, `libadwaita-1-0 (≥ 1.5)`, `gir1.2-gtk-4.0`, `gir1.2-adw-1 (≥ 1.5)` | PyGObject + GTK4 + libadwaita for `myangler-preferences` |
-
-`Recommends:` (apt installs by default; skipped with
-`--no-install-recommends`):
-
-- **`fonts-myanmar`** — *strongly recommended.* Without a Burmese font
-  installed the engine still produces correct Myanmar text but the
-  candidate panel and committed output show tofu (□□□).
-- **`gnome-control-center`** — needed only for the "Open Region &
-  Language Settings" button on the Setup tab. Skip on KDE / minimal
-  installs.
-
-#### Things to have running
-
-- An **IBus session**: `ibus-daemon` started by your desktop session.
-  GNOME launches it automatically once any IBus input source is added
-  in Region & Language. On non-GNOME desktops you may need
-  `im-config -n ibus` and a re-login.
-- A **dconf backend** for GSettings, present on every Ubuntu desktop
-  install. The `dconf-gsettings-backend | gsettings-backend`
-  alternation in `Depends:` covers minimal/server profiles.
-
-#### User data
-
-User data lives at `~/.local/share/myangler/` (typing history) and
-dconf under `/com/myangler/inputmethod/burmese/` (settings).
-`apt purge ibus-myangler` removes binaries, schemas, and icons but
-**leaves typing history intact** by design — wipe
-`~/.local/share/myangler/` manually if you want a clean slate.
+User data lives at `~/.local/share/myangler/` and GSettings/dconf under
+`/com/myangler/inputmethod/burmese/`. `apt purge ibus-myangler` removes
+binaries and schemas but leaves history intact by design.
 
 ---
 
-## Key Bindings (Compose Mode)
+## Key Bindings
 
-| Key | Action |
-|-----|--------|
-| Any printable ASCII (`!`–`~`, excluding space) | Extend the composition buffer. Non-composable characters (digits, punctuation) flow through the engine's literal-tail pipeline. |
+| Key | Compose-mode action |
+|---|---|
+| Printable ASCII | Extend the composition buffer |
+| Space | Commit the selected candidate; optionally insert a literal space |
+| Return / Enter | Commit the selected candidate |
+| Backspace | Delete the last buffer character |
+| Escape | Commit the raw Latin buffer unchanged |
 | Arrow keys, Page Up / Page Down | Navigate the candidate panel |
-| `Tab` / `Shift+Tab` | Next / previous candidate (translated to arrows internally) |
-| `Space` (first) | Commit selected candidate (and insert a literal space if *Commit on space* is enabled) |
-| `Space` (no composition) | Insert ASCII space |
-| `Return` | Commit selected candidate |
-| `Backspace` | Delete last character from buffer |
-| `Escape` | Commit raw Latin buffer unchanged, cancel composition |
-
----
-
-## Testing
-
-Every case is defined once in `Sources/BurmeseIMETestSupport/Suites/` and
-exposed via `BurmeseTestSuites.all`. Two runners iterate that shared list:
-
-- `swift run TestRunner` — CLI driver (works without XCTest). Runs every
-  case in parallel via `DispatchQueue.concurrentPerform` and streams a
-  `.` per pass / `F` per failure as cases complete; only failing cases
-  are named in the post-run report (qualified `Suite.case` plus each
-  assertion's label and source location).
-- `swift test` / Xcode Test navigator — `BurmeseSuiteXCTests.swift`
-  drives every suite through a single thin XCTest wrapper
-
-Suites under `Sources/BurmeseIMETestSupport/Suites/`:
-
-| Suite | Coverage |
-|-------|----------|
-| `RomanizationSuite` | Consonants, vowel sorting, normalization, alias helpers |
-| `GrammarSuite` | Medial legality, valid/invalid syllable combinations |
-| `ReverseRomanizerSuite` | Myanmar → roman + round-trip stability |
-| `ClusterAliasSuite` | Parser-level cluster-alias onset expansions |
-| `EngineSuite` | Public API: buffer lifecycle, commit/cancel, ranking |
-| `LexiconRankingSuite` | Merge ordering, alias penalties, real-lexicon spot checks |
-| `LanguageModelSuite` | Binary-format round-trip, unigram/bigram/trigram backoff |
-| `PunctuationSuite` | Punctuation mapper + in-composition tail conversion |
-| `NumberMeasureWordsSuite` | Measure-word expansion, year/currency patterns |
-| `UserHistorySuite` | SQLite history store, score decay, engine integration |
-| `IMESettingsSuite` | UserDefaults suite round-trip, engine honors settings |
-| `SQLiteCandidateStoreSuite` | Alias-aware prefix lookup (bundled + legacy schema) |
-| `PropertySuite` | 5 properties: legal syllables parse, no Latin interleaving (×2), sliding-window equivalence, anchor monotonicity |
-| `FuzzSuite` | Budget-capped random buffers (`FUZZ_BUDGET_MS`, default 1000ms) |
-
-**Key invariants:**
-- Within a single composed run, Myanmar output never has Latin
-  interleaved *between* Myanmar characters. Mixing scripts across runs
-  in the document is expected and supported: literal tails (unparseable
-  suffixes) are emitted verbatim alongside the Myanmar surface, and
-  Latin text between commits flows through untouched — see
-  **Mixed-Script Input** above.
-- Forward parse → reverse romanize → forward parse produces the same
-  surface (round-trip stable).
-- Illegal consonant+medial pairs never appear in committed output.
-
-**Two engine layers, two test styles.** Most suites construct a bare
-`BurmeseEngine()` (no language model, no lexicon) and assert
-non-ranking invariants — parser legality, sanitizer behaviour, literal
-fallback shape. Suites whose claim is about *user-visible rank-0 output*
-load the same bundled SQLite lexicon (`native/macos/Data/BurmeseLexicon.sqlite`)
-and trigram LM (`native/macos/Data/BurmeseLM.bin`) the macOS / Linux
-shells use at runtime, via the `BundledArtifacts` helper — they skip
-cleanly when those artifacts are absent (e.g. on a fresh checkout
-before `corpus_builder` has run). Examples of the bundled-engine
-pattern: `AnchorStabilitySuite`, `LexiconRankingSuite`,
-`MedialStabilitySuite`, `MidBufferStackInferenceSuite`,
-`WindowingKinziAcrossThresholdSuite`. Contributors writing a test for
-a ranking-related claim should follow the same pattern; the bare
-engine and the production-equivalent engine can disagree, sometimes
-substantially, and only the latter matches what the user sees.
-
-### Benchmarks
-
-```bash
-cd Packages/BurmeseIMECore
-swift run -c release BurmeseBench                                  # JSON on stdout
-swift run -c release BurmeseBench --check Tests/Benchmarks/baseline.json
-swift run -c release BurmeseBench --update Tests/Benchmarks/baseline.json
-swift run -c release BurmeseBench --scenario medium
-```
-
-Scenarios: `short` (6-char buffer × 1000), `medium` (11-char × 1000),
-`long` (30-char × 500), `incremental` (38-char typed one key at a time).
-Metrics: p50/p95/p99/max per scenario in microseconds. Warm-up = 50
-iterations; each scenario runs three times with the middle-p95 run
-reported. `--check` exits 1 on >20% p95 or >30% p99 regression against
-the committed baseline.
-
----
-
-## Lexicon
-
-The bundled lexicon (`BurmeseLexiconSource.tsv`) provides:
-
-- Log-scale unigram frequency scores normalized to the 0–1000 range
-  (corpus-derived; see `Packages/BurmeseIMECore/Tools/corpus_builder/`)
-- Optional explicit reading overrides for irregular or high-priority
-  entries
-
-The TSV, the compiled SQLite database, and the LM binary are outputs
-of the `corpus_builder` pipeline — **they are not hand-edited**. To
-grow or re-balance the lexicon, change the corpus inputs or the
-pipeline code under `Tools/corpus_builder/` and re-run the full
-pipeline so all three artefacts regenerate from the same vocabulary
-in one pass. The engine and schema remain unchanged as the corpus
-expands.
-
----
-
-## Roadmap
-
-- [x] `BurmeseIMECore` — Grammar, romanization, N-best Viterbi parser,
-      sliding-window composition, SQLite lexicon
-- [x] Cluster-sound shortcuts (`j`, `ch`, `gy`, `sh` + `w` variants)
-- [x] `LexiconBuilder` — TSV → SQLite compilation pipeline
-- [x] Unit tests — Grammar, romanization, engine, fixture regressions
-- [x] `BurmeseIME` — headless IMK bundle with `IMKInputController`
-      integration and key handling
-- [x] `BurmeseIMEPreferences` — SwiftUI settings app with live
-      cross-process reconciliation
-- [x] `BurmeseIMEInstaller` — aggregate Xcode target + unsigned `.pkg`
-      one-click installer
-- [x] Trigram language model — Kneser-Ney scored re-ranking over
-      grammar and lexicon candidates
-- [x] User history store — `UserHistory.sqlite` writes on every commit
-      with alias-normalized keys; entries surfaced + manageable from the
-      Preferences app
-- [x] Burmese digits, punctuation auto-mapping, measure-word suggestions
-- [x] Corpus data pipeline — `Tools/corpus_builder/` builds aligned
-      lexicon + LM from a public corpus
-- [x] Core engine builds and tests on Linux (Ubuntu 24.04 / Swift 6.3.1)
-- [x] Linux native shell — `ibus-myangler.deb` with GTK4 + libadwaita
-      Preferences app, full feature parity with the macOS shell
-      ([`native/linux/README.md`](native/linux/README.md))
-
----
-
-## Design Decisions
-
-**Why grammar-first?** Starting from formal orthographic rules makes
-illegal combinations structurally impossible, rather than filtering them
-after the fact.
-
-**Why Viterbi instead of longest-match?** Longest-match is ambiguous
-over multi-syllable buffers. Viterbi DP scores the globally best parse,
-so the engine ranks whole-word and phrase candidates rather than
-resolving syllables greedily left to right.
-
-**Why a sliding window?** N-best DP is quadratic in buffer length
-because each DP state carries a growing output string. Freezing the
-prefix once it is outside any possible rule match keeps per-keystroke
-work bounded on long inputs.
-
-**Why SQLite?** The lexicon is a read-only asset bundled with the app.
-SQLite provides prefix-index queries and bigram lookups with zero
-network or server dependency, sub-millisecond latency, and a stable
-on-disk format that survives app updates.
-
-**Why an unsigned pkg + per-user install?** Distributing an IME through
-the Mac App Store requires notarization and a paid Developer Program
-membership. A `pkgbuild`-produced unsigned pkg signed ad-hoc for the pkg
-wrapper (but with team-signed app bundles inside) is enough for personal
-use and trusted sideload: Gatekeeper asks once for the pkg, after which
-the team-signed apps run without per-launch prompts.
-
-**Why no sandbox?** Sandboxed apps sharing state via an App Group need
-that App Group officially registered with Apple under the team — only
-possible with paid Developer Program membership. With free Apple
-Development signing, macOS can't persist the TCC grant for App-Group
-data access and re-prompts on every IME launch. Dropping the sandbox
-removes the App Group dependency; the two processes share settings
-through a plain `UserDefaults` suite file in
-`~/Library/Preferences/`. Trade-off: no MAS distribution path, which
-isn't a goal here.
+| Tab / Shift-Tab | Next / previous candidate |
