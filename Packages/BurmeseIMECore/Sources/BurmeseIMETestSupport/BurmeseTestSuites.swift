@@ -107,5 +107,6 @@ public enum BurmeseTestSuites {
         LongBufferYaPinPromotionSuite.suite,
         BufferFinalOrphanAnchorSuite.suite,
         MultiClusterDepVowelOnAnchorSuite.suite,
+        ExplicitPlusKinziDisplacementSuite.suite,
     ]
 }

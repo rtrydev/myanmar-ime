@@ -1167,6 +1167,60 @@ public final class BurmeseEngine: @unchecked Sendable {
                 }
             }
         }
+        // TASK-031: Explicit user-typed `+` strict-stack promotion.
+        // When the user typed `+`s in the buffer, the parser respects
+        // them as soft boundaries and produces the kinzi / native-
+        // virama-stack / na-asat-closure surface at parser top-1
+        // (e.g. `min+ga` → `မင်္ဂ`, `kan+ga` → `ကန်ဂ`,
+        // `yan+gun` → `ယန်ဂူန`, `nan+ga` → `နန်ဂ`). Without this
+        // block the engine's LM-driven composite ranking can re-rank
+        // an alternative segmentation above the user-respecting
+        // surface — concretely `min+ga` displaces to `မည်န္ဂ` (a
+        // `mi2na+ga`-reading parse that introduces a virama where
+        // the user wanted kinzi), and `kan+ga` displaces to `ကံဂ`
+        // (anusvara closure instead of na+asat). The user-typed `+`
+        // is the strongest possible "stack here" signal, so route
+        // every parse whose reading exactly matches the user's
+        // literal input through the existing
+        // `bestStrictInferredStackIndex` rank-0 lift.
+        //
+        // Discriminator: parse.reading == effectiveParseInput, OR
+        // parse.reading == effectiveParseInput + "a". The parser's
+        // reading carries internal disambiguators like `2`/`3`
+        // (retroflex / anusvara variants) when it picked a
+        // non-literal segmentation; a literal-match means the parse
+        // preserved the user's exact keystrokes and `+` placement.
+        // The "+a" sibling matches the parser's normal habit of
+        // appending the inherent vowel `a` after a trailing bare
+        // consonant — `yan+gun` → reading `yan+guna`, `thin+kun` →
+        // reading `thin+kuna`, etc. — so the user-respecting parse
+        // for a `<...>n+<lower>n` shape still surfaces. Variant
+        // parses (`kan2+ga`, `yan+gu2na`, `yan+gun2a`, `yan3+guna`,
+        // …) stay in the panel at lower rank: they're not promoted
+        // here, but the user can still pick them via the panel.
+        if !effectiveWindowed && displayBuffer.contains("+") {
+            // Compare against the user's pre-reshape `displayBuffer`
+            // rather than `effectiveParseInput`. The
+            // `collapseConnectorRuns` TASK-011 reshape strips an
+            // upper's inherent `a` before `+` (e.g. `thin+ga+thin`
+            // → `thin+g+thin`) before the parser sees the buffer;
+            // the parser's reading rebuilds that `a` so reading
+            // matches the user's original keystrokes again. A
+            // displaced parse (e.g. `mina+ga` for user `min+ga`)
+            // produces a reading that does NOT match the user's
+            // typed buffer, so the discriminator correctly excludes
+            // it. The trailing-`a` allowance covers the parser's
+            // habit of appending an inherent vowel after a bare
+            // trailing consonant (`yan+gun` → reading `yan+guna`).
+            for parse in grammarParses
+            where Self.readingMatchesUserLiteralAcrossInherentVowels(
+                parseReading: parse.reading,
+                userInput: displayBuffer
+            ) {
+                strictInferredStackOutputs.insert(parse.output)
+                strictInferredStackOutputs.insert(Self.correctAaShape(parse.output))
+            }
+        }
         // `windowFallback` is set when the tail-only parse failed so we
         // retried with the full buffer. In that case the anchor is still
         // the authoritative rendering of the prefix — we just couldn't
@@ -1707,15 +1761,43 @@ public final class BurmeseEngine: @unchecked Sendable {
         merged = Self.sanitizeDoubledCodaChain(merged)
         merged = Self.sanitizeMultiClusterOnSingleAnchor(merged)
 
-        if !effectiveParseInput.contains("+"),
-           !effectiveWindowed,
+        // TASK-031: `effectiveParseInput.contains("+")` no longer
+        // gates this promotion. The original gate was based on the
+        // (incorrect) assumption that user-typed `+` already
+        // guarantees the parser's stack-respecting surface wins
+        // ranking; in practice the LM signal can flip a sibling
+        // (anusvara/nya-asat-na/etc.) above the user's intent on
+        // short buffers, so we route `+`-bearing buffers through the
+        // same promotion path the inferred-`+` cases use. The
+        // `strictInferredStackOutputs` set was populated upstream
+        // from grammar parses whose reading exactly matches
+        // `effectiveParseInput` — that's the discriminator that
+        // keeps the promotion targeted at "user-typed-`+`-respecting"
+        // surfaces and avoids re-promoting variant parses (e.g.
+        // `kan2+ga` retroflex sibling).
+        if !effectiveWindowed,
            !strictInferredStackOutputs.isEmpty,
            let idx = Self.bestStrictInferredStackIndex(
                in: merged,
                strictInferredStackOutputs: strictInferredStackOutputs
            ) {
-            let keeper = merged.remove(at: idx)
-            merged.insert(keeper, at: 0)
+            // TASK-031: when the buffer carries an explicit user-
+            // typed `+`, skip the promotion if a lexicon-source
+            // candidate already occupies rank 0. Lexicon hits are
+            // the strongest signal — the user composed a word that
+            // matches a curated dictionary entry — and must not be
+            // displaced by a grammar-side strict-stack candidate.
+            // The implicit-inference path (no `+` in the buffer)
+            // continues to promote unconditionally because there's
+            // no user-explicit signal that would justify deferring
+            // to lexicon over the inferred stack.
+            let lexiconAtSlotZero = displayBuffer.contains("+")
+                && !merged.isEmpty
+                && merged[0].source == .lexicon
+            if !lexiconAtSlotZero {
+                let keeper = merged.remove(at: idx)
+                merged.insert(keeper, at: 0)
+            }
         }
 
         // Windowed-buffer counterpart of the promotion above (TASK-001).
@@ -1728,8 +1810,13 @@ public final class BurmeseEngine: @unchecked Sendable {
         // matching merged candidate to rank 0. Frozen-prefix-resident
         // inference sites are excluded by construction: the strict set
         // only ever contains tail-derived outputs.
-        if !effectiveParseInput.contains("+"),
-           effectiveWindowed,
+        // TASK-031: same gate-lift as the non-windowed branch above.
+        // The windowed path computes `windowedStrictOutputs` =
+        // `<frozen prefix><tail>` for each tail surface in
+        // `strictInferredStackOutputs`; the membership check still
+        // applies, so explicit-`+` buffers that window across the
+        // composition boundary participate in the rank-0 promotion.
+        if effectiveWindowed,
            !effectivePrefixBranches.isEmpty,
            !strictInferredStackOutputs.isEmpty {
             var windowedStrictOutputs: Set<String> = []
@@ -3016,6 +3103,84 @@ public final class BurmeseEngine: @unchecked Sendable {
             && scalars[idx + 2] == 0x1039 {
             return true
         }
+        return false
+    }
+
+    /// TASK-031: discriminator for the explicit-`+` strict-stack
+    /// promotion. Returns true when `parseReading` is exactly
+    /// `userInput` modulo inherent-vowel `a` characters that the
+    /// parser inserts at SPECIFIC positions:
+    ///   (a) immediately before a `+` in the user input (the inverse
+    ///       of `Engine/InputNormalization::collapseConnectorRuns`'s
+    ///       TASK-011 reshape `<C>a+<C>` → `<C>+<C>`, e.g. user
+    ///       typed `thin+ga+thin`, engine reshape produces
+    ///       `thin+g+thin`, parser rebuilds reading `thin+ga+thin`).
+    ///   (b) at the end of the reading (the parser's habit of
+    ///       appending the inherent vowel after a trailing bare
+    ///       consonant — `yan+gun` → reading `yan+guna`).
+    ///
+    /// `a`s elsewhere — between two consonants in an onset cluster
+    /// (`b+r` interpreted as `ba+r` instead of `bra` with medial-r),
+    /// or between a vowel and a consonant in a different
+    /// segmentation — are rejected because they represent a parser
+    /// segmentation choice that does NOT correspond to the user's
+    /// intent. Concretely: for user input `brah+ma`, parse reading
+    /// `barah+ma` is rejected (the `a` after `b` is a wrong
+    /// segmentation choice), but `vyah+ma` (reading reflects the
+    /// medial-ra interpretation) is accepted by exact match.
+    ///
+    /// Examples:
+    /// - userInput=`min+ga`, parseReading=`min+ga` → true (exact match)
+    /// - userInput=`yan+gun`, parseReading=`yan+guna` → true (rule (b): trailing `a`)
+    /// - userInput=`thin+g+thin`, parseReading=`thin+ga+thin` → true (rule (a): `a` before `+`)
+    /// - userInput=`brah+ma`, parseReading=`barah+ma` → false (`a` between `b` and `r`, neither rule applies)
+    /// - userInput=`min+ga`, parseReading=`mi2na+ga` → false (contains `2`)
+    /// - userInput=`min+ga`, parseReading=`mina+ga` → true (rule (a): `a` before `+` — same as `min+ga` after TASK-011 reshape)
+    ///   This last case is intentionally accepted: the parser's
+    ///   segmentation `mi+na+ga` produces a surface that is also
+    ///   a valid post-`+` interpretation for the user. The kinzi
+    ///   tiebreaker in `bestStrictInferredStackIndex` will lift the
+    ///   true kinzi parse above this asat-only sibling when both
+    ///   are present in the candidate set.
+    @_spi(Testing) public static func readingMatchesUserLiteralAcrossInherentVowels(
+        parseReading: String,
+        userInput: String
+    ) -> Bool {
+        let r = Array(parseReading)
+        let u = Array(userInput)
+        var i = 0
+        var j = 0
+        while i < r.count && j < u.count {
+            if r[i] == u[j] {
+                i += 1
+                j += 1
+            } else if r[i] == "a" {
+                // Allow `a` insertion only at "rule (a)" positions:
+                // immediately before a `+` in the reading (which
+                // means immediately before a `+` in the user input
+                // too, since up to this point the two strings are
+                // synchronized on non-`a` characters). This is the
+                // inverse of the TASK-011 reshape; any other `a`
+                // insertion represents a segmentation choice the
+                // user did not type.
+                if i + 1 < r.count, r[i + 1] == "+" {
+                    i += 1
+                } else {
+                    return false
+                }
+            } else {
+                return false
+            }
+        }
+        // After consuming all of userInput, any remaining reading
+        // characters must be a single trailing `a` (rule (b):
+        // parser-appended inherent vowel after a trailing bare
+        // consonant). Anything else (`2`, `3`, extra letters from
+        // a different segmentation) means the parse picked a
+        // different reading than the user typed.
+        guard j == u.count else { return false }
+        if i == r.count { return true }
+        if i == r.count - 1 && r[i] == "a" { return true }
         return false
     }
 

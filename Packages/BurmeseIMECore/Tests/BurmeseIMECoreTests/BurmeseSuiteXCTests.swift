@@ -350,4 +350,8 @@ final class LongBufferYaPinPromotionXCTests: XCTestCase {
 final class MultiClusterDepVowelOnAnchorXCTests: XCTestCase {
     func testAll() { runSuite(MultiClusterDepVowelOnAnchorSuite.suite, xctest: self) }
 }
+
+final class ExplicitPlusKinziDisplacementXCTests: XCTestCase {
+    func testAll() { runSuite(ExplicitPlusKinziDisplacementSuite.suite, xctest: self) }
+}
 #endif
