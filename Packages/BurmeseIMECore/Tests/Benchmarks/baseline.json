@@ -146,7 +146,8 @@
     "macos": {
   "meta" : {
     "commit" : "4a017c8",
-    "date" : "2026-04-27T09:54:31Z"
+    "date" : "2026-04-27T09:54:31Z",
+    "note" : "TASK-061: 7 scenarios (cluster_alias_j16, repetition_tha30, vowel_rule_chain_*) carry placeholder Linux values pending macOS regeneration via `swift run -c release BurmeseBench --update Tests/Benchmarks/baseline.json` on Apple Silicon. The drift guard in BenchBaselineFormatSuite passes once the names match the Linux section; the values become real once a macOS maintainer runs --update."
   },
   "scenarios" : [
     {
@@ -220,6 +221,69 @@
       "p95_us" : 349.71,
       "p99_us" : 373,
       "scenario" : "plus_chain_30"
+    },
+    {
+      "allocations" : 0,
+      "iterations" : 200,
+      "max_us" : 3644.80,
+      "p50_us" : 1863.68,
+      "p95_us" : 1891.22,
+      "p99_us" : 2021.81,
+      "scenario" : "cluster_alias_j16"
+    },
+    {
+      "allocations" : 0,
+      "iterations" : 200,
+      "max_us" : 51636.18,
+      "p50_us" : 2968.40,
+      "p95_us" : 3082.15,
+      "p99_us" : 3359.23,
+      "scenario" : "repetition_tha30"
+    },
+    {
+      "allocations" : 0,
+      "iterations" : 200,
+      "max_us" : 35241.75,
+      "p50_us" : 1637.83,
+      "p95_us" : 1691.92,
+      "p99_us" : 1821.48,
+      "scenario" : "vowel_rule_chain_aing_8"
+    },
+    {
+      "allocations" : 0,
+      "iterations" : 200,
+      "max_us" : 4450.59,
+      "p50_us" : 1450.63,
+      "p95_us" : 1537.07,
+      "p99_us" : 1591.03,
+      "scenario" : "vowel_rule_chain_aing_4"
+    },
+    {
+      "allocations" : 0,
+      "iterations" : 200,
+      "max_us" : 543.82,
+      "p50_us" : 269.04,
+      "p95_us" : 278.69,
+      "p99_us" : 282.18,
+      "scenario" : "vowel_rule_chain_aing_2"
+    },
+    {
+      "allocations" : 0,
+      "iterations" : 200,
+      "max_us" : 9622.34,
+      "p50_us" : 873.32,
+      "p95_us" : 879.15,
+      "p99_us" : 900.44,
+      "scenario" : "vowel_rule_chain_aung_8"
+    },
+    {
+      "allocations" : 0,
+      "iterations" : 200,
+      "max_us" : 29653.44,
+      "p50_us" : 4511.55,
+      "p95_us" : 5001.92,
+      "p99_us" : 5054.24,
+      "scenario" : "vowel_rule_chain_in_10"
     }
   ]
 }

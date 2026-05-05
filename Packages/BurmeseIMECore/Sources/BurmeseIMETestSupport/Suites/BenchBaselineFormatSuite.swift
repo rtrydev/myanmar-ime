@@ -149,5 +149,65 @@ public enum BenchBaselineFormatSuite {
                     + "at \(candidates)"
             )
         },
+
+        // TASK-061: cross-platform baseline drift guard. When the
+        // bench scenario list grows in `BurmeseBench/main.swift`,
+        // both maintainers must capture the new numbers via
+        // `--update` on their respective host before merging. The
+        // drift guard catches the case where one platform's section
+        // got the new scenario but the other did not — silently
+        // dropping the perf gate for the missed platform until the
+        // next time someone notices.
+        TestCase("committedBaseline_scenarioSetsMatchAcrossPlatforms") { ctx in
+            let candidates = [
+                "Tests/Benchmarks/baseline.json",
+                "Packages/BurmeseIMECore/Tests/Benchmarks/baseline.json",
+            ]
+            var json: [String: Any]? = nil
+            for path in candidates {
+                guard let data = FileManager.default.contents(atPath: path),
+                      let parsed = try? JSONSerialization.jsonObject(with: data)
+                          as? [String: Any]
+                else { continue }
+                json = parsed
+                break
+            }
+            guard let json else {
+                ctx.assertTrue(
+                    false,
+                    "could_not_read_baseline",
+                    detail: "no baseline.json at \(candidates)"
+                )
+                return
+            }
+            let platforms = BenchBaselineFormat.platformKeys(from: json)
+            // Skip when only one platform exists — the suite isn't
+            // checking richness, just consistency between sections
+            // that DO exist. Brand-new repositories or single-host
+            // iterations don't need to fail this check.
+            guard platforms.count >= 2 else { return }
+            var perPlatform: [String: Set<String>] = [:]
+            for platform in platforms {
+                guard let names = BenchBaselineFormat.scenarioNames(
+                    from: json, platformKey: platform
+                ) else { continue }
+                perPlatform[platform] = names
+            }
+            // Pairwise compare every section against the union to
+            // surface every missing scenario, not just the first
+            // diverging pair.
+            let union = perPlatform.values.reduce(Set<String>()) { $0.union($1) }
+            for (platform, names) in perPlatform {
+                let missing = union.subtracting(names).sorted()
+                ctx.assertTrue(
+                    missing.isEmpty,
+                    "platform_\(platform)_complete",
+                    detail: "platform '\(platform)' is missing scenario(s) "
+                        + "\(missing) — run `swift run -c release BurmeseBench "
+                        + "--update Tests/Benchmarks/baseline.json` on "
+                        + "'\(platform)' to capture them"
+                )
+            }
+        },
     ])
 }

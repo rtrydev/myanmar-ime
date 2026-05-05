@@ -397,8 +397,19 @@ if let path = checkPath {
         exit(2)
     }
     var regressions: [String] = []
+    var missingFromBaseline: [String] = []
     for m in results {
-        guard let b = baseline.first(where: { $0.scenario == m.scenario }) else { continue }
+        guard let b = baseline.first(where: { $0.scenario == m.scenario }) else {
+            // TASK-061: surface the missing-scenario case loudly
+            // rather than silently skipping. A scenario added to
+            // the bench code but never captured in the running
+            // platform's baseline section was previously ignored
+            // here, so per-platform regressions in newly-added
+            // scenarios went uncaught until a contributor on
+            // another host ran `--check`.
+            missingFromBaseline.append(m.scenario)
+            continue
+        }
         let p95Bound = b.p95Us * 1.20
         let p99Bound = b.p99Us * 1.30
         if m.p95Us > p95Bound {
@@ -409,11 +420,30 @@ if let path = checkPath {
         }
     }
     print(json)
+    if !missingFromBaseline.isEmpty {
+        FileHandle.standardError.write(Data(
+            "\nMISSING FROM \(currentPlatformKey) BASELINE:\n".utf8
+        ))
+        for s in missingFromBaseline {
+            FileHandle.standardError.write(Data("  \(s)\n".utf8))
+        }
+        FileHandle.standardError.write(Data(
+            "  → run `swift run -c release BurmeseBench --update \(path)` on \(currentPlatformKey) to capture them\n".utf8
+        ))
+    }
     if !regressions.isEmpty {
         FileHandle.standardError.write(Data("\nREGRESSIONS:\n".utf8))
         for r in regressions {
             FileHandle.standardError.write(Data("  \(r)\n".utf8))
         }
+        exit(1)
+    }
+    if !missingFromBaseline.isEmpty {
+        // Treat missing baseline entries as a gate failure so
+        // the per-platform baseline-drift bug TASK-061 documents
+        // can no longer hide silently. Same exit code as a real
+        // regression so CI lanes that only check the exit status
+        // still surface the issue.
         exit(1)
     }
     FileHandle.standardError.write(Data("no regressions\n".utf8))

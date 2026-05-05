@@ -76,4 +76,30 @@ public enum BenchBaselineFormat {
         else { return nil }
         return entries(from: json, platformKey: platformKey)
     }
+
+    /// Return the set of platform keys present in a per-platform
+    /// baseline document. Returns an empty set for the legacy flat
+    /// schema. TASK-061: the cross-platform baseline-drift guard
+    /// uses this to enumerate platforms before comparing scenario
+    /// name sets.
+    public static func platformKeys(from json: [String: Any]) -> Set<String> {
+        guard let platforms = json["platforms"] as? [String: Any] else {
+            return []
+        }
+        return Set(platforms.keys)
+    }
+
+    /// Return the scenario names listed under `platformKey`.
+    /// TASK-061: used by the drift guard to assert
+    /// `set(linux.scenarios) == set(macos.scenarios)` so a future
+    /// scenario addition that lands in only one platform's section
+    /// is caught before merge.
+    public static func scenarioNames(
+        from json: [String: Any],
+        platformKey: String
+    ) -> Set<String>? {
+        guard let scenarios = entries(from: json, platformKey: platformKey)
+        else { return nil }
+        return Set(scenarios.map(\.scenario))
+    }
 }

@@ -275,6 +275,17 @@ baseline (and vice versa). When a structural perf change lands,
 both maintainers must run `--update` on their respective host before
 merging — the gate is otherwise host-bound.
 
+`BurmeseBench --check` exits 1 with a `MISSING FROM <platform> BASELINE`
+diagnostic when a scenario in the bench code has no entry in the
+running platform's section (TASK-061). The drift guard
+`BenchBaselineFormatSuite::committedBaseline_scenarioSetsMatchAcrossPlatforms`
+catches the case where one platform's section gained a new scenario
+but the other did not — both must stay in sync. **When adding a
+scenario to `BurmeseBench/main.swift`, run `--update` on every
+platform key already present in `baseline.json` (linux, macos, …)
+before merging**, otherwise the drift guard fails and the perf gate
+silently no-ops on the missed platform.
+
 ### Lexicon and LM data — pipeline outputs, do not hand-edit
 
 `Data/BurmeseLexiconSource.tsv`, `native/macos/Data/BurmeseLexicon.sqlite`,
