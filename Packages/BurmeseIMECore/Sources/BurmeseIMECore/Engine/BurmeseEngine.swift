@@ -381,6 +381,69 @@ public final class BurmeseEngine: @unchecked Sendable {
         return injected
     }
 
+    /// TASK-033: detect a buffer of shape `<letter>+'{2,}<letter>+`
+    /// (a run of two-or-more contiguous `'` chars sitting BETWEEN two
+    /// ASCII-letter runs). The TASK-056 sanitizer correctly drops
+    /// every Myanmar candidate carrying the doubled-apostrophe leak,
+    /// but every parser candidate for these buffers carries the leak
+    /// — so the sanitizer's "preserve violators when nothing clean
+    /// exists" path keeps the literal at rank 0 with NO Burmese
+    /// sibling reachable. The fix collapses the `''+` run to a single
+    /// `'` (the parser's soft-separator role) before parsing, so the
+    /// resulting candidate panel matches the single-apostrophe sibling
+    /// surface. The literal raw buffer is still added by
+    /// `injectLiteralFallback` as a lower-rank fallback.
+    ///
+    /// Boundary cases (`<lhs>'`, `'<rhs>`, `<lhs>''`, `''<rhs>`) do
+    /// NOT match this predicate — the run must sit BETWEEN two letter
+    /// runs.
+    internal static func collapsedDoubledMidBufferApostrophes(
+        _ buffer: String
+    ) -> String? {
+        guard buffer.contains("''") else { return nil }
+        let chars = Array(buffer)
+        var anyMatch = false
+        var collapsed: [Character] = []
+        collapsed.reserveCapacity(chars.count)
+        var i = 0
+        while i < chars.count {
+            let c = chars[i]
+            guard c == "'" else {
+                collapsed.append(c)
+                i += 1
+                continue
+            }
+            // Walk the apostrophe run.
+            var runEnd = i
+            while runEnd < chars.count, chars[runEnd] == "'" {
+                runEnd += 1
+            }
+            let runLen = runEnd - i
+            // Must be flanked by letters on both sides.
+            let hasLetterLeft = i > 0
+                && Self.isAsciiLetterChar(chars[i - 1])
+            let hasLetterRight = runEnd < chars.count
+                && Self.isAsciiLetterChar(chars[runEnd])
+            if hasLetterLeft && hasLetterRight && runLen >= 2 {
+                anyMatch = true
+                collapsed.append("'")
+            } else {
+                for _ in 0..<runLen { collapsed.append("'") }
+            }
+            i = runEnd
+        }
+        return anyMatch ? String(collapsed) : nil
+    }
+
+    @inline(__always)
+    private static func isAsciiLetterChar(_ c: Character) -> Bool {
+        guard c.unicodeScalars.count == 1, let scalar = c.unicodeScalars.first else {
+            return false
+        }
+        let v = scalar.value
+        return (v >= 0x61 && v <= 0x7A) || (v >= 0x41 && v <= 0x5A)
+    }
+
     /// Pipeline implementation; produces the raw `CompositionState`
     /// without the literal-fallback wrapper. Recursive entries inside
     /// the engine (`englishContractionState`, mid-buffer digit /
@@ -430,6 +493,35 @@ public final class BurmeseEngine: @unchecked Sendable {
         // the apostrophe and concatenate the surrounding letters.
         if Self.englishContractionApostropheIndex(in: displayBuffer) != nil {
             return englishContractionState(buffer: displayBuffer, context: context)
+        }
+        // TASK-033: a run of two-or-more `'` between two letter runs
+        // (`thar''mar`, `kar'''par`) collapses to a single `'` for
+        // parser consumption. The TASK-056 sanitizer drops every
+        // Myanmar candidate carrying the literal `''` leak; without
+        // this normalisation the panel is left with only the
+        // ASCII-literal raw buffer. Collapsing here lets the parser
+        // produce the clean Burmese sibling under the
+        // `'`-soft-separator path; the verbatim raw buffer is added
+        // back by `injectLiteralFallback` as a lower-rank fallback.
+        if let collapsed = Self.collapsedDoubledMidBufferApostrophes(displayBuffer) {
+            var state = updateInternal(buffer: collapsed, context: context)
+            state.rawBuffer = displayBuffer
+            // Carry the user's full buffer through as the candidate
+            // reading so `recordSelection` keys history on the
+            // original keystrokes. The candidate surfaces inherit
+            // from the `'`-collapsed parse.
+            state.candidates = state.candidates.map { cand in
+                Candidate(
+                    surface: cand.surface,
+                    reading: displayBuffer,
+                    source: cand.source,
+                    score: cand.score
+                )
+            }
+            cacheLock.lock()
+            lastHistoryKey = Romanization.aliasReading(displayBuffer)
+            cacheLock.unlock()
+            return state
         }
         // Task 10: Peel mid-buffer ASCII digits (letter-digit-letter) off
         // the buffer before the rest of the pipeline runs, then splice
