@@ -351,6 +351,10 @@ final class MultiClusterDepVowelOnAnchorXCTests: XCTestCase {
     func testAll() { runSuite(MultiClusterDepVowelOnAnchorSuite.suite, xctest: self) }
 }
 
+final class UncoveredVowelChainShapeXCTests: XCTestCase {
+    func testAll() { runSuite(UncoveredVowelChainShapeSuite.suite, xctest: self) }
+}
+
 final class ExplicitPlusKinziDisplacementXCTests: XCTestCase {
     func testAll() { runSuite(ExplicitPlusKinziDisplacementSuite.suite, xctest: self) }
 }

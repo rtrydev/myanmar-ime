@@ -970,7 +970,7 @@ extension BurmeseEngine {
         // (categories 1..5) — no allocation, no closure.
         var clusterBitset: UInt8 = 0
         var clusterCount: Int = 0
-        var firstCat: Int = 0
+        var firstScalar: UInt32 = 0
         var afterClusterClosed = false
         for scalar in scalars {
             let v = scalar.value
@@ -983,14 +983,14 @@ extension BurmeseEngine {
             if Self.task030IsBase(v) {
                 clusterBitset = 0
                 clusterCount = 0
-                firstCat = 0
+                firstScalar = 0
                 afterClusterClosed = false
                 continue
             }
             if v == 0x103A || v == 0x1039 {
                 clusterBitset = 0
                 clusterCount = 0
-                firstCat = 0
+                firstScalar = 0
                 afterClusterClosed = false
                 continue
             }
@@ -1004,22 +1004,37 @@ extension BurmeseEngine {
             clusterBitset |= bit
             clusterCount += 1
             if clusterCount == 1 {
-                firstCat = cat
-                // i-family (2) may legally extend with u-family (3) → o-cluster.
-                // e-family (4) may legally extend with aa-family (1) → aung order.
-                // Other singletons close the cluster immediately.
-                if cat != 2 && cat != 4 {
+                firstScalar = v
+                // TASK-034: tighten the legal-cluster-extension check
+                // to the EXACT canonical scalar pairs, not category-
+                // level pairs. Only `102D` (the canonical i-family
+                // first scalar of the o-cluster) may legally extend
+                // into u-family; the long-i `102E` closes the cluster
+                // immediately. Likewise only `1031` (the e-kar) may
+                // legally extend into aa-family. Pre-fix the check
+                // used `cat == 2` and `cat == 4` which admitted
+                // non-canonical pairs like `102E 1030`, `102E 102F`,
+                // `102D 1030` — none of which is attested Burmese
+                // orthography.
+                if v != 0x102D && v != 0x1031 {
                     afterClusterClosed = true
                 }
             } else if clusterCount == 2 {
-                let isOCluster = firstCat == 2 && cat == 3
-                let isAungOrder = firstCat == 4 && cat == 1
+                // TASK-034: same tightening at the second-scalar
+                // check — require exact canonical pairs:
+                //   o-cluster:    `102D 102F`
+                //   aung-order:   `1031 102B|102C`
+                // All other two-scalar combinations are violators.
+                let isOCluster = firstScalar == 0x102D && v == 0x102F
+                let isAungOrder = firstScalar == 0x1031
+                    && (v == 0x102B || v == 0x102C)
                 if isOCluster || isAungOrder {
                     afterClusterClosed = true
                 } else {
                     // Cross-category 2-cluster that isn't one of the
                     // two legal multi-scalar shapes — already a single-
-                    // cluster cross-category violator (TASK-028).
+                    // cluster cross-category violator (TASK-028) or a
+                    // non-canonical i+u / e+non-aa pairing (TASK-034).
                     return true
                 }
             }
@@ -1048,19 +1063,105 @@ extension BurmeseEngine {
     /// surface (the buffer represents one typed unit, not a sentence
     /// fragment).
     @_spi(Testing) public static func surfaceIsWhollyMultiClusterOnSingleAnchor(_ surface: String) -> Bool {
-        // Walk once: count bases, look for asat/virama, then defer
-        // the dep-vowel-pattern check to the broader predicate.
+        // Pre-fix: only fired when the entire surface sat on a single
+        // anchor (`baseCount <= 1`, no internal asat/virama).
+        //
+        // TASK-034 extension: also fire when the FIRST anchor's open
+        // cluster runs into a fresh base WITHOUT an asat/virama
+        // closure between them (the `<C>oun`/`<C>iu` family —
+        // `1021 102D 102F 1030 1014` for `oun`, where the first
+        // anchor `1021` carries an illegal multi-cluster
+        // `102D 102F 1030` and then `1014` starts a fresh base
+        // without proper closure). Such shapes are "wholly bug-class"
+        // because no future keystroke can rehabilitate a syllable
+        // whose dep-vowel cluster has already escaped past one base.
+        //
+        // The discriminator vs. legitimate mid-typing prefixes
+        // (`thueiooz`-shape long sentence intermediates): in those
+        // cases the multi-cluster sits in an ORPHAN sub-cluster
+        // AFTER an asat/virama closure (the prior syllable has
+        // already closed; the orphan-mark sub-cluster will be
+        // resolved when the user types more letters). The walk
+        // tracks "have we seen an asat/virama so far?" — when the
+        // first multi-cluster violation triggers, fire only if no
+        // asat/virama has been seen yet in the prior scan.
+        let scalars = surface.unicodeScalars
         var baseCount = 0
-        for scalar in surface.unicodeScalars {
+        for scalar in scalars {
             let v = scalar.value
-            if v == 0x103A || v == 0x1039 { return false } // internal break
             if Self.task030IsBase(v) {
                 baseCount += 1
-                if baseCount > 1 { return false }
+                if baseCount > 1 { break }
             }
         }
         if baseCount == 0 { return false }
-        return surfaceContainsMultiClusterOnSingleAnchor(surface)
+        if baseCount == 1 {
+            // No internal break possible; defer to the broader predicate.
+            return surfaceContainsMultiClusterOnSingleAnchor(surface)
+        }
+        // baseCount >= 2: replicate the broader predicate's per-
+        // anchor walk, but this time bail out at the FIRST violation
+        // and check whether an asat/virama has already been seen.
+        // Pre-asat violations are bug-class (the first anchor's
+        // cluster ran into a fresh base without closure); post-asat
+        // violations are mid-typing orphan residue that the next
+        // keystroke can resolve.
+        var clusterBitset: UInt8 = 0
+        var clusterCount: Int = 0
+        var firstScalar: UInt32 = 0
+        var afterClusterClosed = false
+        var sawAsatOrVirama = false
+        for scalar in scalars {
+            let v = scalar.value
+            if v < 0x1000 || v > 0x103F { continue }
+            if Self.task030IsBase(v) {
+                clusterBitset = 0
+                clusterCount = 0
+                firstScalar = 0
+                afterClusterClosed = false
+                continue
+            }
+            if v == 0x103A || v == 0x1039 {
+                clusterBitset = 0
+                clusterCount = 0
+                firstScalar = 0
+                afterClusterClosed = false
+                sawAsatOrVirama = true
+                continue
+            }
+            if v >= 0x103B && v <= 0x103E { continue }
+            if v == 0x1036 || v == 0x1037 || v == 0x1038 { continue }
+            let cat = Self.task030DepVowelCategory(v)
+            if cat == 0 { continue }
+            if afterClusterClosed {
+                // Multi-cluster violation. Fire only if no
+                // asat/virama has closed a syllable so far in the
+                // surface.
+                return !sawAsatOrVirama
+            }
+            let bit = UInt8(1) << cat
+            if (clusterBitset & bit) != 0 {
+                return !sawAsatOrVirama
+            }
+            clusterBitset |= bit
+            clusterCount += 1
+            if clusterCount == 1 {
+                firstScalar = v
+                if v != 0x102D && v != 0x1031 {
+                    afterClusterClosed = true
+                }
+            } else if clusterCount == 2 {
+                let isOCluster = firstScalar == 0x102D && v == 0x102F
+                let isAungOrder = firstScalar == 0x1031
+                    && (v == 0x102B || v == 0x102C)
+                if isOCluster || isAungOrder {
+                    afterClusterClosed = true
+                } else {
+                    return !sawAsatOrVirama
+                }
+            }
+        }
+        return false
     }
 
     /// TASK-030 sanitizer: drop candidates whose surface carries the
