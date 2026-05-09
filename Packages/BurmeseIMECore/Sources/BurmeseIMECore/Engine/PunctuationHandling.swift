@@ -643,10 +643,25 @@ extension BurmeseEngine {
     /// non-digit char) and running single-best parsing on each composable
     /// run between them. Used only for the frozen prefix — lexicon + N-best
     /// are reserved for the active tail.
-    internal func renderFrozenPunctSegments(_ s: String) -> String {
+    ///
+    /// When `absorbTrailingToneIfBurmeseFollows` is `true`, a trailing
+    /// `:` or `.` (the LAST char of `s`, with no further content) is
+    /// absorbed onto the preceding segment as visarga (U+1038) or
+    /// creaky tone (U+1037) when that segment ends in a tone-eligible
+    /// shape (bare base consonant, asat-coda, or medial-bearing
+    /// onset). This is used by the `splitAtLastEmbeddedComposingPunct`
+    /// call site (TASK-032) when the active buffer following the split
+    /// is itself Burmese-composable — the user's `<C>a:<rest>` /
+    /// `<C>a.<rest>` shape is unambiguously a Burmese tone marker
+    /// rather than mid-buffer ASCII punctuation.
+    internal func renderFrozenPunctSegments(
+        _ s: String,
+        absorbTrailingToneIfBurmeseFollows: Bool = false
+    ) -> String {
         var out = ""
         var current = ""
-        for c in s {
+        let chars = Array(s)
+        for (idx, c) in chars.enumerated() {
             // When `.` / `:` closes a creaky-tone or tone-variant vowel
             // suffix (`u.`, `i.`, `an.`, `aw:`, …) it stays attached to
             // the current composable run instead of flushing as
@@ -660,6 +675,35 @@ extension BurmeseEngine {
                Self.colonActsAsVowelModifier(prefixEndingAtColon: Substring(current + ":")) {
                 current.append(":")
                 continue
+            }
+            // TASK-032: when an internal `:`/`.` is followed by a
+            // Burmese-composable letter run (a-z/A-Z), absorb the tone
+            // onto the preceding segment when that segment is
+            // tone-eligible (bare-`<C>a`, medial-bearing inherent-`a`,
+            // or asat-coda). The literal `:`/`.` between two Burmese
+            // syllables is never legitimate ASCII document punctuation.
+            //
+            // The trailing-position case (last char of `s` is `:`/`.`)
+            // is gated on `absorbTrailingToneIfBurmeseFollows` because
+            // the renderer cannot see the active buffer that comes
+            // AFTER the rendered prefix — the caller passes that
+            // signal in.
+            let isInternalPunct = (c == ":" || c == ".")
+                && idx + 1 < chars.count
+                && Self.isComposableLetter(chars[idx + 1])
+            let isTrailingPunctWithBurmeseAfter = (c == ":" || c == ".")
+                && idx == chars.count - 1
+                && absorbTrailingToneIfBurmeseFollows
+            if isInternalPunct || isTrailingPunctWithBurmeseAfter {
+                if !current.isEmpty {
+                    let rendered = renderFrozenSegment(current)
+                    let toneScalar: UInt32 = (c == ":") ? 0x1038 : 0x1037
+                    if let toned = Self.applyToneScalar(rendered, toneScalar: toneScalar) {
+                        out += toned
+                        current = ""
+                        continue
+                    }
+                }
             }
             // Flush at any literal-punct split char *or* the in-syllable
             // composing-punct subset (`*`, `'`). The split-char set
@@ -691,6 +735,28 @@ extension BurmeseEngine {
             out += renderFrozenSegment(current)
         }
         return out
+    }
+
+    /// TASK-032 helper. Apply a tone scalar (U+1037 creaky / U+1038
+    /// visarga) to the END of a Myanmar surface when its trailing
+    /// shape is tone-eligible (bare base consonant, asat-coda, or
+    /// medial-bearing onset). Returns nil when the surface ends in a
+    /// shape that does not accept the tone (already toned, vowel-
+    /// closed, indep-vowel-only, …) so the caller falls back to
+    /// flushing the literal `:`/`.`.
+    @inline(__always)
+    private static func applyToneScalar(_ surface: String, toneScalar: UInt32) -> String? {
+        let scalars = Array(surface.unicodeScalars)
+        return insertToneIntoSurface(scalars: scalars, toneScalar: toneScalar)
+    }
+
+    @inline(__always)
+    private static func isComposableLetter(_ c: Character) -> Bool {
+        guard c.unicodeScalars.count == 1, let scalar = c.unicodeScalars.first else {
+            return false
+        }
+        let v = scalar.value
+        return (v >= 0x61 && v <= 0x7A) || (v >= 0x41 && v <= 0x5A)
     }
 
     /// Single-best render of a punct-free segment. Digits convert to

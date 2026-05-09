@@ -571,9 +571,46 @@ public final class BurmeseEngine: @unchecked Sendable {
         if let split = splitAtLastEmbeddedComposingPunct(displayBuffer) {
             var state = updateInternal(buffer: split.activeBuffer, context: context)
             state.rawBuffer = displayBuffer
+            // TASK-032: when the active buffer composes to a Burmese
+            // surface (no residual ASCII letters in rank-0), the
+            // split-position `:`/`.` is unambiguously a Burmese tone
+            // marker on the preceding bare-`<C>a` / medial-bearing /
+            // asat-coda syllable rather than mid-buffer ASCII
+            // punctuation. Re-render the prefix with the trailing
+            // tone absorbed onto the preceding Myanmar syllable.
+            //
+            // The activeBufferIsBurmeseComposable check looks at the
+            // top inner candidate: when its surface contains no
+            // ASCII letters, the tail is fully Burmese-composable and
+            // tone absorption is the right rank-0 outcome.
+            //
+            // The trailingPunct check reads the original buffer slice
+            // (not split.renderedPrefix) because Burmese-punctuation
+            // mapping may have already replaced the `.`/`:` with
+            // U+104A/U+104B in the rendered prefix.
+            let prefixSliceLen = displayBuffer.count - split.activeBuffer.count
+            let prefixSlice = String(displayBuffer.prefix(prefixSliceLen))
+            let activeBufferIsBurmeseComposable: Bool = {
+                guard let top = state.candidates.first else { return false }
+                let trailingPunct = prefixSlice.last
+                guard trailingPunct == ":" || trailingPunct == "." else { return false }
+                return !top.surface.unicodeScalars.contains {
+                    let v = $0.value
+                    return (v >= 0x41 && v <= 0x5A) || (v >= 0x61 && v <= 0x7A)
+                }
+            }()
+            let effectivePrefix: String
+            if activeBufferIsBurmeseComposable {
+                effectivePrefix = renderFrozenPunctSegments(
+                    prefixSlice,
+                    absorbTrailingToneIfBurmeseFollows: true
+                )
+            } else {
+                effectivePrefix = split.renderedPrefix
+            }
             if state.candidates.isEmpty {
                 state.candidates = [Candidate(
-                    surface: split.renderedPrefix + split.activeBuffer,
+                    surface: effectivePrefix + split.activeBuffer,
                     reading: displayBuffer,
                     source: .grammar,
                     score: 0
@@ -581,7 +618,7 @@ public final class BurmeseEngine: @unchecked Sendable {
             } else {
                 state.candidates = state.candidates.map { cand in
                     Candidate(
-                        surface: split.renderedPrefix + cand.surface,
+                        surface: effectivePrefix + cand.surface,
                         reading: displayBuffer,
                         source: cand.source,
                         score: cand.score

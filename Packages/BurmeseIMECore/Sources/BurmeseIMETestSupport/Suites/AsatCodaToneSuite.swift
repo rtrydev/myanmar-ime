@@ -186,24 +186,31 @@ public enum AsatCodaToneSuite {
             }
         },
 
-        // Mid-buffer-letter guard: `kit.kha` — the tone helper must
-        // refuse when the next char in the literal tail is an ASCII
-        // letter (user is mid-typing English mid-buffer).
-        TestCase("midBufferLetterGuard_preserved") { ctx in
+        // Mid-buffer-letter guard: when the suffix after the asat-coda
+        // tone marker is GENUINELY English (no Burmese composition
+        // possible), the literal `.` survives and no tone scalar is
+        // inserted. The original TASK-023/024 guard used buffers like
+        // `kit.kha` to test this, but `kha` is itself Burmese-composable
+        // (`ခ`) — TASK-032 unified those cases under the asat-coda +
+        // tone Burmese rule, since the user's intent there is the
+        // creaky-tone-on-coda + next-syllable composition. The
+        // English-mode-preservation invariant is now tested with
+        // suffixes like `qqq`/`xyz` that have no Burmese parse.
+        TestCase("midBufferEnglishGuard_preserved") { ctx in
             let engine = emptyEngine()
-            let cases = ["kit.kha", "let.kha", "myit.kha", "kya.kha", "kywa.kha"]
+            let cases = ["kit.qqq", "kit.xyz", "let.qqq", "myit.qqq"]
             for buffer in cases {
                 let surface = engine.update(buffer: buffer, context: [])
                     .candidates.first?.surface ?? ""
                 ctx.assertTrue(
                     surfaceContains(surface, scalar: 0x002E),
                     buffer,
-                    detail: "expected literal `.` to survive in mid-buffer position; surface='\(surface)'"
+                    detail: "expected literal `.` to survive in mid-buffer English position; surface='\(surface)'"
                 )
                 ctx.assertFalse(
                     surfaceContains(surface, scalar: 0x1037),
                     "\(buffer)_noTone",
-                    detail: "tone scalar must not be inserted before an ASCII letter; surface='\(surface)'"
+                    detail: "tone scalar must not be inserted before genuine English; surface='\(surface)'"
                 )
             }
         },

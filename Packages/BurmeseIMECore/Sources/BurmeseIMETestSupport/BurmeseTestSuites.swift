@@ -73,6 +73,7 @@ public enum BurmeseTestSuites {
         WindowedIndepVowelViramaInvariantSuite.suite,
         RepeatedLetterPerfSuite.suite,
         BareConsonantToneSuite.suite,
+        MidBufferBareConsonantToneSuite.suite,
         AdjacentIndependentVowelSuite.suite,
         RepeatedVowelLetterSuite.suite,
         ApostropheContractionSuite.suite,

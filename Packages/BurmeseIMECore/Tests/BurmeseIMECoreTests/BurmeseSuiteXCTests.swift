@@ -255,6 +255,10 @@ final class BareConsonantToneXCTests: XCTestCase {
     func testAll() { runSuite(BareConsonantToneSuite.suite, xctest: self) }
 }
 
+final class MidBufferBareConsonantToneXCTests: XCTestCase {
+    func testAll() { runSuite(MidBufferBareConsonantToneSuite.suite, xctest: self) }
+}
+
 final class AdjacentIndependentVowelXCTests: XCTestCase {
     func testAll() { runSuite(AdjacentIndependentVowelSuite.suite, xctest: self) }
 }

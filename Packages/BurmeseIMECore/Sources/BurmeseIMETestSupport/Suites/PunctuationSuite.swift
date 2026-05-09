@@ -142,17 +142,25 @@ public enum PunctuationSuite {
         },
 
         TestCase("engine_composableAfterDot_getsParsed") { ctx in
-            // Use `ka.myat` so the `.` is genuinely punctuation between
-            // two composable runs. `thar.myat` would now collapse the
-            // dot into the `ar.` creaky-tone modifier (task 01).
+            // TASK-032: `ka.myat` is bare-`<C>a` + `.` + Burmese-
+            // composable. The `.` is unambiguously a creaky tone
+            // marker on the `ka` syllable, not a punctuation
+            // terminator. The expected top is `က့မြတ်` (creaky
+            // absorbed).
+            //
+            // Pre-fix this case was used to assert the literal-
+            // mapped behaviour (`က။မြတ်`), but that contradicted
+            // TASK-014's invariant for trailing-position `<C>a:` /
+            // `<C>a.`; TASK-032 unifies those by always absorbing
+            // when the continuation is itself Burmese.
             let (settings, suiteName) = makeSettings()
             defer { cleanup(suiteName) }
             settings.burmesePunctuationEnabled = true
             let engine = BurmeseEngine(settings: settings)
             let state = engine.update(buffer: "ka.myat", context: [])
             let surfaces = state.candidates.map(\.surface)
-            ctx.assertTrue(surfaces.contains("က\u{104B}မြတ်"),
-                           "dotThenComposable", detail: "surfaces=\(surfaces)")
+            ctx.assertTrue(surfaces.contains("က\u{1037}မြတ်"),
+                           "dotAbsorbedAsCreaky", detail: "surfaces=\(surfaces)")
         },
 
         TestCase("engine_composableBetweenTwoPuncts_getsParsed") { ctx in
@@ -271,33 +279,38 @@ public enum PunctuationSuite {
         },
 
         TestCase("engine_embeddedDot_mixedRealAndModifier_splitsOnlyRealPunct") { ctx in
-            // `padma.rarthiu.tu.` — first `.` follows the `padma` consonant
-            // cluster (no `<C>.` modifier rule), so it is punctuation;
-            // second `.` follows `u`, closing `u.` (creaky), so it is a
-            // modifier; trailing `.` is absorbed as the creaky-tone of
-            // `tu.`. The only ။ in the output should be the single real
-            // terminator after `padma`.
+            // `padma..rarthiu.tu.` — the doubled `..` between `padma`
+            // and `rarthiu` cannot be a single-tone marker (TASK-032
+            // absorbs only single `.` when it sits between Burmese-
+            // composable runs); the first single `.` from the doubled
+            // pair stays as punctuation and maps to ။. Second `.`
+            // follows `u`, closing `u.` (modifier). Trailing `.` is
+            // absorbed as creaky-tone of `tu.`.
             //
-            // Switched from `thar.…` since task 01 made the `ar.` creaky
-            // rule absorb that leading `.`.
+            // Switched from `thar.…` since task 01 made the `ar.`
+            // creaky rule absorb that leading `.`. Switched from
+            // `padma.…` to `padma..…` since TASK-032 now absorbs the
+            // bare-`ma` + single-`.` shape as creaky too.
             let (settings, suiteName) = makeSettings()
             defer { cleanup(suiteName) }
             settings.burmesePunctuationEnabled = true
             let engine = BurmeseEngine(settings: settings)
-            let state = engine.update(buffer: "padma.rarthiu.tu.", context: [])
+            let state = engine.update(buffer: "padma..rarthiu.tu.", context: [])
             let surfaces = state.candidates.map(\.surface)
             ctx.assertTrue(
                 surfaces.contains(where: { $0.contains("\u{104B}") }),
                 "realPunctMapped",
                 detail: "surfaces=\(surfaces)"
             )
-            // The second `.` must not become ။ — no surface should have
-            // more than one ။ glyph (just the single real terminator).
+            // The trailing `.` and the inner modifier `u.` must not
+            // become ။ — no surface should have more than two ။
+            // glyphs (the doubled real punct between `padma` and
+            // `rarthiu` produces two ။).
             ctx.assertFalse(
                 surfaces.contains(where: {
-                    $0.filter({ $0 == "\u{104B}" }).count > 1
+                    $0.filter({ $0 == "\u{104B}" }).count > 2
                 }),
-                "noDoubleFullStop",
+                "noTripleFullStop",
                 detail: "surfaces=\(surfaces)"
             )
         },

@@ -38,9 +38,17 @@ public enum MidBufferPunctuationSuite {
         TestCase("asciiMidBufferPunctuationStaysLiteral") { ctx in
             let (engine, suiteName) = makeEngine(mapped: false)
             defer { cleanup(suiteName) }
+            // TASK-032: a SINGLE `.` / `:` between a tone-eligible
+            // bare-`<C>a` syllable and a Burmese-composable
+            // continuation is unambiguously a Burmese tone marker
+            // (creaky / visarga) and gets absorbed onto the preceding
+            // syllable, NOT preserved as a literal between scripts.
+            // Doubled / mixed punct runs (`..`, `::`, `.:`) and runs
+            // that include `*` / `'` continue to flush as literal
+            // because they cannot all act as a single tone marker.
             for (input, expected) in [
-                ("ka.tar", "က.တာ"),
-                ("ka:tar", "က:တာ"),
+                ("ka.tar", "က့တာ"),       // creaky absorbed (TASK-032)
+                ("ka:tar", "ကးတာ"),       // visarga absorbed (TASK-032)
                 ("ka*.tar", "က*.တာ"),
                 ("ka'.tar", "က'.တာ"),
                 ("ka..tar", "က..တာ"),
@@ -54,10 +62,18 @@ public enum MidBufferPunctuationSuite {
         TestCase("mappedMidBufferPunctuationMapsOnlyMappedCharacters") { ctx in
             let (engine, suiteName) = makeEngine(mapped: true)
             defer { cleanup(suiteName) }
+            // TASK-032: with Burmese-punctuation mapping ON, a single
+            // `.` between two Burmese syllables maps to U+104B
+            // (Myanmar full stop), but only when the prefix is NOT a
+            // tone-eligible bare-`<C>a` shape. For `ka.tar` and
+            // `ka:tar` (bare-`<C>a` + tone + Burmese), the tone
+            // absorption takes precedence over the punct mapping —
+            // the user's `.` after `ka` is a Burmese tone marker, not
+            // a section-end-mark.
             for (input, expected) in [
-                ("ka.tar", "က\u{104B}တာ"),
+                ("ka.tar", "က့တာ"),                        // creaky absorbed (TASK-032)
                 ("ka..tar", "က\u{104B}\u{104B}တာ"),
-                ("ka:tar", "က:တာ"),
+                ("ka:tar", "ကးတာ"),                        // visarga absorbed (TASK-032)
                 ("ka'.tar", "က'\u{104B}တာ"),
                 ("ka*.tar", "က*\u{104B}တာ"),
             ] {
