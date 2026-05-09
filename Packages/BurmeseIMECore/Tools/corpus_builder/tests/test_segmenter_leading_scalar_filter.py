@@ -46,9 +46,12 @@ class HasNonMyanmarLeadingScalarTests(unittest.TestCase):
         self.assertTrue(_has_non_myanmar_leading_scalar("၀ီက"))  # ၀ီက
 
     def test_myanmar_digit_plus_consonant_is_kept(self) -> None:
-        # Stylistic ၀/ဝ substitution like `၀တ်စုံ` is intentional
-        # (and attested heavily in the corpus) — the filter only
-        # rejects digit + combining-mark orphans.
+        # The leading-scalar filter does not reject `<digit><consonant>`
+        # surfaces — that's TASK-037's confusable-rewrite responsibility,
+        # which runs in `normalize_text` (ingest pipeline) and rewrites
+        # the leading `၀` to `ဝ` BEFORE this filter runs. The bare
+        # predicate must still let `၀တ်` through so the rewrite path
+        # gets a chance to canonicalise it.
         self.assertFalse(_has_non_myanmar_leading_scalar("၀တ်"))
 
     def test_bom_anywhere_is_rejected(self) -> None:
@@ -106,7 +109,14 @@ class CuratedLoaderFilterTests(unittest.TestCase):
             entries = read_curated_tsv(path)
             surfaces = [e.surface for e in entries]
             self.assertIn("ကျွန်တော်", surfaces)
-            self.assertIn("၀တ်", surfaces)
+            # TASK-037: the leading `၀` in `၀တ်` is a confusable
+            # miscoding for `ဝ` (wa-consonant). `read_curated_tsv`
+            # runs `normalize_text` on each surface, which rewrites
+            # `၀<consonant>` → `ဝ<consonant>` per Class 1. The
+            # surface that survives is therefore the canonical
+            # `ဝတ်`, not the polluted `၀တ်`.
+            self.assertIn("ဝတ်", surfaces)
+            self.assertNotIn("၀တ်", surfaces)
             self.assertNotIn("…ကျွန်တော်", surfaces)
             self.assertNotIn("႐ု", surfaces)
             self.assertNotIn("﻿ကျွန်တော်", surfaces)

@@ -30,6 +30,36 @@ _ZWSP = "​"
 _ZWNJ = "‌"
 _ZWJ = "‍"
 
+# Myanmar block: U+1000..U+109F. Digits live in U+1040..U+1049
+# (canonical) plus U+104E (aforementioned-symbol); the non-digit
+# Myanmar consonants and dependent marks fall within U+1000..U+103F
+# and U+104A..U+105F.
+def _is_myanmar_digit(ch: str) -> bool:
+    """True for U+1040..U+1049 (the Myanmar digit block)."""
+    if not ch:
+        return False
+    cp = ord(ch)
+    return 0x1040 <= cp <= 0x1049
+
+
+def _is_myanmar_consonant_or_mark(ch: str) -> bool:
+    """True for any Myanmar block scalar that is not a digit / not
+    punctuation. Used by the confusable-pair rewrite to decide whether
+    a U+1040 leading the token is followed by something that looks
+    like part of a Burmese morpheme (consonants, dependent vowels,
+    medials, virama/asat, tone marks)."""
+    if not ch:
+        return False
+    cp = ord(ch)
+    # Consonants & independent vowels, dep vowels, medials, virama,
+    # asat, tone, anusvara: U+1000..U+103F. Plus U+104E
+    # (aforementioned-symbol) and U+103F (great sa). Exclude digits
+    # (U+1040..U+1049) and punctuation (U+104A pote-ma-tin,
+    # U+104B ga-nga-ma-tin, U+104C, U+104D ywe, U+104F ei).
+    if 0x1000 <= cp <= 0x103F:
+        return True
+    return False
+
 
 # TASK-038: doubled tone-marker collapse. NFC reorders scalars by
 # Combining Class but does NOT collapse duplicates. Corpus surfaces
@@ -86,14 +116,91 @@ def _strip_orphan_zwnj(text: str) -> str:
     return "".join(c for c, k in zip(chars, keep) if k)
 
 
+# TASK-037: confusable scalar pairs. Three rewrite directions are
+# needed:
+#
+# Class 1: leading U+1040 (digit zero) followed by a Burmese
+# consonant or stack mark → U+101D (wa-consonant). Corpus authors
+# typed `၀` for `ဝ`.
+#
+# Class 2: leading U+1044 (digit four) immediately before `င်း`
+# (U+1004 U+103A U+1038) → U+104E (aforementioned-symbol). Corpus
+# miscodes the formal-register `၎င်း` as `၄င်း`.
+#
+# Class 3: U+101D (wa-consonant) embedded between two Myanmar
+# digits → U+1040 (digit zero). Inverse of Class 1, common in date
+# strings (`၂ဝ၁၈` → `၂၀၁၈`).
+_NG_SUFFIX = "င်း"  # င်း
+
+
+def _canonicalize_confusables(text: str) -> str:
+    """Apply the three confusable-pair rewrites described in TASK-037."""
+    if not text:
+        return text
+
+    # Class 2 first: `၄င်း` → `၎င်း`. Done as a substring scan rather
+    # than a positional rewrite because the bug pattern is the
+    # specific sequence (U+1044 U+1004 U+103A U+1038), not "any
+    # leading U+1044".
+    text = text.replace("၄" + _NG_SUFFIX, "၎" + _NG_SUFFIX)
+
+    # Classes 1 and 3 are positional and depend on neighbours, so we
+    # walk the string and rewrite per-character.
+    chars = list(text)
+    n = len(chars)
+    for i, ch in enumerate(chars):
+        if ch == "၀":
+            # Class 1: a U+1040 followed by a Burmese consonant /
+            # stack mark / dependent vowel (anything in U+1000..U+103F)
+            # is a confusable. Only rewrite when the *previous*
+            # character is NOT a Myanmar digit (i.e., the zero is
+            # outside a digit run).
+            prev_ch = chars[i - 1] if i > 0 else ""
+            next_ch = chars[i + 1] if i + 1 < n else ""
+            if (not _is_myanmar_digit(prev_ch)
+                    and _is_myanmar_consonant_or_mark(next_ch)):
+                chars[i] = "ဝ"
+        elif ch == "ဝ":
+            # Class 3: a wa-consonant between two Myanmar digits in
+            # an otherwise pure-digit numeral run is a confusable.
+            prev_ch = chars[i - 1] if i > 0 else ""
+            next_ch = chars[i + 1] if i + 1 < n else ""
+            # Walk the local digit run on both sides; the wa is
+            # in-run if its immediate neighbours are both digits OR
+            # if either neighbour is itself a wa that resolves to a
+            # digit (handles consecutive `ဝဝ` in `၂ဝဝ၈`).
+            left_digit = _is_myanmar_digit(prev_ch)
+            right_digit = _is_myanmar_digit(next_ch)
+            # Allow wa to chain to wa when the chain resolves to a
+            # digit on both sides — `၂ဝဝ၈`: the first `ဝ` sees
+            # digit on left, wa on right; the second sees wa on
+            # left, digit on right. Resolve by scanning past wa runs.
+            if not left_digit and prev_ch == "ဝ":
+                # scan back through wa to find the nearest non-wa
+                j = i - 1
+                while j > 0 and chars[j] == "ဝ":
+                    j -= 1
+                left_digit = _is_myanmar_digit(chars[j])
+            if not right_digit and next_ch == "ဝ":
+                j = i + 1
+                while j + 1 < n and chars[j] == "ဝ":
+                    j += 1
+                right_digit = _is_myanmar_digit(chars[j])
+            if left_digit and right_digit:
+                chars[i] = "၀"
+    return "".join(chars)
+
+
 def _needs_canonicalization(text: str) -> bool:
     """Quick scan — returns True if any pipeline stage might rewrite
     this string. The fast-path lets identity-preserving callers
     (`assertIs(normalize_text(s), s)`) short-circuit when the input
-    is already in NFC and contains no zero-width control marks.
+    is already in NFC and contains no confusable / zero-width / digit
+    scalars.
 
     The check is deliberately conservative: any time we see a tone or
-    asat scalar (U+1036/U+1037/U+1038/U+103A) or zero-width controls,
+    asat scalar (U+1036/U+1037/U+1038/U+103A), or any of the
+    confusable-class scalars (`၀`/`၄`/`ဝ`), or zero-width controls,
     we run the full pipeline. Plain Burmese text without these marks
     is NFC-stable and short-circuits.
     """
@@ -101,6 +208,11 @@ def _needs_canonicalization(text: str) -> bool:
         return True
     for ch in text:
         cp = ord(ch)
+        # Confusable-class scalars trigger Class 1/2/3 rewrites.
+        if cp == 0x101D or cp == 0x1044:
+            return True
+        if 0x1040 <= cp <= 0x1049:
+            return True
         # Tone / asat scalars participate in NFC reorder and the
         # doubled-tone collapse. Any string containing them must
         # round-trip through the pipeline.
@@ -127,6 +239,10 @@ def normalize_text(text: str) -> str:
     4. Strip orphan U+200C / U+200D — only when they sit outside a
        Myanmar-Myanmar context where they could control cluster
        formation (TASK-038).
+    5. Apply Myanmar digit / consonant confusable rewrites: leading
+       `၀` before a consonant becomes `ဝ`; leading `၄င်း` becomes
+       `၎င်း`; `ဝ` embedded in a pure-digit run becomes `၀`
+       (TASK-037).
 
     Identity preservation: when no pipeline stage rewrites the
     string, `normalize_text` returns the input unchanged (same
@@ -144,6 +260,7 @@ def normalize_text(text: str) -> str:
     text = unicodedata.normalize("NFC", text)
     text = _collapse_doubled_tones(text)
     text = _strip_orphan_zwnj(text)
+    text = _canonicalize_confusables(text)
     # Identity preservation when the pipeline made no actual change.
     return original if text == original else text
 
