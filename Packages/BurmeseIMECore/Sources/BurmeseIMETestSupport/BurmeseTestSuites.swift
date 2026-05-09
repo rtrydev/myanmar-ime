@@ -112,6 +112,7 @@ public enum BurmeseTestSuites {
         MultiClusterDepVowelOnAnchorSuite.suite,
         UncoveredVowelChainShapeSuite.suite,
         ExplicitPlusKinziDisplacementSuite.suite,
+        IdenticalMedialPlusChainSuite.suite,
         LangBasicConsonantInventorySuite.suite,
         LangDependentVowelInventorySuite.suite,
         LangAaShapeOrthographySuite.suite,

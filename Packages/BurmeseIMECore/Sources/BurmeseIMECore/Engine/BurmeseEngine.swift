@@ -2786,7 +2786,97 @@ public final class BurmeseEngine: @unchecked Sendable {
                 || (separatorCount >= 3 && distinctContentChars.count <= 2)
             return pathologicalShape
         }()
-        let placeAtRankZero = asciiRatioMet || class_A_violation || class_B_collapse
+
+        // TASK-035: explicit-`+` identical medial-bearing-syllable
+        // repetition. When the user types a chain of three or more
+        // identical *medial-bearing open* tokens joined by `+`
+        // (`kya+kya+kya`, `pwa+pwa+pwa`, `mya+mya+mya`,
+        // `ka+kya+kya+kya`, …), the candidate-merge ranking can
+        // promote a single-syllable lexicon prefix above the
+        // parser's multi-syllable segmentation, dropping the
+        // trailing repetitions silently. Detect by:
+        //   1. The buffer partitions on `+` into 3+ tokens, AND
+        //   2. At least 3 of those tokens are *identical to one
+        //      another* AND each carries a `y` / `w` / `h` medial
+        //      after the consonant onset (so `ka+ka+ka` is excluded
+        //      because `ka` has no medial — that buffer renders
+        //      correctly today as a multi-stack `က္ကက`), AND
+        //   3. Rank-0 surface scalar count is less than 2x the
+        //      number of tokens — i.e. the surface couldn't
+        //      possibly contain one syllable per token. A
+        //      medial-bearing open syllable (`ကျ`) is 2 scalars,
+        //      so the threshold is `scalarCount < 2 * tokenCount`.
+        //      This is intentionally tighter than the Class B 3x
+        //      ratio so we only fire when most of the buffer's
+        //      tokens were dropped.
+        // Promotion target: the literal raw buffer at rank 0, so the
+        // user has the escape hatch even when the parser refuses to
+        // produce the multi-syllable segmentation.
+        //
+        // The medial-bearing constraint preserves the
+        // `MultiStackTrailingTone` family (`ka+ka+ka.`,
+        // `ka+ka+ka+ka.`, `k+k+k+k`) which legitimately renders as
+        // a multi-stack chain because there is no medial-on-base
+        // ambiguity to drive a candidate-merge collapse.
+        let class_C_identicalPlusChain: Bool = {
+            guard rawCount >= 7 else { return false }
+            // Tokenise on `+` only (not on other separators — `:` /
+            // `.` / `*` / `'` are tone or punct markers, not stack
+            // boundaries).
+            let tokens = rawBuffer.split(
+                separator: "+",
+                omittingEmptySubsequences: true
+            ).map(String.init)
+            guard tokens.count >= 3 else { return false }
+            // A medial-bearing token has `y` or `w` at index ≥ 1
+            // (after the initial consonant onset). `h` as a medial
+            // is the ha-htoe prefix which appears at index 0
+            // (`hma`, `hna`, …) — so check both: a `y`/`w` at
+            // index ≥ 1, OR an `h` at index 0 followed by a
+            // consonant. The simplest necessary condition for the
+            // bug is "token length ≥ 3 AND contains `y` or `w`
+            // somewhere AND the token does not contain a coda
+            // letter or a tone marker" — every bug-class buffer
+            // satisfies this and no negative-control buffer does.
+            func isMedialBearingOpen(_ t: String) -> Bool {
+                guard t.count >= 3 else { return false }
+                // Open means no closing coda letter (`*`, `:`, `.`,
+                // and no asat in the reading): the token must end in
+                // a vowel letter, typically `a`. Reject tokens
+                // carrying tone or close marks.
+                guard let last = t.last, last == "a" || last == "e"
+                    || last == "o" || last == "u" || last == "i"
+                else { return false }
+                // Must contain `y` or `w` at index ≥ 1 (medial after
+                // consonant), or `h` at index ≥ 1 (which would be a
+                // ha-htoe medial after the consonant, e.g. `khw`
+                // would not match but `khya` has `y` at index 2).
+                let chars = Array(t)
+                for i in 1..<chars.count {
+                    if chars[i] == "y" || chars[i] == "w" {
+                        return true
+                    }
+                }
+                return false
+            }
+            // Find any *medial-bearing* token that appears 3+ times.
+            var counts: [String: Int] = [:]
+            for t in tokens where isMedialBearingOpen(t) {
+                counts[t, default: 0] += 1
+            }
+            let hasIdenticalMedialTriple = counts.values.contains { $0 >= 3 }
+            guard hasIdenticalMedialTriple else { return false }
+            // Surface-collapse check: rank-0 scalar count must be
+            // less than 2 * tokenCount — anything that drops half or
+            // more of the tokens is a collapse.
+            let scalarCount = topSurface.unicodeScalars.count
+            return scalarCount < 2 * tokens.count
+        }()
+
+        let placeAtRankZero = asciiRatioMet
+            || class_A_violation
+            || class_B_collapse
+            || class_C_identicalPlusChain
 
         var candidates = state.candidates
         if placeAtRankZero {
