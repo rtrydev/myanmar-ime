@@ -35,6 +35,8 @@ public enum ReverseRomanizer {
             if let (roman, consumed) = matchOnsetlessA(scalars, from: i) {
                 result += roman
                 i += consumed
+                let merged = mergeTrailingToneMarkers(scalars, from: &i, into: &result)
+                if merged > 0 { /* tone consumed */ }
                 continue
             }
 
@@ -42,6 +44,7 @@ public enum ReverseRomanizer {
             if let (roman, consumed) = matchIndependentVowel(scalars, from: i) {
                 result += roman
                 i += consumed
+                _ = mergeTrailingToneMarkers(scalars, from: &i, into: &result)
                 continue
             }
 
@@ -99,6 +102,7 @@ public enum ReverseRomanizer {
                         result += "a"
                         i = j
                     }
+                    _ = mergeTrailingToneMarkers(scalars, from: &i, into: &result)
                     continue
                 }
 
@@ -132,6 +136,13 @@ public enum ReverseRomanizer {
                     result += "a"
                     i = j
                 }
+                // TASK-036: any U+1036/U+1037/U+1038 that the vowel
+                // pattern did not consume must merge onto the emitted
+                // reading as `3`/`.`/`:`. Without this scan, surfaces
+                // such as `<C> 1030 1037` (long-u + creaky) or
+                // `<C> ... 103A 1037` (asat-then-tone non-canonical
+                // storage) silently lose the tone marker.
+                _ = mergeTrailingToneMarkers(scalars, from: &i, into: &result)
                 continue
             }
 
@@ -140,6 +151,22 @@ public enum ReverseRomanizer {
             if let (vowelRoman, consumed) = matchVowelSequence(scalars, from: i) {
                 result += vowelRoman
                 i += consumed
+                _ = mergeTrailingToneMarkers(scalars, from: &i, into: &result)
+                continue
+            }
+
+            // Bare tone markers (U+1036 anusvara, U+1037 creaky, U+1038
+            // visarga) at this position have no emitted roman to merge
+            // onto — but the structural rule is "every tone marker
+            // produces a reading marker". Emit the marker against an
+            // empty preceding emission so the round-trip parity holds.
+            // The forward parser may not produce these standalone
+            // forms, but the reading still needs to record the scalar.
+            if let marker = toneMarker(for: s.value) {
+                if !result.hasSuffix(marker) {
+                    result += marker
+                }
+                i += 1
                 continue
             }
 
@@ -148,6 +175,82 @@ public enum ReverseRomanizer {
         }
 
         return result
+    }
+
+    // MARK: - Trailing Tone Merge
+
+    /// Map a tone-marker scalar to its romanization marker character.
+    /// Returns nil for non-tone scalars.
+    private static func toneMarker(for value: UInt32) -> String? {
+        switch value {
+        case 0x1036: return "3"   // anusvara → `an3` family marker
+        case 0x1037: return "."   // creaky tone
+        case 0x1038: return ":"   // visarga
+        default:     return nil
+        }
+    }
+
+    /// After a vowel/independent-vowel match, scan for any trailing
+    /// tone markers (U+1036, U+1037, U+1038) that were not consumed
+    /// by the matched pattern, and merge each onto the emitted roman
+    /// reading as `3` / `.` / `:`. Also tolerates an interleaved
+    /// asat (U+103A) — non-canonical `<C> 103A 1037` storage where
+    /// the asat has already been consumed by `*` leaves the trailing
+    /// 1037 dangling.
+    ///
+    /// This is the structural fix for TASK-036: `Romanization.vowels`
+    /// covers some `<vowel> + tone` pairs explicitly (`ar.`, `aw.`,
+    /// `e2.`, …) but a number of common pairs have no entry —
+    /// `1030 1037` (long-u + creaky), `102E 1037` (long-i + creaky),
+    /// non-canonical asat-then-tone storage, and bare consonant +
+    /// tone. Without this merge the trailing tone scalar falls
+    /// through to the "Unrecognized scalar — skip" branch and the
+    /// reading silently truncates.
+    ///
+    /// Idempotent: if `result` already ends with the corresponding
+    /// marker (e.g. the existing pattern emitted `i:` and the next
+    /// scalar is a duplicate U+1038), skip the duplicate so doubled
+    /// tones do not produce doubled markers in the reading.
+    @discardableResult
+    private static func mergeTrailingToneMarkers(
+        _ scalars: [Unicode.Scalar],
+        from i: inout Int,
+        into result: inout String
+    ) -> Int {
+        var consumed = 0
+        while i < scalars.count {
+            let v = scalars[i].value
+            // Tolerate a single interleaved asat between the matched
+            // pattern and a trailing tone marker — covers
+            // non-canonical asat-then-tone storage and the canonical
+            // `<base> 103A 1038` shape that already merges `:` via
+            // multi-scalar patterns elsewhere but can still leak when
+            // the base + asat were emitted independently.
+            if v == 0x103A {
+                // Look ahead: if a tone marker follows, emit `*` (the
+                // asat marker) and continue so the tone can merge.
+                if i + 1 < scalars.count,
+                   toneMarker(for: scalars[i + 1].value) != nil {
+                    if !result.hasSuffix("*") {
+                        result += "*"
+                    }
+                    i += 1
+                    consumed += 1
+                    continue
+                }
+                break
+            }
+            guard let marker = toneMarker(for: v) else { break }
+            // Idempotency: don't double-emit. If the emitted reading
+            // already ends with this marker, the pattern already
+            // covered the tone — just skip the duplicate scalar.
+            if !result.hasSuffix(marker) {
+                result += marker
+            }
+            i += 1
+            consumed += 1
+        }
+        return consumed
     }
 
     // MARK: - Internal Matching
