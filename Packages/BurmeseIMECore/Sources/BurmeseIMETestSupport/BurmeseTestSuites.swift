@@ -139,5 +139,6 @@ public enum BurmeseTestSuites {
         LangLiteralPassthroughSweepSuite.suite,
         TrailingToneAsatLeakSuite.suite,
         TrailingAFterVowelRuleSuite.suite,
+        ExplicitAsatAfterOpenVowelSuite.suite,
     ]
 }
