@@ -1912,7 +1912,16 @@ public final class BurmeseEngine: @unchecked Sendable {
         merged = Self.sanitizeOrphanZwnj(merged)
         merged = Self.sanitizeMalformedMyanmarMarks(merged)
         merged = Self.sanitizeIndepVowelVirama(merged)
-        merged = Self.sanitizeAdjacentIndependentVowels(merged)
+        // TASK-052: explicit-`+` two-syllable forms whose surface
+        // contains adjacent independent-vowel scalars (`a+i` →
+        // `1021 1021 102E`, `a+u` → `1021 1021 1030`, `a+aung` →
+        // `1021 1021 1031 102C 1004 103A`, …) are user-intentional
+        // and must not be filtered by `sanitizeAdjacentIndependent
+        // Vowels`. Pass them through as a preserved set.
+        merged = Self.sanitizeAdjacentIndependentVowels(
+            merged,
+            preservedSurfaces: strictInferredStackOutputs
+        )
         merged = Self.sanitizeDoubledCodaChain(merged)
         merged = Self.sanitizeMultiClusterOnSingleAnchor(merged)
 
@@ -2538,7 +2547,17 @@ public final class BurmeseEngine: @unchecked Sendable {
 
         let sanitizedAffixed = Self.sanitizeMalformedMyanmarMarks(mergedWithAffixes)
         let sanitizedAffixed2 = Self.sanitizeIndepVowelVirama(sanitizedAffixed)
-        let sanitizedAffixed3 = Self.sanitizeAdjacentIndependentVowels(sanitizedAffixed2)
+        // TASK-052: same preserved-surfaces guard as the first
+        // sanitize call so the user-respecting two-syllable
+        // explicit-`+` parses (`1021 1021 102C` for `a+ar`,
+        // `1021 1021 1031 102C 103A` for `a+aw`, …) survive into
+        // `mergedWithAffixes` even when the affix-merged candidate
+        // list still contains an alias-bearing single-anchor
+        // sibling (`1021 101B` for `a+ara`).
+        let sanitizedAffixed3 = Self.sanitizeAdjacentIndependentVowels(
+            sanitizedAffixed2,
+            preservedSurfaces: strictInferredStackOutputs
+        )
         let sanitizedAffixed4 = Self.sanitizeDoubledCodaChain(sanitizedAffixed3)
         let sanitizedAffixed5 = Self.sanitizeDigitOrphanAsat(sanitizedAffixed4)
         let sanitizedAffixed6 = Self.sanitizeToneOrphanAsat(sanitizedAffixed5)
@@ -3614,7 +3633,28 @@ public final class BurmeseEngine: @unchecked Sendable {
         // different reading than the user typed.
         guard j == u.count else { return false }
         if i == r.count { return true }
-        if i == r.count - 1 && r[i] == "a" { return true }
+        if i == r.count - 1 && r[i] == "a" {
+            // TASK-052 narrowing: rule (b)'s trailing-`a` allowance
+            // covers parses that appended inherent `a` after a bare
+            // trailing CONSONANT (e.g. `yan+gun` → `yan+guna`). When
+            // the user input ends with `r`/`w`/`y` AFTER a vowel
+            // letter, the user's input is a vowel-rule continuation
+            // (`ar`, `aw`, `ay`) and the parser's "consonant + a"
+            // re-segmentation is a different parse than what the
+            // user typed. Reject those so the exact-match parse
+            // (`a+ar` = `1021 1021 102C`) wins over the
+            // alias-bearing one (`a+ara` = `1021 101B`).
+            if u.count >= 2 {
+                let last = u[u.count - 1]
+                let prev = u[u.count - 2]
+                let vowelLetters: Set<Character> = ["a", "e", "i", "o", "u"]
+                let medialLikeLetters: Set<Character> = ["r", "w", "y"]
+                if medialLikeLetters.contains(last) && vowelLetters.contains(prev) {
+                    return false
+                }
+            }
+            return true
+        }
         return false
     }
 

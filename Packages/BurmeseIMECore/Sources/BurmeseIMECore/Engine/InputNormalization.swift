@@ -98,21 +98,29 @@ extension BurmeseEngine {
             }
             idx += 1
         }
-        // TASK-047: the `+` before a vowel-letter is stripped here
-        // unless the LHS of the `+` carries a consonant onset that
-        // (with its inherent or written vowel) constitutes a
-        // complete syllable. The parser's `softBoundaryContext` gate
-        // admits a hard syllable break for `<C>+<bare-vowel-rule>`
-        // — when the LHS has a consonant ancestor — and produces
-        // the user-respecting two-syllable surface. The pre-existing
-        // strip remains for `<bare-vowel>+<bare-vowel>` shapes
-        // (`u+u`, `ee+oo`, …) where neither side has a consonant
-        // onset and the `<C>+<vowel>` syllable-break interpretation
-        // does not apply. The decision is made on the LHS of each
-        // `+` independently: walk back from the `+` looking for the
-        // first non-vowel-letter; if it's a consonant, keep the
-        // `+`; if we hit the start of the buffer or another `+`
-        // first, strip.
+        // TASK-047 / TASK-052: the `+` before a vowel-letter is
+        // stripped only when the legacy long-vowel collapse is the
+        // semantically-intended primary reading.
+        //
+        //  (a) TASK-047: when ANY segment to the LHS of the `+`
+        //      contains a consonant letter, keep the `+` so the
+        //      parser's `softBoundaryContext` gate fires the hard
+        //      syllable break (`<C>+<bare-vowel-rule>` →
+        //      two-syllable surface).
+        //
+        //  (b) TASK-052: when the entire LHS chain is bare-vowel
+        //      rules (no consonant anywhere on the left side of
+        //      the buffer), keep the `+` so the parser materialises
+        //      the two-syllable surface with each side anchored to
+        //      its own `1021`. The legacy strip is preserved ONLY
+        //      for the immediately-adjacent identical-letter case
+        //      (`u+u`, `i+i`, `a+a`, `e+e`, `o+o`) where the
+        //      doubled-vowel collapse is the user's intended
+        //      emphasis reading.
+        //
+        // CLAUDE.md §6 rule: "User-typed `+` is a hard syllable /
+        // stack boundary." Stripping it loses signal that the
+        // parser cannot recover from.
         let vowelLeaders: Set<Character> = ["a", "e", "i", "o", "u"]
         let consonantLetters: Set<Character> = [
             "k", "g", "n", "s", "z", "t", "d", "p", "v", "b",
@@ -125,26 +133,52 @@ extension BurmeseEngine {
             if reshapedChars[i] == "+",
                i + 1 < reshapedChars.count,
                vowelLeaders.contains(reshapedChars[i + 1]) {
-                // Walk back from `i` looking for a consonant letter
-                // before any other `+` or buffer start. If found,
-                // keep the `+` so the parser's soft-boundary path
-                // can materialise the two-syllable surface
-                // (TASK-047). Otherwise drop the `+` (legacy
-                // bare-vowel chain behaviour).
+                // Walk back through the ENTIRE LHS — past any other
+                // `+`s — looking for a consonant letter. Per case
+                // (a) TASK-047 we keep the `+` whenever any segment
+                // on the left side has a consonant onset. Without
+                // this full walk, a `<C><a>+<vowel>+<vowel>` chain
+                // would mis-classify the second `+` as bare-vowel-
+                // chain (the immediate prior segment is bare vowel)
+                // even though the buffer's leftmost segment is a
+                // consonant-bearing syllable.
                 var hasConsonantLHS = false
+                var hasIdenticalDoubleStart = -1
                 var j = i - 1
                 while j >= 0 {
                     let ch = reshapedChars[j]
-                    if ch == "+" { break }
                     if consonantLetters.contains(ch) {
                         hasConsonantLHS = true
                         break
                     }
+                    if ch == "+", hasIdenticalDoubleStart < 0 {
+                        hasIdenticalDoubleStart = j + 1
+                    }
                     j -= 1
                 }
                 if !hasConsonantLHS {
-                    i += 1
-                    continue
+                    // Bare-vowel-chain LHS. The immediately-preceding
+                    // segment runs from `lhsStart` to `i` (exclusive).
+                    // Strip ONLY when this immediate segment and the
+                    // immediate RHS segment are the same single-letter
+                    // bare-vowel rule (`u+u`, `i+i`, `a+a`, …).
+                    let lhsStart = hasIdenticalDoubleStart >= 0
+                        ? hasIdenticalDoubleStart : 0
+                    let lhs = String(reshapedChars[lhsStart..<i])
+                    var k = i + 1
+                    while k < reshapedChars.count,
+                          reshapedChars[k] != "+",
+                          reshapedChars[k] != "*",
+                          reshapedChars[k] != "'" {
+                        k += 1
+                    }
+                    let rhs = String(reshapedChars[(i + 1)..<k])
+                    if shouldStripPlusForIdenticalBareVowel(lhs: lhs, rhs: rhs) {
+                        i += 1
+                        continue
+                    }
+                    // Otherwise keep the `+` so the parser's soft-`+`
+                    // arc materialises the two-syllable surface.
                 }
             }
             result.append(reshapedChars[i])
@@ -153,6 +187,25 @@ extension BurmeseEngine {
         while result.first == "+" { result.removeFirst() }
         while result.last == "+" { result.removeLast() }
         return result
+    }
+
+    /// TASK-052: True when `lhs` and `rhs` are the same bare-vowel
+    /// rule and the parser collapses them into a single long-vowel
+    /// independent-vowel surface (`u+u` → `အူ`, `i+i` → `ဤ`,
+    /// `a+a` → `အ`). For these the legacy `+` strip is kept so the
+    /// long-vowel form remains rank 0 — the user's repeated vowel
+    /// is interpreted as emphasis on a single phonetic syllable.
+    /// All other bare-vowel-LHS shapes preserve the `+` so the
+    /// parser materialises the two-syllable form.
+    private static func shouldStripPlusForIdenticalBareVowel(
+        lhs: String, rhs: String
+    ) -> Bool {
+        guard !lhs.isEmpty, !rhs.isEmpty, lhs == rhs else { return false }
+        // Single-letter doubled vowels: `a+a`, `e+e`, `i+i`, `o+o`,
+        // `u+u`. Keep them collapsed because the corpus reading is
+        // unambiguous (long-vowel emphasis or particle).
+        let identicalDoubles: Set<String> = ["a", "e", "i", "o", "u"]
+        return identicalDoubles.contains(lhs)
     }
 
     /// Letters that map to consonants whose inherent vowel is `a`
@@ -2224,7 +2277,16 @@ extension BurmeseEngine {
         // Restricted to the post-asat-coda case so single-syllable
         // bare-vowel patterns (`iii`, `ee`) and their canonical
         // bare-vowel-override sibling (`ဤ`, `အီ`) are unaffected.
-        if surfaceHasOrphanAnchorPastAsatCoda(promotedSurface(parse)) {
+        //
+        // TASK-052 carve-out: skip the rejection when the parse
+        // reading carries an explicit `+`. A user-typed `+` between
+        // the asat-closed coda and the post-anchor cluster signals
+        // a deliberate hard syllable break (e.g. `ka+e+o` →
+        // `… 101A 103A 1021 102D 102F`); the orphan-chain heuristic
+        // would otherwise force the right-shrink probe to drop the
+        // post-`+` syllable, breaking `ExplicitPlusVowelChainSuite`.
+        if !parse.reading.contains("+"),
+           surfaceHasOrphanAnchorPastAsatCoda(promotedSurface(parse)) {
             return false
         }
         return true

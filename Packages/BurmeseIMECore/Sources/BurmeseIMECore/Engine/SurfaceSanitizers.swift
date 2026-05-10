@@ -198,12 +198,23 @@ extension BurmeseEngine {
     /// Like the other sanitizers, the filter only runs when at
     /// least one clean candidate exists; otherwise the panel keeps
     /// the violating candidates as a last-resort fallback.
-    internal static func sanitizeAdjacentIndependentVowels(_ candidates: [Candidate]) -> [Candidate] {
+    internal static func sanitizeAdjacentIndependentVowels(
+        _ candidates: [Candidate],
+        preservedSurfaces: Set<String> = []
+    ) -> [Candidate] {
         // First pass: drop everything flagged by the full invariant
         // (TASK-015 + TASK-022 + TASK-037). When at least one clean
         // sibling exists, the panel surfaces only clean candidates.
+        // TASK-052: surfaces in `preservedSurfaces` (typically the
+        // user-respecting strict-stack outputs from the explicit-`+`
+        // promotion path) are exempt from the filter — when the user
+        // typed an explicit `+` between two bare-vowel rules
+        // (`a+i` → `1021 1021 102E`), the resulting adjacent
+        // independent-vowel scalars are intentional, not a parser
+        // bug shape.
         let cleanFiltered = candidates.filter {
-            !surfaceViolatesIndependentVowelInvariant($0.surface)
+            preservedSurfaces.contains($0.surface)
+                || !surfaceViolatesIndependentVowelInvariant($0.surface)
         }
         if !cleanFiltered.isEmpty {
             return cleanFiltered
@@ -218,7 +229,8 @@ extension BurmeseEngine {
         // ranker may otherwise float to the top once mixed-anchor
         // chains are filtered.
         let adjacencyFree = candidates.filter {
-            !surfaceContainsAdjacentIndepVowels($0.surface)
+            preservedSurfaces.contains($0.surface)
+                || !surfaceContainsAdjacentIndepVowels($0.surface)
         }
         if !adjacencyFree.isEmpty {
             return adjacencyFree

@@ -287,6 +287,15 @@ extension SyllableParser {
                             // onset that follows.
                             upperForGate = nil
                             admit = .unconditional
+                        case .bareVowel:
+                            // TASK-052: bare-vowel-LHS predecessor —
+                            // virama cannot bond to a bare-vowel
+                            // syllable that already terminates, so
+                            // the user's `+` is always a hard
+                            // syllable boundary. Admit
+                            // unconditionally.
+                            upperForGate = nil
+                            admit = .unconditional
                         }
 
                         let onsetsAtVowelEnd = onsetMatchesByStart[vowelEnd]
@@ -860,6 +869,13 @@ extension SyllableParser {
         case seedOnset(Character)
         case asatVowel(Character)
         case plainVowel(Character)
+        /// TASK-052: bare-vowel-LHS predecessor — the previous arc is
+        /// a `vowelOnly` chain with no consonant ancestor (`a+`,
+        /// `i+`, `o+`, `aung+`, …). The user's `+` here is always a
+        /// hard syllable boundary (a virama can never bond to a
+        /// bare-vowel syllable that already terminates), so the
+        /// soft-`+` arc is admitted unconditionally.
+        case bareVowel
         case none
     }
 
@@ -911,6 +927,24 @@ extension SyllableParser {
                 let scalar = onsetLastScalar[Int(onsetId)]
                 guard let ch = Unicode.Scalar(scalar).map(Character.init) else { return .none }
                 return .plainVowel(ch)
+            }
+            // TASK-052: bare-vowel-LHS — the `vowelOnly` chain has no
+            // consonant ancestor. Walk back through any `vowelOnly`
+            // / `.skip` ancestors and look for the seed; if reached,
+            // this is a bare-vowel-LHS predecessor and the soft-`+`
+            // arc is admitted unconditionally.
+            var pIdx = Int(previous.parentIdx)
+            while pIdx >= 0 {
+                let parent = arena[pIdx]
+                switch parent.matchRef {
+                case .seed:
+                    return .bareVowel
+                case .vowelOnly, .skip:
+                    pIdx = Int(parent.parentIdx)
+                    continue
+                default:
+                    return .none
+                }
             }
             return .none
 

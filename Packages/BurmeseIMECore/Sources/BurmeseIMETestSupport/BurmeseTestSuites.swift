@@ -148,5 +148,6 @@ public enum BurmeseTestSuites {
         AnusvaraPlusAsatRejectionSuite.suite,
         MedialPlusAsatRejectionSuite.suite,
         DigitDepVowelAnchorSuite.suite,
+        BareVowelPlusBareVowelSuite.suite,
     ]
 }
