@@ -219,6 +219,28 @@ extension BurmeseEngine {
             $0.digit.unicodeScalars.first!
         }
 
+        // TASK-043: drop multi-syllable lexicon prefix-match lemmas
+        // before splicing the digit. A user-typed mid-buffer digit
+        // signals a hard syllable boundary at that position
+        // (TASK-001 / TASK-002), so a lexicon lemma whose reading
+        // extends past the digit boundary describes a *different*
+        // word than the one the user is composing — splicing the
+        // digit into its surface produces fabricated nonsense like
+        // `က၁ာကွယ်ရေးဦးစီးချုပ်` (`Defense-Service-Chief` with `1`
+        // wedged after `က`). Only `.lexicon`-source candidates whose
+        // reading is a strict superset of the cleaned buffer's
+        // reading are filtered; exact-reading lexicon hits and all
+        // `.grammar` / `.history` candidates pass through.
+        let cleanedAliasKey = Romanization.aliasReading(cleaned)
+        let cleanedComposeKey = Romanization.composeLookupKey(cleaned)
+        func candidateIsLexiconPrefixOnly(_ c: Candidate) -> Bool {
+            guard c.source == .lexicon else { return false }
+            if Romanization.aliasReading(c.reading) == cleanedAliasKey { return false }
+            if Romanization.composeLookupKey(c.reading) == cleanedComposeKey { return false }
+            return true
+        }
+        let preFilteredCandidates = candidates.filter { !candidateIsLexiconPrefixOnly($0) }
+
         // Promote candidates whose surface matches a boundary-aligned
         // parse before the rest. Within each tier the original engine
         // ranking is preserved. When at least one aligned candidate
@@ -227,10 +249,10 @@ extension BurmeseEngine {
         // breaks the prefix syllable (TASK-002 acceptance criteria).
         // Unaligned candidates are kept only when no aligned sibling
         // survives.
-        let aligned = candidates.filter {
+        let aligned = preFilteredCandidates.filter {
             boundaryAlignedSurfaces[$0.surface] != nil
         }
-        let unaligned = candidates.filter {
+        let unaligned = preFilteredCandidates.filter {
             boundaryAlignedSurfaces[$0.surface] == nil
         }
         let orderedCandidates = aligned.isEmpty ? unaligned : aligned

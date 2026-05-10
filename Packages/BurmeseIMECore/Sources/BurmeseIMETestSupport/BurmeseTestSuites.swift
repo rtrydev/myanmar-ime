@@ -141,5 +141,6 @@ public enum BurmeseTestSuites {
         TrailingAFterVowelRuleSuite.suite,
         ExplicitAsatAfterOpenVowelSuite.suite,
         MingalarKinziLongBufferSuite.suite,
+        LexiconPrefixLiteralTailSuite.suite,
     ]
 }

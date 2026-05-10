@@ -2359,10 +2359,62 @@ public final class BurmeseEngine: @unchecked Sendable {
         if !hasAffixes {
             mergedWithAffixes = merged
         } else {
+            // TASK-043: drop multi-syllable lexicon prefix-match lemmas
+            // before concatenating the literal tail / digit affix. The
+            // `merged` list contains:
+            //   (a) parser/grammar surfaces (and exact-alias/exact-
+            //       compose lexicon hits absorbed into grammar at
+            //       merge time) whose reading equals `normalized`, and
+            //   (b) lexicon prefix-match surfaces whose reading is a
+            //       strict superset of `normalized` (the SQLite
+            //       `LIMIT 20` returns lemmas whose alias-readings
+            //       *start with* the prefix, not just match it).
+            // The affix concatenation is only meaningful for (a) — the
+            // user's tail letter / digit / punct-run is a literal
+            // continuation of the syllable they composed. For (b) the
+            // dropped tail belongs to a *different* syllable than the
+            // one the lexicon lemma's reading describes; concatenating
+            // it produces a fabricated `<lemma>+<tail>` non-word like
+            // `ယုံကြည်ချက်အူ` (`belief`+`အူ`) or
+            // `ကာကွယ်ရေးဦးစီးချုပ်၁` (`Defense-Service-Chief-1`).
+            //
+            // Filter rule: drop a candidate iff
+            //   - source == .lexicon (exact-reading lexicon hits with
+            //     a matching grammar surface get their source rewritten
+            //     to .grammar at merge time, so .lexicon here is
+            //     necessary AND sufficient for "prefix-only match"
+            //     after the un-windowed merge), AND
+            //   - the candidate's reading's alias / compose key does
+            //     NOT equal `aliasPrefix` / `composePrefix` (defensive
+            //     — covers the rare case where an exact-reading
+            //     lexicon hit slipped through without being absorbed
+            //     into grammar).
+            //
+            // Single-trailing-punct (`kar:`, `kar.`) is unaffected
+            // because those compose into the candidate via the bare-
+            // consonant-tone path before the affix loop runs (TASK-014
+            // / TASK-049); the `effectiveTail` is empty by the time
+            // we get here. Trailing-punct RUNS of length ≥ 2 (`kya..`,
+            // `kya::`) leave a residual literal punct in
+            // `effectiveTail` and DO trigger the filter.
+            let exactReadingFilterApplies = !effectiveTail.isEmpty
+                || !digitPrefix.isEmpty
+            func candidateIsLexiconPrefixOnly(_ c: Candidate) -> Bool {
+                guard c.source == .lexicon else { return false }
+                let candAliasKey = Romanization.aliasReading(c.reading)
+                if candAliasKey == aliasPrefix { return false }
+                let candComposeKey = Romanization.composeLookupKey(c.reading)
+                if candComposeKey == composePrefix { return false }
+                return true
+            }
             let burmesePrefix = Self.arabicToBurmeseDigits(digitPrefix)
             var expanded: [Candidate] = []
             var seen: Set<String> = []
             for candidate in merged {
+                if exactReadingFilterApplies,
+                   candidateIsLexiconPrefixOnly(candidate) {
+                    continue
+                }
                 let candidateTail = effectiveTail
                 let hasDigitAffixes = Self.containsDigit(digitPrefix) || Self.containsDigit(candidateTail)
                 if leadingLiteral.isEmpty && digitPrefix.isEmpty && candidateTail.isEmpty {
