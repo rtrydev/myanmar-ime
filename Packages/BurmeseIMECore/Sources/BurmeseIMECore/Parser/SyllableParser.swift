@@ -352,11 +352,39 @@ public final class SyllableParser: Sendable {
         var vowelPreAsat = [UInt32](repeating: 0, count: builtVowelTrie.terminals.count)
         var vowelMidBufPen = [Bool](repeating: false, count: builtVowelTrie.terminals.count)
         for (idx, entry) in builtVowelTrie.terminals.enumerated() {
-            vowelOnlyLegalities[idx] = Grammar.validateSyllable(
+            let baseLegality = Grammar.validateSyllable(
                 onset: nil,
                 medials: [],
                 vowelRoman: entry.canonicalRoman
             )
+            // TASK-046: bare-diphthong vowel rules (`aing`, `aung`,
+            // `ai`) emit a self-contained dep-vowel cluster + `<nga>
+            // 103A` shape that constitutes a complete syllable on its
+            // own. The default `validateSyllable(onset: nil, ...)`
+            // returns 10 for any non-standalone vowel — that low
+            // legality lets the engine's `grammarCandidateIsBetter`
+            // tiebreaker (legalityScore comparison after syllableCount
+            // tie) float a re-segmented `aing + ain + gaing` sibling
+            // above the all-anchored `aing + aing + aing` parse for
+            // chained input. Boost the per-arc legality of bare-
+            // diphthong rules to match the onset+vowel pair (100) so
+            // the chain legality scales with N instead of contributing
+            // only 10*N. The narrow `nga` (U+1004) check excludes
+            // ya-asat-coda variants like `o2` (`102D 102F 101A 103A`).
+            let entryScalars = Array(entry.myanmar.unicodeScalars)
+            let isBareDiphthongShape: Bool = {
+                guard entryScalars.count >= 4 else { return false }
+                guard entryScalars[entryScalars.count - 1].value == 0x103A else { return false }
+                guard entryScalars[entryScalars.count - 2].value == 0x1004 else { return false }
+                for i in 0..<(entryScalars.count - 2) {
+                    let v = entryScalars[i].value
+                    if v >= 0x102B && v <= 0x1032 { return true }
+                }
+                return false
+            }()
+            vowelOnlyLegalities[idx] = isBareDiphthongShape
+                ? max(baseLegality, 100)
+                : baseLegality
             if entry.canonicalRoman == "+" {
                 if entry.myanmar.isEmpty {
                     if foundSoftBoundaryId < 0 { foundSoftBoundaryId = entry.id }

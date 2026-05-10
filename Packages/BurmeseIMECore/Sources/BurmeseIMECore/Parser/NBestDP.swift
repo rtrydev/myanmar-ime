@@ -359,9 +359,38 @@ extension SyllableParser {
                     // want it. Add an aliasCost penalty at the final
                     // transition so a standalone-vowel alternative (e.g.
                     // ဥ via `u2.`) outranks it when both are available.
+                    //
+                    // TASK-046: when the previous arc was a multi-scalar
+                    // bare-diphthong rule (`aing`, `aung`, `ai`) ending
+                    // in `<nga> 103A` AND the current arc is also a
+                    // bare-diphthong vowelOnly rule, the stackedFinal
+                    // penalty would unfairly demote the user-intended
+                    // chained-bare-diphthong parse (`aing + aing`)
+                    // against a re-segmented sibling (`ain + gaing`)
+                    // that doesn't pay it. Carve out only that
+                    // structural shape; ordinary `<C>aaY` stacking and
+                    // `an + ar` (closed-syllable + bare-vowel) keep the
+                    // existing penalty so their established rankings
+                    // are preserved.
+                    let prevWasBareDiphthongShape: Bool = {
+                        guard case .vowelOnly(let prevId) = previous.matchRef else {
+                            return false
+                        }
+                        guard vowelEndsWithAsat[Int(prevId)] else { return false }
+                        // The diphthong-shape rules are the multi-scalar
+                        // standalones (`aing`, `aung`, `ai`) — at least
+                        // 4 scalars in their Myanmar output AND the
+                        // scalar before the asat closer is `nga` (1004).
+                        let entry = vowelTerminals[Int(prevId)]
+                        let scalars = Array(entry.myanmar.unicodeScalars)
+                        guard scalars.count >= 4 else { return false }
+                        guard scalars[scalars.count - 2].value == 0x1004 else { return false }
+                        return true
+                    }()
                     let stackedFinal =
                         !vowelEntry.isStandalone
                         && previousEndedWithVowel
+                        && !prevWasBareDiphthongShape
                         && vowelEnd == n
                     // TASK-007: skip the transition entirely when a
                     // standalone vowel rule whose Myanmar output begins

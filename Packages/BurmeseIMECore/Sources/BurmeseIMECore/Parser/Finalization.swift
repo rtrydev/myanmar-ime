@@ -810,6 +810,43 @@ extension SyllableParser {
                         Self.bumpLastInherentABoundary(&rawBoundaries)
                     }
                 }
+                // TASK-046: orphan dep-vowel anchor on a chained
+                // bare-diphthong-rule repetition. The previous-
+                // syllable closer + new-syllable dep-vowel pattern
+                // shows up when the user repeats a bare diphthong
+                // rule (`aing` / `aung` / `ai`): syllable 1 lands
+                // the rule's full dep-vowel cluster (with the
+                // engine's `adjustLeadingVowel` ZWNJ prefix /
+                // `promoteOrphanZwnjToImplicitA` post-process
+                // covering the buffer head), and syllable 2's
+                // `vowelOnly` arc lands directly after the prior
+                // syllable's asat closer (U+103A). Without an
+                // anchor injection, the dep-vowel cluster
+                // concatenates onto the asat closer, producing
+                // orthographically illegal shapes like
+                // `အောင်ောင်ေါင်` (orphan e-kar after the first
+                // syllable's asat).
+                //
+                // Trigger: previous arc's emission was a "diphthong
+                // shape" — at least four scalars ending in
+                // `<consonant base> 103A` with a dep-vowel scalar
+                // inside the cluster — AND this `vowelOnly` arc
+                // starts with a dep-vowel scalar. Narrowing to the
+                // diphthong shape avoids firing on shorter
+                // closed-syllable rules like `an` (`1014 103A`,
+                // 2 scalars, no internal dep-vowel) where the
+                // injected anchor would legalise an unintended
+                // parse like `an+ar → အန်အာ` and displace the
+                // user-respecting `a+nar → အနာ` interpretation.
+                let outputScalars = output.unicodeScalars
+                let firstScalarIsDepVowel = entry.myanmar
+                    .unicodeScalars.first.map {
+                        $0.value >= 0x102B && $0.value <= 0x1032
+                    } ?? false
+                let prevWasDiphthongShape = Self.outputEndsWithBareDiphthongShape(outputScalars)
+                if prevWasDiphthongShape && firstScalarIsDepVowel && !isInherentA {
+                    output.unicodeScalars.append(Unicode.Scalar(0x1021)!)
+                }
                 output.append(entry.myanmar)
                 reading.append(entry.canonicalRoman)
                 if isInherentA {
@@ -834,6 +871,41 @@ extension SyllableParser {
             raw: stripped, processed: collapsed, boundaries: strippedBoundaries
         )
         return (collapsed, reading, collapsedBoundaries)
+    }
+
+    /// TASK-046: true when `outputScalars` ends with a bare-diphthong
+    /// shape — at least four scalars, ending with `<nga> 103A` (the
+    /// nga-asat coda emitted by the `aing` / `aung` / `ai` family
+    /// rules), with at least one dependent-vowel scalar
+    /// (U+102B..U+1032) in the cluster before the nga base. The
+    /// narrow `nga` (U+1004) check excludes shapes like `o2`
+    /// (`102D 102F 101A 103A`) and `e2` (`101A 103A`) where the
+    /// chain-boundary anchor injection would mis-interpret a
+    /// ya-asat-coda variant as a fresh diphthong-syllable boundary.
+    internal static func outputEndsWithBareDiphthongShape(
+        _ outputScalars: String.UnicodeScalarView
+    ) -> Bool {
+        let arr = Array(outputScalars)
+        guard arr.count >= 4 else { return false }
+        guard arr[arr.count - 1].value == 0x103A else { return false }
+        guard arr[arr.count - 2].value == 0x1004 else { return false }
+        // Walk backward from arr.count - 3 looking for a dep-vowel
+        // scalar in the syllable's cluster. A new syllable boundary
+        // (consonant base, indep vowel, ZWNJ, virama) terminates
+        // the scan.
+        var i = arr.count - 3
+        while i >= 0 {
+            let v = arr[i].value
+            if v >= 0x102B && v <= 0x1032 { return true }
+            // Reached the syllable's onset / a previous syllable's
+            // closer; bail out — no dep vowel in this syllable's
+            // cluster.
+            if (v >= 0x1000 && v <= 0x1021) || v == 0x103F { return false }
+            if v >= 0x1023 && v <= 0x102A { return false }
+            if v == 0x200C || v == 0x1039 { return false }
+            i -= 1
+        }
+        return false
     }
 
     /// Collapse runs of consecutive U+103A asat scalars to a single
