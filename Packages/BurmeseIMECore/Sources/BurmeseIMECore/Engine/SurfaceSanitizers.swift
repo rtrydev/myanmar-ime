@@ -1511,6 +1511,30 @@ extension BurmeseEngine {
                 return nil
             }
         }
+        // TASK-047: refuse to anchor an orphan dep-vowel whose
+        // immediate predecessor is a virama (U+1039) when the parse
+        // reading contains `+`. The user typed an explicit `+`
+        // between two syllables, so a `<C> 1039 <dep-vowel>`
+        // pattern in the materialised surface is the parser's
+        // mis-interpretation of the user's `+` as a virama-stack
+        // marker (rather than a soft syllable boundary). Inserting
+        // U+1021 between the virama and the dep-vowel produces a
+        // structurally weird `<C> 1039 1021 <dep-vowel>` shape that
+        // promotes the wrong parse (k_+_aung → `က္အောင်`) over the
+        // user-respecting two-syllable form (`ကအောင်`) the
+        // soft-boundary path materialises. Suppress the rebuild
+        // whenever a `+` appears in the reading; the parser's
+        // soft-`+` parse is the canonical sibling to keep at top.
+        let readingContainsPlus = parse.reading.contains("+")
+        if readingContainsPlus {
+            for pos in orphanPositions {
+                guard pos >= 1 else { continue }
+                let prev = scalars[pos - 1].value
+                if prev == 0x1039 {
+                    return nil
+                }
+            }
+        }
 
         // TASK-022: collapse contiguous orphan-mark scalars into a
         // single anchor per cluster, but split clusters whenever a

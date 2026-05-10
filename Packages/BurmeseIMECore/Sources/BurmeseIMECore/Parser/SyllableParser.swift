@@ -388,6 +388,16 @@ public final class SyllableParser: Sendable {
             if entry.canonicalRoman == "+" {
                 if entry.myanmar.isEmpty {
                     if foundSoftBoundaryId < 0 { foundSoftBoundaryId = entry.id }
+                    // TASK-047: bump the soft-`+` vowelOnly legality
+                    // beyond the default 100 so a parse that admits
+                    // the user's `+` as a hard syllable boundary
+                    // outranks an alternative parse that interprets
+                    // the same `+` as a virama-stack site (which
+                    // re-segments the user's input). The bump only
+                    // affects the soft-`+` arc, not the virama-`+`
+                    // arc, so kinzi / virama-stack rankings are
+                    // unaffected.
+                    vowelOnlyLegalities[idx] = max(vowelOnlyLegalities[idx], 200)
                 } else if foundViramaId < 0 {
                     foundViramaId = entry.id
                 }

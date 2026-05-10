@@ -58,7 +58,41 @@ extension SyllableParser {
             let minTier = legalIndices.filter {
                 arena[Int($0)].syllableCount == minimumLegalSyllables
             }
-            if limit > 1 && minTier.count < 2 {
+            // TASK-047: when the user typed a `+` and every
+            // min-tier candidate fails the post-finalize legality
+            // scan (typically because the `+` was admitted as a
+            // virama-`+` arc whose adjacent dep-vowel materialises
+            // a virama-before-vowel sequence that
+            // `scanOutputLegality` rejects), the min-tier filter
+            // would silently drop the higher-syllableCount soft-`+`
+            // sibling that DOES scan clean — leaving the panel
+            // empty of any user-respecting form. Detect this by
+            // materialising the min-tier states once and checking
+            // whether at least one surface scans clean; if none do,
+            // widen the filter to min+1 so the soft-`+` (and
+            // similar) sibling reaches the materialize/sort path.
+            // The narrow `chars.contains("+")` gate keeps single-
+            // bare-vowel-rule shapes (`aw` → `‌ော်`,
+            // `aing` → `‌ိုင်`) on the existing min-tier path —
+            // those rules emit a structurally orphan dep-vowel
+            // cluster that the engine's downstream
+            // `promoteOrphanZwnjToImplicitA` post-process repairs;
+            // widening would surface a competing onset+vowel sibling
+            // (e.g. `aw` → `အဝ` from `a + w` parse) that displaces
+            // the canonical bare-diphthong rendering.
+            // TASK-047: when the user typed `+`, ALWAYS widen the
+            // filter to min+1. `+`-bearing buffers admit both a
+            // virama-`+` (1-syllable merge) parse and a soft-`+`
+            // (2-syllable break) parse with different syllableCounts;
+            // the strict min-tier filter would silently drop the
+            // user-respecting soft-`+` sibling whenever the
+            // virama-`+` form happens to be legal post-scan
+            // (e.g. `k+ar` produces a legal `<k><virama><r>` 2-arc
+            // sibling that the min-tier filter keeps to the exclusion
+            // of the soft-`+` `<k><1021><ar>` 3-arc sibling). Widen so
+            // both compete in the materialised sort.
+            let bufferContainsPlus = requestedReading.contains("+")
+            if (limit > 1 && minTier.count < 2) || bufferContainsPlus {
                 filteredIndices = legalIndices.filter {
                     arena[Int($0)].syllableCount <= minimumLegalSyllables + 1
                 }
@@ -845,6 +879,34 @@ extension SyllableParser {
                     } ?? false
                 let prevWasDiphthongShape = Self.outputEndsWithBareDiphthongShape(outputScalars)
                 if prevWasDiphthongShape && firstScalarIsDepVowel && !isInherentA {
+                    output.unicodeScalars.append(Unicode.Scalar(0x1021)!)
+                }
+                // TASK-047: a user-typed `+` between a syllable and a
+                // following bare vowel-rule (`aung`, `aing`, `i`, …)
+                // must materialise as a hard syllable boundary, not a
+                // soft separator that silently lets the new rule
+                // consume the previous syllable's onset / inherent
+                // vowel as its own onset. The parser's soft-`+` arc
+                // emits empty Myanmar surface, and the next bare
+                // vowel-rule's dep-vowel cluster lands directly on
+                // the previous consonant base — turning user input
+                // `ka+aung` into a single-syllable `ကောင်` instead of
+                // the two-syllable `ကအောင်` the user typed for.
+                //
+                // Inject U+1021 when the immediately-preceding arc
+                // was the soft-`+` form (canonical roman `+`, empty
+                // Myanmar emission) AND this `vowelOnly` arc starts
+                // with a dep-vowel scalar. The buffer-head case is
+                // governed by the existing leading-A promotion above
+                // and is not affected by this rule.
+                let prevWasSoftPlus: Bool = {
+                    guard refIndex >= 1 else { return false }
+                    if case let .vowelOnly(prevVowelId) = refs[refIndex - 1] {
+                        return prevVowelId == softBoundaryViramaVowelId
+                    }
+                    return false
+                }()
+                if prevWasSoftPlus && firstScalarIsDepVowel && !isInherentA {
                     output.unicodeScalars.append(Unicode.Scalar(0x1021)!)
                 }
                 output.append(entry.myanmar)

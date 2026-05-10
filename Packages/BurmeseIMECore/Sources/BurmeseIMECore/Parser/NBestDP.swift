@@ -290,7 +290,26 @@ extension SyllableParser {
                         }
 
                         let onsetsAtVowelEnd = onsetMatchesByStart[vowelEnd]
-                        guard !onsetsAtVowelEnd.isEmpty else { continue }
+                        let bareVowelMatchesAtVowelEnd = vowelMatchesByStart[vowelEnd]
+                        // TASK-047: admit the soft-`+` arc when the
+                        // following position carries either a
+                        // consonant onset (the original gate) or a
+                        // bare-vowel rule (`aung`, `aing`, `i`, …).
+                        // The bare-vowel-rule case represents the
+                        // user typing `<C>+<vowel-rule>` to break
+                        // the syllable boundary BEFORE an onsetless
+                        // dependent-vowel cluster — e.g. `ka+aung`
+                        // means "ka, then aung as a separate
+                        // syllable". Without admitting the
+                        // soft-`+` arc here, the parser drops to the
+                        // virama path even when the result is a
+                        // structurally illegal `<C><virama><dep-vowel>`
+                        // cluster, and the user-respecting two-
+                        // syllable interpretation never reaches the
+                        // candidate panel.
+                        guard !onsetsAtVowelEnd.isEmpty
+                            || !bareVowelMatchesAtVowelEnd.isEmpty
+                        else { continue }
 
                         if admit != .unconditional, let upper = upperForGate {
                             var hasShortLegal = false
@@ -316,7 +335,20 @@ extension SyllableParser {
                                 guard digraphCollision else { continue }
                             case .crossClassOrDigraph:
                                 let crossClassIllegal = !hasShortLegal
-                                guard crossClassIllegal || digraphCollision else { continue }
+                                // TASK-047: when the post-`+` position
+                                // is a bare vowel-rule (no onset), the
+                                // virama path is structurally
+                                // unavailable (virama can only stack
+                                // onto a consonant onset, not a
+                                // dep-vowel cluster). Treat this as a
+                                // forced cross-class-illegal admit so
+                                // the soft-`+` arc fires and yields a
+                                // hard syllable break.
+                                let nextIsBareVowelOnly =
+                                    onsetsAtVowelEnd.isEmpty
+                                    && !bareVowelMatchesAtVowelEnd.isEmpty
+                                guard crossClassIllegal || digraphCollision || nextIsBareVowelOnly
+                                else { continue }
                             case .unconditional:
                                 break
                             }

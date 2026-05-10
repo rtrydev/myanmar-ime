@@ -124,13 +124,19 @@ public enum ExplicitPlusVowelChainSuite {
         // Regression guards: legal `+` shapes must keep working.
         // - `ka+e+o` is the multi-anchor sibling reference (`e` rule
         //   emits a coda asat that legally closes the syllable).
-        // - `ka+u` is a single-syllable buffer with no chain.
+        // - `ka+u` was originally a single-syllable expectation
+        //   (`ku`) on the assumption that `+` before a single-char
+        //   vowel rule is a no-op; TASK-047 reclassifies the
+        //   `<C>(a|ar|ay)+<vowel-rule>` shape as a hard syllable
+        //   break. The test now checks for the two-syllable form
+        //   (anchor injection between LHS and the bare vowel),
+        //   matching the TASK-047 acceptance criterion.
         // - `k+k+k+k` is the kinzi-stack regression guard.
         TestCase("plusVowelChain_regressionGuards") { ctx in
             let engine = emptyEngine()
             let cases: [(buffer: String, mustContain: [UInt32])] = [
                 ("ka+e+o",   [0x101A, 0x103A, 0x1021, 0x102D, 0x102F]),  // e-coda + indep-o
-                ("ka+u",     [0x1000, 0x1030]),               // simple `kar+u`-style
+                ("ka+u",     [0x1000, 0x1021, 0x1030]),                  // TASK-047 two-syllable
             ]
             for c in cases {
                 let surface = engine.update(buffer: c.buffer, context: [])

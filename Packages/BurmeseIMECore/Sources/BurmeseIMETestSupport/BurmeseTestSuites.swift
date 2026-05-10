@@ -144,5 +144,6 @@ public enum BurmeseTestSuites {
         LexiconPrefixLiteralTailSuite.suite,
         PlusDisjointKinziInferenceSuite.suite,
         BareVowelRuleChainSuite.suite,
+        PlusBeforeVowelRuleSuite.suite,
     ]
 }

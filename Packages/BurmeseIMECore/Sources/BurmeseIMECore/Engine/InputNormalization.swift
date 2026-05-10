@@ -98,7 +98,26 @@ extension BurmeseEngine {
             }
             idx += 1
         }
+        // TASK-047: the `+` before a vowel-letter is stripped here
+        // unless the LHS of the `+` carries a consonant onset that
+        // (with its inherent or written vowel) constitutes a
+        // complete syllable. The parser's `softBoundaryContext` gate
+        // admits a hard syllable break for `<C>+<bare-vowel-rule>`
+        // — when the LHS has a consonant ancestor — and produces
+        // the user-respecting two-syllable surface. The pre-existing
+        // strip remains for `<bare-vowel>+<bare-vowel>` shapes
+        // (`u+u`, `ee+oo`, …) where neither side has a consonant
+        // onset and the `<C>+<vowel>` syllable-break interpretation
+        // does not apply. The decision is made on the LHS of each
+        // `+` independently: walk back from the `+` looking for the
+        // first non-vowel-letter; if it's a consonant, keep the
+        // `+`; if we hit the start of the buffer or another `+`
+        // first, strip.
         let vowelLeaders: Set<Character> = ["a", "e", "i", "o", "u"]
+        let consonantLetters: Set<Character> = [
+            "k", "g", "n", "s", "z", "t", "d", "p", "v", "b",
+            "m", "y", "r", "l", "w", "h"
+        ]
         var result = ""
         result.reserveCapacity(reshapedChars.count)
         var i = 0
@@ -106,8 +125,27 @@ extension BurmeseEngine {
             if reshapedChars[i] == "+",
                i + 1 < reshapedChars.count,
                vowelLeaders.contains(reshapedChars[i + 1]) {
-                i += 1
-                continue
+                // Walk back from `i` looking for a consonant letter
+                // before any other `+` or buffer start. If found,
+                // keep the `+` so the parser's soft-boundary path
+                // can materialise the two-syllable surface
+                // (TASK-047). Otherwise drop the `+` (legacy
+                // bare-vowel chain behaviour).
+                var hasConsonantLHS = false
+                var j = i - 1
+                while j >= 0 {
+                    let ch = reshapedChars[j]
+                    if ch == "+" { break }
+                    if consonantLetters.contains(ch) {
+                        hasConsonantLHS = true
+                        break
+                    }
+                    j -= 1
+                }
+                if !hasConsonantLHS {
+                    i += 1
+                    continue
+                }
             }
             result.append(reshapedChars[i])
             i += 1
