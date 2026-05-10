@@ -257,5 +257,121 @@ public enum TrailingAFterVowelRuleSuite {
                 )
             }
         },
+
+        // STRICT RANK-0 ACCEPTANCE for the buffer-leading vowel-rule
+        // bug class. The Class D literal-fallback promotion in
+        // `injectLiteralFallback` covers buffer-leading vowel-rule
+        // shapes (`iaa`, `iaaa`, `uaa`, `eaa`, `oaa`, …) by
+        // promoting the raw-buffer literal to rank 0 when the
+        // trailing `a^n` (n>=2) would otherwise vanish silently.
+        // The predicate is restricted to pure-vowel-rule buffers
+        // (no consonants, no separators) so the consonant-anchored
+        // mid-typing prefixes in the corpus (`nga`, `kya`, `apha`,
+        // …) stay on the regular ranking path.
+        //
+        // Acceptance: rank-0 surface for `<vowel-rule>aa+` is
+        // either the raw-buffer literal OR has a different scalar
+        // count from the `<vowel-rule>` baseline.
+        TestCase("rankZero_bufferLeadingVowelRuleClassD") { ctx in
+            let engine = emptyEngine()
+            // (buffer-leading-rule, trailing-a counts to test).
+            // The leading-A promotion path (`aa+` with no other
+            // letter) is excluded — it has its own carve-out and is
+            // covered by `regression_bareLeadingAaProducesIndependentA`.
+            let leadingRules = ["i", "u", "e", "o", "ar", "ay", "aw", "in", "out"]
+            for v in leadingRules {
+                let baseTop = engine.update(buffer: v, context: [])
+                    .candidates.first?.surface ?? ""
+                let baseScalarCount = baseTop.unicodeScalars.count
+                for n in 2...4 {
+                    let buffer = v + String(repeating: "a", count: n)
+                    let top = engine.update(buffer: buffer, context: [])
+                        .candidates.first?.surface ?? ""
+                    let topScalarCount = top.unicodeScalars.count
+                    let isLiteral = top == buffer
+                    let differsInCount = topScalarCount != baseScalarCount
+                    ctx.assertTrue(
+                        isLiteral || differsInCount,
+                        "\(buffer)",
+                        detail: "rank-0 silent-absorption: top='\(top)' [count=\(topScalarCount)] base='\(baseTop)' [count=\(baseScalarCount)]; expected literal OR different scalar count"
+                    )
+                }
+            }
+        },
+
+        // Carve-out: leading-A promotion (`aa`, `aaa`, `aaaa`)
+        // must NOT be hit by Class D. Trimming all trailing
+        // `a`s leaves an empty buffer, which the predicate
+        // skips, so the leading-A path stays intact. (`aaaaa+`
+        // hits the pre-existing TASK-047 Class B pathological-
+        // collapse path which already promotes the literal at
+        // 5+ same-letter runs; that is independent of Class D.)
+        TestCase("rankZero_classD_excludesLeadingARun") { ctx in
+            let engine = emptyEngine()
+            for buffer in ["aa", "aaa", "aaaa"] {
+                let top = engine.update(buffer: buffer, context: [])
+                    .candidates.first?.surface ?? ""
+                ctx.assertFalse(
+                    top == buffer,
+                    buffer,
+                    detail: "leading-A run should NOT be promoted to literal at rank 0; got '\(top)'"
+                )
+                ctx.assertTrue(
+                    top.unicodeScalars.first?.value == 0x1021,
+                    buffer,
+                    detail: "expected leading 'အ' (U+1021); got '\(top)' [\(hex(top))]"
+                )
+            }
+        },
+
+        // Carve-out: consonant-anchored buffers stay on the
+        // regular ranking path even for n>=2 trailing `a`s. Class
+        // D only fires on pure-vowel-rule buffers; for
+        // consonant-anchored shapes the TASK-016 / TASK-026 /
+        // Class B paths handle the chained inherent-`a` either by
+        // re-rendering as `အ` (`kaa → ကအ`, `khoutaa → ခေါက်အ`)
+        // or by Class B literal promotion for pathological
+        // collapses (`kaaaaaaaa`, `kbbbbbbbb`).
+        TestCase("rankZero_classD_excludesConsonantAnchored") { ctx in
+            let engine = emptyEngine()
+            // Each of these has a consonant in the buffer (k, m,
+            // t, p, n, h, etc.) and ends in `aa+`. Rank-0 must NOT
+            // be the literal — the regular ranking path already
+            // handles them.
+            let cases = ["kaa", "kaaa", "kaakaa", "thaaaa",
+                         "khoutaa", "khoutaaa", "khaungaa",
+                         "khaungaaa"]
+            for buffer in cases {
+                let top = engine.update(buffer: buffer, context: [])
+                    .candidates.first?.surface ?? ""
+                ctx.assertFalse(
+                    top == buffer,
+                    buffer,
+                    detail: "consonant-anchored buffer should NOT be promoted to literal at rank 0 by Class D; got '\(top)'"
+                )
+            }
+        },
+
+        // Carve-out: separator-bearing buffers stay on the
+        // regular ranking path. Visarga + inherent-A path
+        // (`kar:aa → ကားအ`) is preserved via the separator gate
+        // in the Class D predicate.
+        TestCase("rankZero_classD_excludesSeparatorBearing") { ctx in
+            let engine = emptyEngine()
+            // Visarga and dot-tone buffers ending in `aa+` retain
+            // their Burmese surface (the literal pass-through path
+            // for these is already handled by the existing
+            // `digitOrLiteralFallback` / mid-buffer-tone logic, not
+            // by Class D).
+            for buffer in ["kar:aa", "kar:aaa", "ka:aa"] {
+                let top = engine.update(buffer: buffer, context: [])
+                    .candidates.first?.surface ?? ""
+                ctx.assertFalse(
+                    top == buffer,
+                    buffer,
+                    detail: "separator-bearing buffer should NOT be promoted to literal at rank 0 by Class D; got '\(top)'"
+                )
+            }
+        },
     ])
 }

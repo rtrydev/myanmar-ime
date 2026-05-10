@@ -2873,10 +2873,133 @@ public final class BurmeseEngine: @unchecked Sendable {
             return scalarCount < 2 * tokens.count
         }()
 
+        // TASK-039: chained inherent-`a` silent-absorption past the
+        // first trailing `a` for buffer-leading vowel-rule shapes.
+        // The TASK-016 chained-inherent-a guard at the DP level only
+        // rejects a `vowelOnly(inherent-a)` arc whose immediate
+        // predecessor ALSO consumed inherent-a AND has a consonant
+        // ancestor. For consonant-anchored buffers the second
+        // trailing `a` re-renders as `အ` via the right-shrink +
+        // literal-tail path (`kaa → ကအ`, `khoutaa → ခေါက်အ`), so
+        // the rank-0 scalar count differs from the no-trailing-a
+        // form and the strict acceptance criterion is met for
+        // n>=2.
+        //
+        // For BUFFER-LEADING vowel-rule shapes (`iaa`, `iaaa`,
+        // `uaa`, `uaaa`, `eaa`, `oaa`, …) there is no consonant
+        // ancestor, so neither the TASK-016 guard nor the
+        // literal-tail re-render fires. Every trailing `a` past
+        // the first chains as inherent-a-empty, producing exactly
+        // the same surface as the no-trailing-a form. The user's
+        // n>=2 trailing `a`s vanish silently from rank 0.
+        //
+        // Detect this narrow shape and promote the literal raw
+        // buffer to rank 0. The predicate is intentionally tight:
+        //
+        //   1. Buffer length >= 3 (need at least one vowel-rule
+        //      letter + 2 trailing `a`s).
+        //   2. Buffer ends in `aa+` (>=2 trailing `a`s).
+        //   3. Buffer contains NO consonant letter and NO
+        //      separator (`+`, `:`, `.`, `*`, `'`). Only the
+        //      ASCII vowel letters `a`, `e`, `i`, `o`, `u`, `y`,
+        //      `w`, `r` are admitted — these are the characters
+        //      that make up the bare-vowel rules and their
+        //      diphthong continuations (`ay`, `aw`, `ar`, `aung`,
+        //      `iaung`, etc.). Any other letter signals a
+        //      consonant-anchored buffer that is handled by the
+        //      TASK-016 / TASK-026 / Class B paths.
+        //   4. The full rank-0 surface is non-empty Burmese (not
+        //      a literal pass-through; the literal pass-through
+        //      already lands at rank 0 via the asciiRatio path).
+        //   5. The full rank-0 surface has the SAME scalar count
+        //      as the rank-0 surface for the buffer with all
+        //      trailing `a`s removed — i.e., the trailing `a`s
+        //      contributed nothing to the visible scalar count.
+        //
+        // Single-trailing-`a` cases (`khia`, `khoa`, `khouta`,
+        // `khaunga`) are NOT covered here — they are
+        // structurally ambiguous from buffer text alone with
+        // legitimate consonant-anchored inherent-vowel forms
+        // (`nga`, `kya`, `tha`, `mya`) and with mid-sentence
+        // typing prefixes in the corpus. The single-trailing
+        // class remains a documented partial gap (filed as
+        // TASK-039b for follow-up); the panel still contains the
+        // raw-buffer literal at rank >=1, so the user can still
+        // commit-as-typed.
+        let class_D_chainedInherentATail: Bool = {
+            // Bounds: need 1 vowel-rule letter + at least 2
+            // trailing `a`s.
+            guard rawCount >= 3, rawBuffer.hasSuffix("aa") else { return false }
+            // Buffer must contain no separator characters
+            // (`+`, `:`, `.`, `*`, `'`). Separator-bearing buffers
+            // (`kar:aa`, `min+galarparaa`, …) already produce
+            // structurally meaningful Burmese surfaces via the
+            // visarga / explicit-stack / mid-buffer-tone paths;
+            // those are not bug-class shapes.
+            for ch in rawBuffer {
+                switch ch {
+                case "+", ":", ".", "*", "'":
+                    return false
+                default:
+                    continue
+                }
+            }
+            // Surface must be non-empty Burmese (contain at least
+            // one Myanmar scalar). The literal-pass-through case is
+            // already handled by the asciiRatioMet path.
+            guard !topSurface.isEmpty,
+                  topSurface.unicodeScalars.contains(where: { $0.value >= 0x1000 })
+            else { return false }
+            // Trim ALL trailing `a`s and re-parse. If the trimmed
+            // buffer is empty (the full buffer was all-`a`s), this
+            // is the leading-A-promotion path (`aa`, `aaa`, `aaaa`
+            // → `အ`), which is a TASK-016 carve-out — do NOT
+            // promote literal here. Empty trimmed buffer means
+            // every character of the input was a trailing `a`.
+            var trimmedChars = Array(rawBuffer)
+            while trimmedChars.last == "a" {
+                trimmedChars.removeLast()
+            }
+            guard !trimmedChars.isEmpty else { return false }
+            let trimmed = String(trimmedChars)
+            // Recursively re-parse the trimmed buffer via the
+            // pre-fallback path.
+            let trimmedState = updateInternal(buffer: trimmed, context: [])
+            guard let trimmedTop = trimmedState.candidates.first?.surface,
+                  !trimmedTop.isEmpty,
+                  trimmedTop.unicodeScalars.contains(where: { $0.value >= 0x1000 })
+            else { return false }
+            // Restrict to buffer-leading vowel-rule shapes: the
+            // trimmed buffer's rank-0 surface must START with an
+            // independent-vowel scalar (U+1021..U+102A). This
+            // captures the cases where the trimmed buffer is a
+            // pure vowel-rule (`i`, `u`, `e`, `o`, `ar`, `in`,
+            // `out`, `aung`, `aing`, `ote`, …) without an explicit
+            // consonant onset, and is what makes the shape bug-
+            // class — the TASK-016 / Class B paths cannot
+            // re-render the trailing `a`s as a literal `အ` because
+            // there is no consonant ancestor in the parser chain.
+            // Consonant-anchored buffers (`kaa → ကအ`,
+            // `khoutaa → ခေါက်အ`) start with U+1000..U+1020 and
+            // already have their trailing `a`s rendered via
+            // TASK-016, so the strict acceptance criterion (rank-0
+            // scalar count differs from no-trailing-`a` baseline)
+            // is met without any literal-fallback help.
+            guard let firstScalar = trimmedTop.unicodeScalars.first,
+                  (0x1021...0x102A).contains(firstScalar.value)
+            else { return false }
+            // Bug-class signal: trimmed and full surfaces have
+            // the SAME scalar count — the trailing `a`s emitted
+            // nothing visible.
+            return trimmedTop.unicodeScalars.count
+                == topSurface.unicodeScalars.count
+        }()
+
         let placeAtRankZero = asciiRatioMet
             || class_A_violation
             || class_B_collapse
             || class_C_identicalPlusChain
+            || class_D_chainedInherentATail
 
         var candidates = state.candidates
         if placeAtRankZero {
