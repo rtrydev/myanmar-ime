@@ -1,0 +1,9 @@
+2026-05-02 | iteration=1 | tasks=TASK-030,TASK-031 | tests=987/987 | assertions=3604 | commits=2d9fa8f,3ad6488,6560112 | gaps=none | status=done
+2026-05-02T18:20:51Z | iteration=2026-05-02b | tasks=TASK-032,TASK-033 | commits=abf7d8f,34fe984,5494833 | tests=999/999 | gaps=false | status=done
+2026-05-02T21:21:22Z iteration=2026-05-02c tasks=3 tests=1034 commits=4 gaps_fixed=true
+2026-05-05T00:00:00Z | iteration=2026-05-05 | tasks=TASK-030,TASK-031 | commits=d9efec7,93e0a0b | tests=1118/1118 | assertions=5242 | gaps_fixed=true | step3_usage_limit_hit=true | status=done
+2026-05-09 iteration 1/1: completed 3 tasks (TASK-032, TASK-033, TASK-034); 3 commits (ced50c2, 8545a1d, 854f81f); 1376/1376 cases pass; no gaps; archived to tasks/archive/2026-05-09/
+2026-05-09 iteration 2/2: completed 4 tasks (TASK-035, TASK-036, TASK-037, TASK-038); 5 commits (4d00d99, b4498e6, 25702f5, a782a99, 60ec4b8); 1413/1413 cases; 5897/5897 assertions; 86 python tests; gaps_fixed=true (TASK-038 LexiconLMDriftSuite parity); archived to tasks/archive/2026-05-09/; status=done
+2026-05-10 iteration 1/1: completed 2 tasks (TASK-040, TASK-041), partial 1 task (TASK-039 buffer-leading subset closed; consonant-anchored single-a carved out as TASK-042); 4 commits (72a163d, 4e67a0c, 7d5a632, 4260ca0); 1435/1435 cases; gaps_fixed=true (TASK-039 Class D buffer-leading vowel-rule subset); archived to tasks/archive/2026-05-10/; status=done
+2026-05-10T12:25:43Z iteration=1 step1=2 step2=2 step3=2/2 step4=fully_covered=2 step5=skipped step6=archived=2 tests=1447/7310 commits=566af90,714d9cc
+2026-05-10 iteration=2026-05-10c tasks=TASK-045,TASK-046,TASK-047 completed=3 invalidated=0 commits=564291c,478138c,e9cb177,41b18a9 tests=1479/1479 assertions=7415/7415 gaps_fixed=true (TASK-046 windowed N≥5 rank-0 equality via FrozenPrefixCache boundary-orphan-promotion) archived=tasks/archive/2026-05-10c/ status=done
