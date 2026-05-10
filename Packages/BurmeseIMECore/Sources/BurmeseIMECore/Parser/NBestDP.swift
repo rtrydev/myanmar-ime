@@ -366,6 +366,42 @@ extension SyllableParser {
 
                     var legality = vowelOnlyLegality[Int(vowelEntry.id)]
 
+                    // TASK-052: when the buffer is the
+                    // `<bare-vowel-LHS>+<bare-vowel-RHS>` shape — i.e.
+                    // the soft-`+` context is `.bareVowel` AND the
+                    // post-`+` position has only bare-vowel-rule
+                    // matches (no consonant onset) — the virama-`+`
+                    // interpretation is structurally invalid: virama
+                    // (U+1039) stacks onto a consonant lower, not
+                    // onto a dep-vowel cluster. Zero out legality so
+                    // the soft-`+` sibling wins the DP-time
+                    // bestLegal selection. Without this, both arcs
+                    // tie in `isBetterDP` and the first-inserted
+                    // (virama-`+`) state wins arbitrarily, producing
+                    // a surface with a virama-after-dep-vowel-cluster
+                    // that `scanOutputLegality` rejects. Restricted
+                    // to bare-vowel-LHS so `<C>+<bare-vowel-RHS>`
+                    // (which already produces the two-syllable form
+                    // via the existing TASK-047 path and the engine's
+                    // implicit-stack inference) is unaffected.
+                    if vowelEntry.id == viramaVowelId {
+                        let onsetsAtV = onsetMatchesByStart[vowelEnd]
+                        let vowelsAtV = vowelMatchesByStart[vowelEnd]
+                        if onsetsAtV.isEmpty && !vowelsAtV.isEmpty {
+                            // Only fire when the LHS context is bare-
+                            // vowel (no consonant onset on the prior
+                            // chain). For `<C>+<bare-vowel>` (e.g.
+                            // `ka+aing`) the existing TASK-047 path
+                            // already wins; demoting virama-`+` here
+                            // would conflict with the inferred-stack
+                            // parses the engine adds downstream.
+                            let sbCtx = softBoundaryContext(previous: previous, arena: arena)
+                            if case .bareVowel = sbCtx {
+                                legality = 0
+                            }
+                        }
+                    }
+
                     // Kinzi rule: U+103A (asat) immediately before U+1039
                     // (virama) is legal only when the character two positions
                     // back is U+1004 (nga). Anything else is a stacking

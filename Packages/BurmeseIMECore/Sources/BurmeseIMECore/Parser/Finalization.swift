@@ -922,24 +922,44 @@ extension SyllableParser {
                 if prevWasDiphthongShape && firstScalarIsDepVowel && !isInherentA {
                     output.unicodeScalars.append(Unicode.Scalar(0x1021)!)
                 }
-                // TASK-047: a user-typed `+` between a syllable and a
-                // following bare vowel-rule (`aung`, `aing`, `i`, …)
-                // must materialise as a hard syllable boundary, not a
-                // soft separator that silently lets the new rule
-                // consume the previous syllable's onset / inherent
-                // vowel as its own onset. The parser's soft-`+` arc
-                // emits empty Myanmar surface, and the next bare
-                // vowel-rule's dep-vowel cluster lands directly on
-                // the previous consonant base — turning user input
-                // `ka+aung` into a single-syllable `ကောင်` instead of
-                // the two-syllable `ကအောင်` the user typed for.
+                // TASK-047 / TASK-052: a user-typed `+` between a
+                // syllable and a following bare vowel-rule (`aung`,
+                // `aing`, `i`, `e`, `a`, …) must materialise as a hard
+                // syllable boundary, not a soft separator that
+                // silently lets the new rule consume the previous
+                // syllable's onset / inherent vowel as its own onset.
+                // The parser's soft-`+` arc emits empty Myanmar
+                // surface, and the next bare vowel-rule's dep-vowel
+                // cluster lands directly on the previous consonant
+                // base — turning user input `ka+aung` into a
+                // single-syllable `ကောင်` instead of the two-syllable
+                // `ကအောင်` the user typed for.
                 //
                 // Inject U+1021 when the immediately-preceding arc
                 // was the soft-`+` form (canonical roman `+`, empty
-                // Myanmar emission) AND this `vowelOnly` arc starts
-                // with a dep-vowel scalar. The buffer-head case is
-                // governed by the existing leading-A promotion above
-                // and is not affected by this rule.
+                // Myanmar emission) AND this `vowelOnly` arc emits a
+                // shape that cannot stand on its own as a fresh
+                // syllable. Three cases:
+                //   (a) `firstScalarIsDepVowel`: dep-vowel cluster
+                //       (`i` → `102E`, `aung` → `1031 102C 1004 103A`,
+                //       …). The cluster must sit on a fresh `1021`
+                //       anchor.
+                //   (b) TASK-052 `firstScalarIsConsonantBase`: the rule
+                //       opens with a consonant base in U+1000..U+1021
+                //       (`e` → `101A 103A`, `i2` → `100A 103A`, …).
+                //       Without an injected `1021` the user's RHS
+                //       reads as a coda attached to the previous
+                //       syllable (`a+e` → just `အယ်` instead of
+                //       `အအယ်`).
+                //   (c) TASK-052 `isInherentA` after soft-`+` when
+                //       output is non-empty: the inherent-`a` rule's
+                //       empty emission would silently drop the user's
+                //       RHS bare vowel (`e+a` → just `အယ်` instead of
+                //       `အယ်အ`). Emit a stand-alone `1021` for the
+                //       bare-`a` syllable boundary.
+                // The buffer-head case is governed by the existing
+                // leading-A promotion above and is not affected by
+                // these rules.
                 let prevWasSoftPlus: Bool = {
                     guard refIndex >= 1 else { return false }
                     if case let .vowelOnly(prevVowelId) = refs[refIndex - 1] {
@@ -947,7 +967,29 @@ extension SyllableParser {
                     }
                     return false
                 }()
+                let firstScalarIsConsonantBaseRHS = entry.myanmar
+                    .unicodeScalars.first.map {
+                        $0.value >= 0x1000 && $0.value <= 0x1021
+                    } ?? false
                 if prevWasSoftPlus && firstScalarIsDepVowel && !isInherentA {
+                    output.unicodeScalars.append(Unicode.Scalar(0x1021)!)
+                }
+                // TASK-052 case (b): the new vowelOnly arc opens with
+                // a consonant base scalar (`e` → `101A 103A`, `i2` →
+                // `100A 103A`). Without an injected anchor the
+                // user's RHS reads as a coda attached to the
+                // previous syllable (`a+e` → `အယ်` instead of
+                // `အအယ်`).
+                if prevWasSoftPlus && firstScalarIsConsonantBaseRHS && !isInherentA
+                    && !output.isEmpty {
+                    output.unicodeScalars.append(Unicode.Scalar(0x1021)!)
+                }
+                // TASK-052 case (c): the new vowelOnly arc is the
+                // inherent-`a` rule (empty emission). Emit a
+                // stand-alone `1021` so the user's `+a` RHS
+                // syllable is visible (`e+a` → `အယ်အ` instead of
+                // `အယ်`).
+                if prevWasSoftPlus && isInherentA && !output.isEmpty {
                     output.unicodeScalars.append(Unicode.Scalar(0x1021)!)
                 }
                 output.append(entry.myanmar)
