@@ -192,7 +192,7 @@ legal stack variants, but it should not displace the user's explicit
 kinzi/stack intent with an unrelated segmentation. TASK-031 made
 explicit `+` as strong as inferred stack markers for rank-0 promotion.
 
-### 7. Variants
+### 7. Variants and Panel Reachability
 
 Homophonous variants should surface in the candidate panel for the
 digit-less reading. They do not have to be rank 0 or on the first page.
@@ -201,6 +201,18 @@ test was paging-blind.
 
 User history records the selected surface under the alias-normalized
 reading and may promote that surface above the LM/lexicon order later.
+
+**General reachability rule.** The user's intended conversion must
+*appear in the candidate panel at all*, top 3 strongly preferred. A
+candidate that is reachable below rank 0 is a soft issue, not a
+critical bug, and should not be "fixed" by changes that destabilize
+ranking elsewhere. Some cases are structurally undecidable from buffer
+text alone — e.g. a committed `<C><V>a` shape (silent-absorption)
+versus an in-flight typing prefix of a corpus word (`apha` mid-stream
+of `aphaya`) — and rank-0 promotion would require a commit-vs-preview
+signal the engine does not have. In such cases, panel presence
+satisfies the rule; do not trade ranking regressions for rank-0
+purity. See archived TASK-039 / TASK-042 for the worked example.
 
 ### 8. Windowing and Performance
 
