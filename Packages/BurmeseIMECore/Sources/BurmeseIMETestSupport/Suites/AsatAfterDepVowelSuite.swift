@@ -92,11 +92,11 @@ public enum AsatAfterDepVowelSuite {
     ]
 
     /// Regression-guard: legal asat-bearing surfaces that must continue
-    /// to surface unchanged at rank 0.
+    /// to surface unchanged at rank 0. NOTE: TASK-049 removed `kya*`
+    /// and `kw*` from this list — `<C><medial>103A` is malformed and
+    /// is now asserted in `MedialPlusAsatRejectionSuite`.
     private static let regressionGuards: [(buffer: String, expectedTop: String)] = [
         ("k*",    "\u{1000}\u{103A}"),                                   // က်
-        ("kya*",  "\u{1000}\u{103B}\u{103A}"),                           // ကျ်
-        ("kw*",   "\u{1000}\u{103D}\u{103A}"),                           // ကွ်
         ("kaw*",  "\u{1000}\u{1031}\u{102C}\u{103A}"),                   // ကော် (aw cluster)
         ("kar:",  "\u{1000}\u{102C}\u{1038}"),                           // ကား (tone, no asat)
         ("kan*",  "\u{1000}\u{1014}\u{103A}"),                           // ကန်
@@ -211,13 +211,23 @@ public enum AsatAfterDepVowelSuite {
         },
 
         // Counter-examples — legal asat-bearing shapes must REMAIN legal.
+        //
+        // NOTE: TASK-049 reclassified `<C><medial>103A` (`kya*` →
+        // `1000 103B 103A`, `kw*` → `1000 103D 103A`) from "legal"
+        // to "malformed". A medial belongs to the onset cluster;
+        // closing it with asat produces a syllable with no inherent
+        // vowel and no coda consonant. The legitimate medial-bearing
+        // closure adds a coda consonant before the asat (`kyan*` →
+        // `1000 103B 1014 103A`). The medial-only cases were removed
+        // from this list and are now asserted as REJECTED in
+        // `MedialPlusAsatRejectionSuite`.
         TestCase("scanOutputLegality_acceptsLegalAsatShapes") { ctx in
             let cases: [(label: String, scalars: [UInt32])] = [
                 // <C> 103A — pure stop coda
                 ("k*",   [0x1000, 0x103A]),
-                // <C> <medial> 103A
-                ("kya*", [0x1000, 0x103B, 0x103A]),
-                ("kw*",  [0x1000, 0x103D, 0x103A]),
+                // <C> <medial> <coda-C> 103A — medial + coda + asat
+                ("kyan*", [0x1000, 0x103B, 0x1014, 0x103A]),
+                ("kwan*", [0x1000, 0x103D, 0x1014, 0x103A]),
                 // <C> 1031 102C 103A — aw cluster
                 ("kaw*", [0x1000, 0x1031, 0x102C, 0x103A]),
                 // <C> 1037 103A — TASK-048 creaky carve-out

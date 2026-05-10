@@ -145,5 +145,7 @@ public enum BurmeseTestSuites {
         PlusDisjointKinziInferenceSuite.suite,
         BareVowelRuleChainSuite.suite,
         PlusBeforeVowelRuleSuite.suite,
+        AnusvaraPlusAsatRejectionSuite.suite,
+        MedialPlusAsatRejectionSuite.suite,
     ]
 }

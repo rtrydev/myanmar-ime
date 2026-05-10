@@ -448,6 +448,17 @@ extension SyllableParser {
                 // window check: peel the optional aw-cluster, then
                 // continue through medials / U+1036 to the consonant
                 // base.
+                //
+                // TASK-048 / TASK-049: medials (`103B..103E`) and
+                // anusvara (`1036`) are skippable in this walk ONLY
+                // if a vowel-bearing cluster (the aw-cluster) was
+                // peeled first. A bare `<C><medial>103A` or
+                // `<C><1036>103A` adjacency drops the inherent vowel
+                // without providing a coda consonant — a
+                // structurally meaningless syllable. Track whether
+                // the aw-cluster peel ran, and gate the medial /
+                // anusvara skip on that flag.
+                var sawVowelCluster = false
                 if j >= 0 {
                     let w0 = indices[j].value
                     if w0 >= 0x102B && w0 <= 0x1032 {
@@ -457,6 +468,7 @@ extension SyllableParser {
                             // Walked across the aw-cluster; resume the
                             // medial/anusvara walk from before `1031`.
                             j -= 2
+                            sawVowelCluster = true
                         } else {
                             // Any other dep-vowel before the asat —
                             // including short/long i (102D/E),
@@ -507,9 +519,38 @@ extension SyllableParser {
                     if w >= 0x102B && w <= 0x1032 {
                         return false
                     }
-                    let isSkippable = w == 0x1036
+                    // TASK-048: anusvara `1036` is a final nasal
+                    // vowel-mark and cannot be closed with asat. The
+                    // adjacency `1036 103A` has no orthographic
+                    // interpretation. Reject when no vowel cluster
+                    // (aw-cluster) was peeled first — the legitimate
+                    // shape `<C> 1036 103A` does not exist.
+                    //
+                    // TASK-049: medials (`103B..103E`) belong to the
+                    // onset cluster. A medial directly followed by
+                    // asat (no intervening coda consonant) drops the
+                    // inherent vowel without providing a closure
+                    // consonant — a structurally meaningless
+                    // syllable. The legitimate medial-bearing closure
+                    // shape either places a coda consonant between
+                    // the medial and the asat (`kyan*` →
+                    // `1000 103B 1014 103A`; j starts on the coda
+                    // base, never enters this loop) or carries the
+                    // aw-cluster (`kyaw*` →
+                    // `1000 103B 1031 102C 103A`; the aw-cluster peel
+                    // sets `sawVowelCluster = true` so the medial
+                    // remains skippable here). Bare `<C><medial>103A`
+                    // is rejected.
+                    let isSkippable = (w == 0x1036)
                         || (w >= 0x103B && w <= 0x103E)
-                    if isSkippable { j -= 1 } else { break }
+                    if isSkippable {
+                        if !sawVowelCluster {
+                            return false
+                        }
+                        j -= 1
+                        continue
+                    }
+                    break
                 }
                 guard j >= 0 else { return false }
                 if !isConsonantBase(indices[j].value) { return false }

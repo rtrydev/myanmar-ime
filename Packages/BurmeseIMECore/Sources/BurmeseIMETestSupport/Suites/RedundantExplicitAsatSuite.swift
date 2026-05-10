@@ -73,10 +73,17 @@ public enum RedundantExplicitAsatSuite {
     /// the tightened legality scan, so the legitimate
     /// `<C><medial><consonant><103A>` sibling (`ကျရ်` =
     /// `1000 103B 101B 103A`) wins at rank 0.
+    ///
+    /// `kya*kar` updated for TASK-049: the malformed
+    /// `<C><medial><103A>` shape (`ကျ်`) — medial directly followed
+    /// by asat with no intervening coda consonant — is rejected by
+    /// the tightened legality scan, so the parser falls back to a
+    /// two-syllable parse `ကျ + ကာ` (medial + inherent + ka + aa)
+    /// where the explicit `*` is dropped as redundant.
     private static let counterExamples: [(buffer: String, expected: String)] = [
         ("ka*",     "\u{1000}\u{103A}"),                                                    // က်
         ("kyar*",   "\u{1000}\u{103B}\u{101B}\u{103A}"),                                    // ကျရ်
-        ("kya*kar", "\u{1000}\u{103B}\u{103A}\u{1000}\u{102C}"),                            // ကျ်ကာ
+        ("kya*kar", "\u{1000}\u{103B}\u{1000}\u{102C}"),                                    // ကျကာ
         ("ka***",   "\u{1000}\u{103A}"),                                                    // က်
     ]
 
