@@ -1702,6 +1702,30 @@ public final class BurmeseEngine: @unchecked Sendable {
                     combinedPreserveSurfaces.insert(branch.output + tailSurface)
                 }
             }
+            // TASK-044: when a frozen-prefix branch carries a kinzi
+            // sequence (`1004 103A 1039`), the kinzi syllable lives
+            // entirely INSIDE the prefix and never reaches the tail-
+            // side `inferImplicitStackMarkers` — so the tail-derived
+            // `strictInferredStackOutputs` set is empty for the
+            // prefix's kinzi, and the windowed-aware expansion above
+            // doesn't add anything for it. Without an explicit
+            // preserve entry, the LM-margin prune at
+            // `pruneGrammarByLmMargin` drops the kinzi-bearing
+            // `<branch.output><tail>` combo as soon as a stronger-LM
+            // lattice / no-kinzi sibling appears, leaving the
+            // candidate panel without ANY kinzi-rendered surface.
+            // Preserve every grammar candidate whose surface starts
+            // with a kinzi-bearing prefix-branch output. This is a
+            // narrow rule — it only fires when the engine has
+            // already chosen a kinzi-rendering branch, so it never
+            // resurrects unrelated low-LM candidates.
+            for branch in effectivePrefixBranches
+            where Self.surfaceContainsKinzi(branch.output) {
+                for candidate in grammarCandidates
+                where candidate.candidate.surface.hasPrefix(branch.output) {
+                    combinedPreserveSurfaces.insert(candidate.candidate.surface)
+                }
+            }
         }
         if appliesYapinPromotion,
            let yapinSurface = Self.yapinPromotionPreservedSurface(
