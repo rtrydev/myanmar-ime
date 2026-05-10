@@ -149,5 +149,6 @@ public enum BurmeseTestSuites {
         MedialPlusAsatRejectionSuite.suite,
         DigitDepVowelAnchorSuite.suite,
         BareVowelPlusBareVowelSuite.suite,
+        ExplicitKinziTonePromotionSuite.suite,
     ]
 }

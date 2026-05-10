@@ -1341,11 +1341,30 @@ public final class BurmeseEngine: @unchecked Sendable {
             // it. The trailing-`a` allowance covers the parser's
             // habit of appending an inherent vowel after a bare
             // trailing consonant (`yan+gun` → reading `yan+guna`).
+            //
+            // TASK-053: when the user typed a trailing tone marker
+            // (`.`/`:`) or digit, the right-shrink probe peels it
+            // into the literal tail and `effectiveParseInput`
+            // doesn't carry it; the parser's reading on the
+            // shrunk input also doesn't carry it. To still match
+            // these tone-suffixed kinzi/asat-closure parses, try
+            // both the verbatim `displayBuffer` and a
+            // tone-/digit-stripped sibling. The original display
+            // buffer covers parses whose reading already carries
+            // the tone (`than+gar.` → reading `thana+gar.`); the
+            // stripped sibling covers parses on the right-shrunk
+            // tail (`min+ga.` → parser saw `min+ga`, reading
+            // `min+ga`).
+            let userLiteralStripped = Self.stripTrailingToneAndDigitMarkers(displayBuffer)
             for parse in grammarParses
             where Self.readingMatchesUserLiteralAcrossInherentVowels(
-                parseReading: parse.reading,
-                userInput: displayBuffer
-            ) {
+                    parseReading: parse.reading,
+                    userInput: displayBuffer
+                ) || (userLiteralStripped != displayBuffer
+                    && Self.readingMatchesUserLiteralAcrossInherentVowels(
+                        parseReading: parse.reading,
+                        userInput: userLiteralStripped
+                    )) {
                 strictInferredStackOutputs.insert(parse.output)
                 strictInferredStackOutputs.insert(Self.correctAaShape(parse.output))
             }
@@ -3595,6 +3614,38 @@ public final class BurmeseEngine: @unchecked Sendable {
     ///   tiebreaker in `bestStrictInferredStackIndex` will lift the
     ///   true kinzi parse above this asat-only sibling when both
     ///   are present in the candidate set.
+    /// TASK-053: peel a trailing tone-marker (`.`/`:`) and/or digit
+    /// run from `userInput`. The right-shrink probe in
+    /// `parseLongestAcceptablePrefix` typically strips these into
+    /// the literal tail before the parser sees the buffer, so the
+    /// parser's reading does not carry them. The
+    /// `readingMatchesUserLiteralAcrossInherentVowels` comparator
+    /// must compare against the user's pre-tail keystrokes to
+    /// recognise that the parse respects the user's explicit `+`
+    /// signal.
+    ///
+    /// The strip preserves the buffer when the trailing tone is
+    /// already a vowel-modifier (`u.`, `aw:`) on a composable
+    /// suffix — those are picked up by the parser as tone arcs and
+    /// land inside the reading. Only chains of `.`/`:`/digits at
+    /// the very end are peeled.
+    @_spi(Testing) public static func stripTrailingToneAndDigitMarkers(_ userInput: String) -> String {
+        var chars = Array(userInput)
+        // Peel trailing tone / digit chars one by one. Stop on the
+        // first non-tone / non-digit char.
+        while let last = chars.last {
+            let v = last.unicodeScalars.first?.value ?? 0
+            let isAsciiDigit = v >= 0x30 && v <= 0x39
+            let isToneMarker = last == "." || last == ":"
+            if isAsciiDigit || isToneMarker {
+                chars.removeLast()
+            } else {
+                break
+            }
+        }
+        return String(chars)
+    }
+
     @_spi(Testing) public static func readingMatchesUserLiteralAcrossInherentVowels(
         parseReading: String,
         userInput: String
