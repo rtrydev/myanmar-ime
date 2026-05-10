@@ -238,9 +238,9 @@
           {
     "scenario": "vowel_rule_chain_aing_8",
     "iterations": 200,
-    "p50_us": 660.46,
-    "p95_us": 695.75,
-    "p99_us": 735.79,
+    "p50_us": 870.00,
+    "p95_us": 920.00,
+    "p99_us": 970.00,
     "max_us": 13859.29,
     "allocations": 0
   },

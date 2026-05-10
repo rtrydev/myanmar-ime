@@ -447,7 +447,92 @@ extension BurmeseEngine {
             // local legality drive the decision (i.e. accept).
             return true
         }
-        return prefixParse.output + tailParse.output == fullParse.output
+        if prefixParse.output + tailParse.output == fullParse.output {
+            return true
+        }
+        // TASK-046 gap fix: bare-onset vowel rules (`aing`, `aung`,
+        // `ai`, `aw`, etc.) parsed with `isFullBuffer: false` emit a
+        // leading U+200C ZWNJ — the parser's standard placeholder
+        // for an onsetless vowel rule that needs an independent-vowel
+        // anchor injected at finalize time. When such a rule begins
+        // the tail slice and the prefix slice is non-empty, the
+        // concatenated `prefixOutput + tailOutput` carries a
+        // mid-surface ZWNJ at the boundary where the full-buffer
+        // parse emits U+1021 (the parser injects the anchor between
+        // adjacent bare-diphthong arcs at full-buffer scope per
+        // TASK-046). The engine's downstream
+        // `promoteOrphanZwnjToImplicitA` rewrite normalizes that
+        // mid-surface ZWNJ to U+1021, producing exactly the
+        // full-buffer parse. Without this carve-out, every
+        // syllable-aligned split through a chain of repeated
+        // bare-onset diphthong rules (`aung × N` for N ≥ 7,
+        // `aing × N` for N ≥ 7) is rejected as "unstable", forcing
+        // `findSyllableSafeSplit` to fall through to the unsafe
+        // target — which lands mid-rule and produces the
+        // trailing-collapse `အူငေါင်` / `ငိန်ဂိုင်` shapes the
+        // task documents.
+        //
+        // Cheap precondition: the boundary-orphan-promotion case
+        // can only apply when the tail slice's parse begins with
+        // U+200C (the orphan-vowel-rule placeholder). Skip the
+        // scalar-walk normalization unless that signal is present —
+        // every non-bare-vowel windowed buffer pays only the cost
+        // of one scalar inspection.
+        if let firstTail = tailParse.output.unicodeScalars.first,
+           firstTail.value == 0x200C,
+           Self.mergedDiffersOnlyByBoundaryOrphanPromotion(
+               prefix: prefixParse.output,
+               tail: tailParse.output,
+               full: fullParse.output
+           ) {
+            return true
+        }
+        return false
+    }
+
+    /// True when `prefix + tail` and `full` differ ONLY by `tail`'s
+    /// leading `U+200C` ZWNJ standing where `full` has `U+1021`.
+    /// The engine's downstream `promoteOrphanZwnjToImplicitA`
+    /// post-process rewrites that single mid-surface ZWNJ to
+    /// `1021`, so the merge is stable once that promotion fires.
+    ///
+    /// Walks the three strings via `unicodeScalars.makeIterator`
+    /// without materialising the concatenated `merged` string or
+    /// allocating scalar arrays — `splitProducesStableMerge` runs
+    /// once per walk-back iteration and per forward-sweep iteration
+    /// in `findSyllableSafeSplit`, and the `vowel_rule_chain_*`
+    /// benchmarks pick up any per-iteration allocation.
+    private static func mergedDiffersOnlyByBoundaryOrphanPromotion(
+        prefix: String,
+        tail: String,
+        full: String
+    ) -> Bool {
+        let pScalars = prefix.unicodeScalars
+        let tScalars = tail.unicodeScalars
+        let fScalars = full.unicodeScalars
+        // Total merged scalar count must equal `full`'s scalar count
+        // for the divergence to be exactly one boundary-position
+        // scalar swap.
+        if pScalars.count + tScalars.count != fScalars.count { return false }
+        guard !pScalars.isEmpty, !tScalars.isEmpty else { return false }
+        // Prefix must match `full`'s leading scalars exactly.
+        var pIter = pScalars.makeIterator()
+        var fIter = fScalars.makeIterator()
+        while let p = pIter.next() {
+            guard let f = fIter.next(), p == f else { return false }
+        }
+        // Boundary: tail's first scalar must be `200C`, `full`'s
+        // matching position must be `1021`.
+        var tIter = tScalars.makeIterator()
+        guard let tBoundary = tIter.next(), tBoundary.value == 0x200C,
+              let fBoundary = fIter.next(), fBoundary.value == 0x1021 else {
+            return false
+        }
+        // Remainder of tail must match `full`'s remaining scalars.
+        while let t = tIter.next() {
+            guard let f = fIter.next(), t == f else { return false }
+        }
+        return fIter.next() == nil
     }
 
     /// Avoid freezing a connector-like `a` into the prefix when the next

@@ -52,21 +52,33 @@ public enum BareVowelRuleChainSuite {
         return result
     }
 
-    /// Bare-engine assertion: for chained bare-vowel-rule inputs that
-    /// fit in a single window pass (`compositionWindowSize = 18`,
-    /// i.e. N ≤ 4 for `aing` / `aung` rules at 4 chars apiece), the
-    /// rank-0 surface is the all-anchored N-fold repetition of the
-    /// rule's independent-vowel form. Buffers past the windowing
-    /// threshold (N ≥ 5) are tested for panel-reachability of the
-    /// all-anchored leading two-syllable prefix — a weakened check
-    /// that proves the anchor injection survives both the parser
-    /// materialise step and the frozen-prefix render. The
-    /// frozen-prefix boundary cuts the chain mid-buffer and the
-    /// tail-side parser re-segments the trailing chars in ways that
-    /// can demote the strict-equality all-anchored sibling further
-    /// down the panel; the leading-prefix check is the structural
-    /// invariant that the fix must restore. CLAUDE.md §7 general
-    /// reachability rule applies.
+    /// Bare-engine assertion: for chained 4-char bare-onset diphthong
+    /// vowel rules (`aing × N`, `aung × N`), the rank-0 surface is
+    /// the all-anchored N-fold repetition of the rule's independent-
+    /// vowel form for every N ∈ {2..8}. Both in-window cases (N ≤ 4
+    /// at 4 chars apiece, fits in `compositionWindowSize = 18`) and
+    /// windowed cases (N ≥ 5) are checked with strict equality. The
+    /// windowed N ≥ 7 path was originally a panel-reachability
+    /// fallback because `findSyllableSafeSplit` rejected
+    /// syllable-aligned splits at multiples of 4 — the parser's
+    /// `splitProducesStableMerge` check compared the prefix-slice
+    /// parse + tail-slice parse against the full-window parse, and
+    /// the tail slice's leading U+200C (orphan-vowel-rule placeholder)
+    /// failed to match the full parse's mid-buffer U+1021 anchor at
+    /// the boundary. The TASK-046 gap fix relaxes that comparison to
+    /// account for the engine's downstream
+    /// `promoteOrphanZwnjToImplicitA` post-process, which normalizes
+    /// the merged surface's interior ZWNJ to U+1021. With the relax,
+    /// the split lands at a syllable boundary (multiple of 4) and the
+    /// rendered surface matches the all-anchored N-fold form.
+    ///
+    /// Each case also asserts the orthographic invariant that the
+    /// surface contains exactly N occurrences of U+1021 — the
+    /// "exactly one independent-vowel anchor per syllable"
+    /// invariant from the task's acceptance criteria, satisfied
+    /// implicitly by strict equality but called out explicitly so
+    /// the structural test signal survives any future surface-format
+    /// drift.
     private static func bareEngineCases(
         rule: String,
         single: [UInt32]
@@ -77,34 +89,17 @@ public enum BareVowelRuleChainSuite {
                 let buffer = String(repeating: rule, count: n)
                 let state = engine.update(buffer: buffer, context: [])
                 let expected = expectedSurface(single: single, count: n)
-                let inWindow = buffer.count <= 18
-                if inWindow {
-                    ctx.assertEqual(
-                        state.candidates.first?.surface ?? "",
-                        expected,
-                        "\(rule)x\(n)_bareEngine_topIsAllAnchored"
-                    )
-                } else {
-                    // Windowed weakened check: at least one candidate
-                    // surface starts with two consecutive independent-
-                    // vowel-anchored repetitions of the rule. This
-                    // guards against the original TASK-046 collapse
-                    // where the frozen-prefix-side merged its second
-                    // syllable into an orphan dep-vowel cluster
-                    // (`အောင်ေါင်`), without requiring the windowed
-                    // tail to perfectly align with the all-anchored
-                    // form (which the frozen-prefix split-position
-                    // chooser does not always honour).
-                    let expectedPrefix = expectedSurface(single: single, count: 2)
-                    let panelHasAllAnchoredPrefix = state.candidates.contains {
-                        $0.surface.hasPrefix(expectedPrefix)
-                    }
-                    ctx.assertTrue(
-                        panelHasAllAnchoredPrefix,
-                        "\(rule)x\(n)_bareEngine_panelHasAllAnchoredPrefix",
-                        detail: "expectedPrefix='\(expectedPrefix)' top10=\(state.candidates.prefix(10).map(\.surface))"
-                    )
-                }
+                let topSurface = state.candidates.first?.surface ?? ""
+                ctx.assertEqual(
+                    topSurface,
+                    expected,
+                    "\(rule)x\(n)_bareEngine_topIsAllAnchored"
+                )
+                ctx.assertEqual(
+                    countAnchor1021(topSurface),
+                    n,
+                    "\(rule)x\(n)_bareEngine_topHasExactlyN1021Anchors"
+                )
             }
         }
     }
@@ -112,11 +107,18 @@ public enum BareVowelRuleChainSuite {
     /// Bare-engine reachability for the `ai` rule. The 2-char `ai`
     /// rule is structurally distinct from the 4-char `aing` / `aung`
     /// — chained `aiai...` lacks a syllable-closing letter past the
-    /// 2-char rule end, and the parser historically dropped to the
-    /// literal-fallback surface for N ≥ 4 (`ai × 4` panel-empty for
-    /// Myanmar). Assert at minimum panel-reachability of the
-    /// all-anchored sibling for N ∈ {2..8}; rank 0 is preferred but
-    /// not required (CLAUDE.md §7 general reachability rule).
+    /// 2-char rule end, and the parser drops to a literal-fallback
+    /// rank-0 surface for N ≥ 4 (the literal beats the all-anchored
+    /// Burmese sibling at the engine's literal-vs-Burmese tiebreak
+    /// because the all-anchored output is structurally a chain of
+    /// independent-vowel anchors with no consonant context — which
+    /// the engine's rank-0 promoter treats as "mostly-unconverted
+    /// ASCII" cousin and demotes against the literal). The
+    /// all-anchored sibling is reachable in the panel (top 3) per
+    /// CLAUDE.md §7 general reachability rule — promoting rank 0
+    /// would require sanitizer/promoter changes far outside this
+    /// task's scope and would risk destabilizing the literal-fallback
+    /// invariants that the IME depends on for non-Burmese input.
     private static func aiReachabilityCases() -> [TestCase] {
         return (2...8).map { n in
             TestCase("ai_x\(n)_bareEngineAllAnchoredReachable") { ctx in
@@ -128,6 +130,28 @@ public enum BareVowelRuleChainSuite {
                     state.candidates.contains(where: { $0.surface == expected }),
                     "aix\(n)_bareEngine_panelContainsAllAnchored",
                     detail: "expected='\(expected)' top10=\(state.candidates.prefix(10).map(\.surface))"
+                )
+                // CLAUDE.md §7 "top 3 strongly preferred": assert the
+                // all-anchored sibling appears within the first three
+                // panel slots so the user reaches it with at most two
+                // arrow-key presses.
+                let allAnchoredIndex = state.candidates
+                    .prefix(3)
+                    .firstIndex(where: { $0.surface == expected })
+                ctx.assertTrue(
+                    allAnchoredIndex != nil,
+                    "aix\(n)_bareEngine_top3ContainsAllAnchored",
+                    detail: "expected='\(expected)' top3=\(state.candidates.prefix(3).map(\.surface))"
+                )
+                // Structural invariant from the AC: when present, the
+                // all-anchored surface contains exactly N occurrences
+                // of U+1021. Failing this would mean the test's
+                // expected scalars drifted out of sync with the
+                // production rendering.
+                ctx.assertEqual(
+                    countAnchor1021(expected),
+                    n,
+                    "aix\(n)_expectedHasExactlyN1021Anchors"
                 )
             }
         }
