@@ -619,6 +619,97 @@ extension BurmeseEngine {
         return false
     }
 
+    /// TASK-051: True when `surface` contains a `<digit>` (ASCII
+    /// U+0030..U+0039 or Myanmar U+1040..U+1049) immediately followed
+    /// by an attachable mark that semantically requires a consonant
+    /// base on its left:
+    /// - dep-vowels and e-kar (U+102B..U+1032),
+    /// - anusvara (U+1036),
+    /// - asat (U+103A) — same shape as
+    ///   `surfaceContainsDigitOrphanAsat`,
+    /// - medials (U+103B..U+103E).
+    ///
+    /// Per Unicode TUS storage order each of these must immediately
+    /// follow a consonant base (with the optional kinzi triple or
+    /// virama-stacked upper). Digits are never a consonant base, so
+    /// every adjacency in this set is structurally illegal —
+    /// CLAUDE.md §3 codifies this as "a digit never anchors asat or
+    /// dependent marks".
+    ///
+    /// This predicate is the broader sibling of
+    /// `surfaceContainsDigitOrphanAsat`. It is used both as a
+    /// post-splice repair gate (to inject a U+1021 anchor on the
+    /// right of the digit) and as a sanitizer guard (to drop any
+    /// surviving violators when a clean sibling exists). The narrower
+    /// `surfaceContainsDigitOrphanAsat` is preserved unchanged for
+    /// the existing `<digit>1021 103A` indirect-anchor shape that
+    /// only fires for asat.
+    @_spi(Testing) public static func surfaceContainsDigitOrphanAttachableMark(_ surface: String) -> Bool {
+        let scalars = Array(surface.unicodeScalars).map(\.value)
+        guard scalars.count >= 2 else { return false }
+        @inline(__always) func isDigit(_ v: UInt32) -> Bool {
+            (v >= 0x30 && v <= 0x39) || (v >= 0x1040 && v <= 0x1049)
+        }
+        @inline(__always) func isAttachableMark(_ v: UInt32) -> Bool {
+            (v >= 0x102B && v <= 0x1032)
+                || v == 0x1036
+                || v == 0x103A
+                || (v >= 0x103B && v <= 0x103E)
+        }
+        for i in 1..<scalars.count {
+            guard isDigit(scalars[i - 1]) else { continue }
+            if isAttachableMark(scalars[i]) { return true }
+        }
+        return false
+    }
+
+    /// TASK-051: repair a digit-orphan-mark adjacency by injecting a
+    /// `U+1021` independent-vowel anchor between the digit and the
+    /// orphan'd attachable mark. Mirrors the per-cluster anchor
+    /// injection that `promoteOrphanInternalMarks` already performs
+    /// for parse-internal orphans, but operates on a finished
+    /// candidate surface (post-digit-splice) where the parse-internal
+    /// fix-up has already run.
+    ///
+    /// Each contiguous run of attachable marks immediately after a
+    /// digit gets a single `U+1021` anchor inserted at its start —
+    /// the same shape the engine already produces for `kar2aung` /
+    /// `tar2aing`. Returns `nil` when no repair is needed (no
+    /// digit-orphan-mark adjacency in the surface).
+    internal static func injectAnchorAfterDigitForOrphanMarks(_ surface: String) -> String? {
+        let scalars = Array(surface.unicodeScalars)
+        guard scalars.count >= 2 else { return nil }
+        @inline(__always) func isDigit(_ v: UInt32) -> Bool {
+            (v >= 0x30 && v <= 0x39) || (v >= 0x1040 && v <= 0x1049)
+        }
+        @inline(__always) func isAttachableMark(_ v: UInt32) -> Bool {
+            (v >= 0x102B && v <= 0x1032)
+                || v == 0x1036
+                || v == 0x103A
+                || (v >= 0x103B && v <= 0x103E)
+        }
+        var rebuilt: [Unicode.Scalar] = []
+        rebuilt.reserveCapacity(scalars.count + 2)
+        var anyInjection = false
+        var i = 0
+        while i < scalars.count {
+            rebuilt.append(scalars[i])
+            // After a digit, if the next scalar is an attachable mark
+            // that needs a consonant base on its left, inject a
+            // U+1021 anchor. Subsequent marks in the same cluster
+            // attach to the newly-injected anchor.
+            if isDigit(scalars[i].value),
+               i + 1 < scalars.count,
+               isAttachableMark(scalars[i + 1].value) {
+                rebuilt.append(Unicode.Scalar(0x1021)!)
+                anyInjection = true
+            }
+            i += 1
+        }
+        guard anyInjection else { return nil }
+        return String(String.UnicodeScalarView(rebuilt))
+    }
+
     /// TASK-056: drop any candidate whose surface contains a run of
     /// contiguous **pure strict-consume** punct scalars (`*` U+002A
     /// or `'` U+0027 only — no `.`/`:` mixed in) sitting between

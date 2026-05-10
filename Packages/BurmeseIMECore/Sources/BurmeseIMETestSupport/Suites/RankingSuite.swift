@@ -908,22 +908,31 @@ public enum RankingSuite {
             })
         }
 
-        // Task 10: a mid-buffer ASCII digit must not strand a dependent
-        // vowel or medial behind a ZWNJ. The digit is literal — it splices
-        // into the composed surface at the scalar offset corresponding to
-        // the letters typed before it, while the letters on both sides
-        // parse as a unified syllable.
+        // Task 10 / TASK-051: a mid-buffer ASCII digit must not strand a
+        // dependent vowel or medial behind a ZWNJ — and per CLAUDE.md §3
+        // "a digit never anchors asat or dependent marks", so when the
+        // digit splice would leave a dep-vowel cluster orphan'd on the
+        // digit (e.g. `k2ote` would render `က၂ုတ်` with the short-u
+        // U+102F floating on the digit), the engine injects a U+1021
+        // independent-vowel anchor between the digit and the orphan'd
+        // cluster. This is the same shape `kar2aung` already produces
+        // via the parse-time orphan-mark injector.
+        //
+        // The pre-TASK-051 expected surfaces (`က၂ုတ်`, `သ၂ာ`, `န၂ေ`, …)
+        // documented the storage-order-illegal shape. The new
+        // expectations carry the U+1021 anchor.
         for (buffer, expectedTop) in [
-            ("t2ote",    "တ၂ုတ်"),
-            ("p2ote",    "ပ၂ုတ်"),
-            ("k2ote",    "က၂ုတ်"),
-            ("th2ar",    "သ၂ာ"),
-            ("n2ay",     "န၂ေ"),
-            ("k3aung",   "က၃ောင်"),
-            // `ky` cluster defaults to ya-pin (task 02); the literal `2`
-            // splices in after the digit-cleaned `kyun` parses with the
-            // ya-pin medial.
-            ("ky2un",    "ကျ၂ူန"),
+            ("t2ote",    "တ၂အုတ်"),
+            ("p2ote",    "ပ၂အုတ်"),
+            ("k2ote",    "က၂အုတ်"),
+            ("th2ar",    "သ၂အာ"),
+            ("n2ay",     "န၂အေ"),
+            ("k3aung",   "က၃အောင်"),
+            // `ky` cluster defaults to ya-pin (task 02); the digit-
+            // cleaned `kyun` parses with the ya-pin medial, then the
+            // long-u U+1030 is anchored to a fresh U+1021 after the
+            // digit so the medial does not orphan the cluster's vowel.
+            ("ky2un",    "ကျ၂အူန"),
         ] {
             cases.append(TestCase("task10_midDigit_\(buffer)") { ctx in
                 let engine = BurmeseEngine()
@@ -990,7 +999,9 @@ public enum RankingSuite {
             let engine = BurmeseEngine()
             let state = engine.update(buffer: "ta2in", context: [])
             let top = state.candidates.first?.surface ?? ""
-            ctx.assertEqual(top, "တ၂ိန်", "task10_ta2inTop")
+            // TASK-051: dep-vowel U+102D (`ိ`) sits on a fresh U+1021
+            // anchor after the digit, mirroring the `kar2aung` shape.
+            ctx.assertEqual(top, "တ၂အိန်", "task10_ta2inTop")
             // The `ိ` (U+102D) must survive somewhere in the surface.
             let hasI = top.unicodeScalars.contains { $0.value == 0x102D }
             ctx.assertTrue(hasI, "task10_ta2in_retainsDepVowelI")
@@ -1011,8 +1022,14 @@ public enum RankingSuite {
         // the onset; the splice point is snapped past the medial cluster
         // so the digit acts as a hard syllable break *after* the
         // `<onset><medial>` cluster, not inside it (task 04).
+        // TASK-051: when the medial-bearing tail's dep-vowel cluster
+        // sits immediately after the digit, the engine injects a
+        // U+1021 anchor between the digit and the orphan'd cluster so
+        // the dep-vowels do not anchor on the digit. `l2wann` already
+        // has its asat-closed coda after the digit so no anchor is
+        // needed.
         for (buffer, expectedTop) in [
-            ("k2yun",  "ကျ၂ူန"),
+            ("k2yun",  "ကျ၂အူန"),
             ("l2wann", "လွ၂န်န"),
         ] {
             cases.append(TestCase("task10_digitBetweenMedial_\(buffer)") { ctx in

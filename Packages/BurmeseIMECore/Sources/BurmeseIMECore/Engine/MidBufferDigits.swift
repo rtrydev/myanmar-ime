@@ -270,11 +270,20 @@ extension BurmeseEngine {
             } else {
                 splicePositions = insertionOffsets.map { fallbackPositionByOffset[$0]! }
             }
-            let burmese = Self.insertScalars(
+            let burmeseRaw = Self.insertScalars(
                 into: candidate.surface,
                 scalars: burmeseDigits,
                 at: splicePositions
             )
+            // TASK-051: when the digit splice lands immediately
+            // before a dep-vowel, medial, anusvara, e-kar, or asat
+            // scalar, the dep-vowel cluster has lost its consonant
+            // anchor. Inject a U+1021 independent-vowel anchor
+            // between the digit and the orphan'd cluster — the same
+            // shape `kar2aung` already produces via the
+            // orphan-mark injector at parse time. CLAUDE.md §3
+            // ("a digit never anchors asat or dependent marks").
+            let burmese = Self.injectAnchorAfterDigitForOrphanMarks(burmeseRaw) ?? burmeseRaw
             if seen.insert(burmese).inserted {
                 result.append(Candidate(
                     surface: burmese,
@@ -283,11 +292,12 @@ extension BurmeseEngine {
                     score: candidate.score
                 ))
             }
-            let ascii = Self.insertScalars(
+            let asciiRaw = Self.insertScalars(
                 into: candidate.surface,
                 scalars: asciiDigits,
                 at: splicePositions
             )
+            let ascii = Self.injectAnchorAfterDigitForOrphanMarks(asciiRaw) ?? asciiRaw
             if ascii != burmese, seen.insert(ascii).inserted {
                 result.append(Candidate(
                     surface: ascii,
