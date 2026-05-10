@@ -3358,6 +3358,20 @@ public final class BurmeseEngine: @unchecked Sendable {
                 // promotion and put kinzi above the open form.
                 liberalKinziOutputs.insert(adjusted.output)
                 liberalKinziOutputs.insert(Self.correctAaShape(adjusted.output))
+            } else if Self.surfaceContainsKinzi(adjusted.output) {
+                // TASK-045: an inferred parse whose surface carries a
+                // kinzi triple (`1004 103A 1039`) but ALSO carries a
+                // user-typed cross-class virama (e.g. `ka+minga` →
+                // `က္မင်္ဂ` = `k_m + min_ga`) fails the strict
+                // `surfaceHasOnlyNativeViramaStacks` check because of
+                // the cross-class `k+m` even though the kinzi part is
+                // canonical. Preserve such surfaces from LM-margin
+                // pruning so the kinzi-bearing candidate stays
+                // reachable in the panel; do not promote them to
+                // rank 0 (the cross-class virama still belongs at
+                // lower rank).
+                liberalKinziOutputs.insert(adjusted.output)
+                liberalKinziOutputs.insert(Self.correctAaShape(adjusted.output))
             }
             if !existingOutputs.contains(adjusted.output) {
                 grammarParses.append(adjusted)

@@ -657,7 +657,19 @@ extension BurmeseEngine {
         promotableOnlyInput: String?,
         promotableOnlyInsertions: Int
     )? {
-        guard !input.contains("+") else { return nil }
+        // TASK-045: when the user typed any `+` the inference still has
+        // to fire — an explicit `+` between syllable A and syllable B
+        // says nothing about whether some implicit kinzi/stack site
+        // INSIDE A or B should also fire. Run the inference on each
+        // `+`-delimited segment independently and reassemble.
+        // `+` is a hard syllable boundary marker, not a global
+        // suppress-inference signal.
+        if input.contains("+") {
+            return inferImplicitStackMarkersAcrossPlusSegments(
+                input,
+                digitBoundaries: digitBoundaries
+            )
+        }
         // Skip the char-array allocation when there is no plausible
         // Pali stack upper at all — the rest of the scan would walk the
         // buffer for nothing.
@@ -1070,6 +1082,221 @@ extension BurmeseEngine {
             promotableOnlyResult,
             promotableInsertAt.count
         )
+    }
+
+    /// TASK-045: per-segment kinzi/stack inference for buffers
+    /// containing one or more user-typed `+`s. Splits `input` on `+`,
+    /// runs the regular `inferImplicitStackMarkers` body on each
+    /// segment, and reassembles the per-segment results into the
+    /// aggregate tuple — preserving every user-typed `+` plus every
+    /// inferred site inside each segment.
+    ///
+    /// Aggregation rules:
+    /// - `input` = segments joined by the original `+` characters,
+    ///   each segment carrying its inferred markers.
+    /// - `insertions` / `liberalInsertions` /
+    ///   `vowelRuleLiberalInsertions` are the sums of the per-segment
+    ///   counts (these counters drive the rarity bumps in
+    ///   `ingestInferredParses` and are additive by construction).
+    /// - `strictOnlyInput` and `promotableOnlyInput` mirror the same
+    ///   per-segment fall-back: a segment that produced a strict-only
+    ///   variant contributes that variant; a segment that did not
+    ///   contributes its full inferred form. The combined string is
+    ///   non-nil only when at least one segment produced the variant.
+    /// - `digitBoundaries` are absolute offsets in `input`; offsets
+    ///   that fall inside a segment are translated to per-segment
+    ///   offsets before recursion. `+` itself is never a digit
+    ///   boundary, so the segment offsets cannot collide.
+    ///
+    /// Returns nil when no segment produced any inference (matches the
+    /// no-`+` behaviour of returning nil on a buffer with no inferred
+    /// sites).
+    private static func inferImplicitStackMarkersAcrossPlusSegments(
+        _ input: String,
+        digitBoundaries: Set<Int>
+    ) -> (
+        input: String,
+        insertions: Int,
+        liberalInsertions: Int,
+        vowelRuleLiberalInsertions: Int,
+        strictOnlyInput: String?,
+        strictOnlyInsertions: Int,
+        promotableOnlyInput: String?,
+        promotableOnlyInsertions: Int
+    )? {
+        // Walk the input character-by-character to derive segment
+        // boundaries and absolute offsets. The character-array offsets
+        // here must match the offsets that `digitBoundaries` carries —
+        // both are computed as `chars.count`-style indices in the
+        // engine.
+        let chars = Array(input)
+        var segments: [(text: String, start: Int)] = []
+        var current = ""
+        var currentStart = 0
+        for (i, c) in chars.enumerated() {
+            if c == "+" {
+                segments.append((current, currentStart))
+                current = ""
+                currentStart = i + 1
+            } else {
+                current.append(c)
+            }
+        }
+        segments.append((current, currentStart))
+
+        // Per-segment recursion. `digitBoundaries` are absolute
+        // offsets; translate them into per-segment offsets and drop
+        // the `+` positions themselves (they are segment delimiters,
+        // never digit indexes).
+        var totalInsertions = 0
+        var totalLiberal = 0
+        var totalVowelRuleLiberal = 0
+        var totalStrictOnly = 0
+        var totalPromotableOnly = 0
+        var fullParts: [String] = []
+        var strictParts: [String] = []
+        var promotableParts: [String] = []
+        // Track which segments produced an inference whose insertion
+        // landed near the segment boundary (specifically: the
+        // segment's reassembled tail ends with `<lower>` after
+        // an inferred `+`). When such a segment is followed by a
+        // user-typed `+` whose next segment also starts with a
+        // stackable consonant, the `collapseConnectorRuns` TASK-011
+        // reshape has stripped the upper's inherent `a` — so the
+        // reassembled buffer reads `<...><lower>+<C>...`, and the
+        // parser interprets the user's `+` as a second virama on top
+        // of the inferred kinzi. Re-insert the inherent `a` between
+        // the inferred lower and the user's `+` so the parser
+        // materialises kinzi on the inferred side and a separate
+        // syllable on the user-stack side (soft-boundary fires
+        // because virama cannot bond to a now-vowel-bearing upper).
+        var segmentEndsInInferredBareLower: [Bool] = []
+        var anyStrictOnlyVariant = false
+        var anyPromotableOnlyVariant = false
+        var anyInferred = false
+        for segment in segments {
+            let segText = segment.text
+            let segStart = segment.start
+            // Only digit boundaries falling strictly inside this
+            // segment matter. A `+` between segments is at offset
+            // `segStart - 1` in absolute terms (or beyond the last
+            // segment); those positions are not digit positions.
+            let segEnd = segStart + segText.count
+            let segDigits = Set(
+                digitBoundaries
+                    .filter { $0 >= segStart && $0 <= segEnd }
+                    .map { $0 - segStart }
+            )
+            if let inferred = inferImplicitStackMarkers(
+                segText,
+                digitBoundaries: segDigits
+            ) {
+                anyInferred = true
+                totalInsertions += inferred.insertions
+                totalLiberal += inferred.liberalInsertions
+                totalVowelRuleLiberal += inferred.vowelRuleLiberalInsertions
+                totalStrictOnly += inferred.strictOnlyInsertions
+                totalPromotableOnly += inferred.promotableOnlyInsertions
+                fullParts.append(inferred.input)
+                if let strictOnly = inferred.strictOnlyInput {
+                    anyStrictOnlyVariant = true
+                    strictParts.append(strictOnly)
+                } else {
+                    strictParts.append(inferred.input)
+                }
+                if let promotableOnly = inferred.promotableOnlyInput {
+                    anyPromotableOnlyVariant = true
+                    promotableParts.append(promotableOnly)
+                } else {
+                    promotableParts.append(inferred.input)
+                }
+                // Detect the bare-lower-ending inferred shape that
+                // would chain with the user's next `+` into a
+                // double-virama. The inferred input ends with `+<C>`
+                // where `<C>` is a stackable consonant letter and
+                // there is no following vowel letter inside this
+                // segment.
+                segmentEndsInInferredBareLower.append(
+                    Self.inferredEndsInBareStackableLower(inferred.input)
+                )
+            } else {
+                fullParts.append(segText)
+                strictParts.append(segText)
+                promotableParts.append(segText)
+                segmentEndsInInferredBareLower.append(false)
+            }
+        }
+        // Re-insert the inherent `a` at every boundary where the
+        // current segment's inferred input ends in a bare stackable
+        // lower AND the next segment starts with a stackable
+        // consonant — i.e. the user's reshape-stripped `+`-stack on
+        // a segment that we just enriched with an inferred kinzi.
+        for i in 0..<(fullParts.count - 1) {
+            guard segmentEndsInInferredBareLower[i] else { continue }
+            let nextSeg = fullParts[i + 1]
+            guard let nextFirst = nextSeg.first else { continue }
+            let vowelLetters: Set<Character> = ["a", "e", "i", "o", "u"]
+            guard nextFirst.isLetter, !vowelLetters.contains(nextFirst) else { continue }
+            guard let nextConsonant = Romanization.romanToConsonant[String(nextFirst)],
+                  Grammar.stackableConsonants.contains(nextConsonant) else {
+                continue
+            }
+            fullParts[i].append("a")
+            strictParts[i].append("a")
+            promotableParts[i].append("a")
+        }
+
+        guard anyInferred else { return nil }
+
+        let combinedInput = fullParts.joined(separator: "+")
+        let combinedStrict: String? = anyStrictOnlyVariant
+            ? strictParts.joined(separator: "+") : nil
+        let combinedPromotable: String? = anyPromotableOnlyVariant
+            ? promotableParts.joined(separator: "+") : nil
+
+        return (
+            combinedInput,
+            totalInsertions,
+            totalLiberal,
+            totalVowelRuleLiberal,
+            combinedStrict,
+            totalStrictOnly,
+            combinedPromotable,
+            totalPromotableOnly
+        )
+    }
+
+    /// TASK-045 helper. True when `inferredInput` ends with `+<C>`
+    /// where `<C>` is a stackable consonant letter. This signals that
+    /// the segment-level inference has placed a kinzi/stack site
+    /// whose lower is the segment's last consonant letter. When the
+    /// next user `+`-segment also begins with a stackable consonant,
+    /// the `collapseConnectorRuns` TASK-011 reshape has already
+    /// stripped the inherent `a` after this lower, so the reassembled
+    /// buffer would read `<...>+<lower>+<lower-of-user-stack>...` and
+    /// the parser would fold both `+`s into a double-virama chain.
+    /// Re-inserting the inherent `a` between the inferred lower and
+    /// the user's `+` restores the syllable break the user originally
+    /// typed (`<C>a+<C>`).
+    ///
+    /// Examples (caller passes the inferred segment input):
+    ///   - inferred=`min+g` → ends `+g`, `g` is stackable → true
+    ///   - inferred=`min+ga` → ends with `a` (vowel) → false
+    ///   - inferred=`atta` → no `+` → false
+    private static func inferredEndsInBareStackableLower(
+        _ inferredInput: String
+    ) -> Bool {
+        let chars = Array(inferredInput)
+        guard chars.count >= 3 else { return false }
+        let last = chars[chars.count - 1]
+        let beforeLast = chars[chars.count - 2]
+        guard beforeLast == "+" else { return false }
+        let vowelLetters: Set<Character> = ["a", "e", "i", "o", "u"]
+        guard last.isLetter, !vowelLetters.contains(last) else { return false }
+        guard let consonant = Romanization.romanToConsonant[String(last)] else {
+            return false
+        }
+        return Grammar.stackableConsonants.contains(consonant)
     }
 
     /// True when the syllable starting at `insertIndex` (the lower
