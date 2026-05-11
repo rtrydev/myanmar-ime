@@ -1730,6 +1730,46 @@ public final class BurmeseEngine: @unchecked Sendable {
         grammarCandidates.sort { lhs, rhs in
             grammarCandidateIsBetter(lhs, than: rhs)
         }
+        // TASK-072: if the user's buffer has any repeated cluster-alias
+        // substring (a sign that they typed the SAME keystrokes for the
+        // same cluster more than once), and the post-sort top-1 surface
+        // mixes ya-pin (U+103B) and ya-yit (U+103C) while a
+        // medial-consistent sibling sits elsewhere in the candidates
+        // list, promote the consistent sibling to rank 0. The mixed
+        // candidate is preserved at the original top-1 slot's previous
+        // position so the panel keeps both interpretations reachable —
+        // only top-1 ordering changes. This guard runs only when the
+        // buffer carries a clear "same keystrokes twice" signal, so
+        // novel single-occurrence buffers are unaffected.
+        var medialConsistencyPreservedSurfaces: Set<String> = []
+        if Self.bufferHasRepeatedClusterAliasShape(displayBuffer),
+           let topIdx = grammarCandidates.indices.first,
+           Self.surfaceHasMixedYapinYayit(grammarCandidates[topIdx].candidate.surface) {
+            // Among the non-mixed siblings, pick the one with the
+            // highest LM log-prob (closest to the per-syllable LM
+            // optimum). This keeps the medial choice aligned with
+            // what each prefix-extension keystroke would have picked
+            // for the trailing syllable (incremental commits one
+            // medial at the short-buffer prefix and the LM at every
+            // subsequent extension reinforces it), so oneshot and
+            // incremental converge on the same surface.
+            var bestIdx: Int?
+            var bestLM = -Double.infinity
+            for i in grammarCandidates.indices.dropFirst() {
+                if Self.surfaceHasMixedYapinYayit(grammarCandidates[i].candidate.surface) {
+                    continue
+                }
+                if grammarCandidates[i].lmLogProb > bestLM {
+                    bestLM = grammarCandidates[i].lmLogProb
+                    bestIdx = i
+                }
+            }
+            if let idx = bestIdx {
+                let consistent = grammarCandidates.remove(at: idx)
+                grammarCandidates.insert(consistent, at: 0)
+                medialConsistencyPreservedSurfaces.insert(grammarCandidates[0].candidate.surface)
+            }
+        }
         let appliesYapinPromotion = !effectiveWindowed
             && Self.isYapinPromotionBuffer(effectiveParseInput)
 
@@ -1784,14 +1824,17 @@ public final class BurmeseEngine: @unchecked Sendable {
            ) {
             var preservingGrammarSurfaces = combinedPreserveSurfaces
             preservingGrammarSurfaces.insert(yapinSurface)
+            preservingGrammarSurfaces.formUnion(medialConsistencyPreservedSurfaces)
             grammarCandidates = pruneGrammarByLmMargin(
                 grammarCandidates,
                 preservingSurfaces: preservingGrammarSurfaces
             )
         } else {
+            var preservingGrammarSurfaces = combinedPreserveSurfaces
+            preservingGrammarSurfaces.formUnion(medialConsistencyPreservedSurfaces)
             grammarCandidates = pruneGrammarByLmMargin(
                 grammarCandidates,
-                preservingSurfaces: combinedPreserveSurfaces
+                preservingSurfaces: preservingGrammarSurfaces
             )
         }
         grammarCandidates = promoteAliasAlternate(grammarCandidates)
@@ -2693,7 +2736,7 @@ public final class BurmeseEngine: @unchecked Sendable {
                 ))
             }
         }
-        let finalCandidates: [Candidate]
+        var finalCandidates: [Candidate]
         if leadingLiteral.isEmpty,
            digitPrefix.isEmpty,
            literalTail.isEmpty,
@@ -2711,6 +2754,48 @@ public final class BurmeseEngine: @unchecked Sendable {
             }
         } else {
             finalCandidates = sanitizedWithAffixes
+        }
+
+        // TASK-072 final-pass guard: when the buffer has a repeated
+        // cluster-alias shape and the rank-0 surface mixes ya-pin /
+        // ya-yit, swap a panel-reachable consistent sibling to rank 0.
+        // This catches lexicon-source mixed candidates that the
+        // grammar-only swap above can't see. When the buffer starts
+        // with a `yaPinPreferredOnsetClusters` key, prefer a ya-pin-
+        // only sibling (so `kyaw:kyar:` family stays in the ya-pin
+        // promotion lane); otherwise pick the first non-mixed
+        // sibling so the lattice composite's medial choice is
+        // preserved.
+        if Self.bufferHasRepeatedClusterAliasShape(displayBuffer),
+           let topIdx = finalCandidates.indices.first,
+           Self.surfaceHasMixedYapinYayit(finalCandidates[topIdx].surface) {
+            let preferYapin = Self.isYapinPromotionBuffer(displayBuffer)
+            // Walk in two passes: first try to find a consistent
+            // sibling that matches the preferred-medial side; if none
+            // exists in the panel, fall back to any non-mixed
+            // sibling. This keeps the ya-pin promotion lane when a
+            // ya-pin variant is reachable AND still flips off the
+            // mixed surface when only the other-medial sibling is
+            // available (`gyaagyaa` has only the ya-yit-only sibling).
+            var preferredMatchIdx: Int?
+            var anyConsistentIdx: Int?
+            for i in finalCandidates.indices.dropFirst() {
+                let surface = finalCandidates[i].surface
+                guard !Self.surfaceHasMixedYapinYayit(surface) else { continue }
+                if anyConsistentIdx == nil { anyConsistentIdx = i }
+                if preferYapin {
+                    let hasYapin = surface.unicodeScalars.contains { $0.value == 0x103B }
+                    if hasYapin {
+                        preferredMatchIdx = i
+                        break
+                    }
+                }
+            }
+            let bestIdx = preferredMatchIdx ?? anyConsistentIdx
+            if let idx = bestIdx {
+                let consistent = finalCandidates.remove(at: idx)
+                finalCandidates.insert(consistent, at: 0)
+            }
         }
 
         return CompositionState(

@@ -344,6 +344,67 @@ extension BurmeseEngine {
         return count
     }
 
+    /// TASK-072 helper. True when `surface` contains BOTH U+103B
+    /// (ya-pin medial) and U+103C (ya-yit medial). Used by the
+    /// post-sort consistency fix to detect mixed-medial top-1
+    /// candidates produced by the lattice composite for buffers
+    /// where the user typed the same cluster-alias keystrokes
+    /// multiple times.
+    internal static func surfaceHasMixedYapinYayit(_ surface: String) -> Bool {
+        var sawYapin = false
+        var sawYayit = false
+        for scalar in surface.unicodeScalars {
+            if scalar.value == 0x103B { sawYapin = true }
+            else if scalar.value == 0x103C { sawYayit = true }
+            if sawYapin && sawYayit { return true }
+        }
+        return false
+    }
+
+    /// TASK-072 helper. True when `buffer` contains an identical
+    /// cluster-alias substring appearing at least twice. The
+    /// detection probes the documented ya-pin-preferred cluster keys
+    /// (`khwy`, `ghwy`, `khy`, `ghy`, `kwy`, `gwy`, `ky`, `gy`) plus
+    /// the chy / phy / shy ya-yit-typical clusters; presence at two
+    /// or more positions means the user typed the same keystrokes
+    /// for the same cluster more than once. The post-sort
+    /// consistency fix is gated on this signal so novel buffers with
+    /// single-occurrence clusters keep the lattice's per-position
+    /// medial choice.
+    internal static func bufferHasRepeatedClusterAliasShape(_ buffer: String) -> Bool {
+        // Cluster-alias keys whose Cy / Cwy spellings represent a
+        // user-visible medial choice. Sorted longest-first so the
+        // scanner doesn't double-count a `kwy` cluster as `ky`.
+        let clusterKeys: [String] = [
+            "khwy", "ghwy", "chwy", "phwy", "shwy",
+            "khy", "ghy", "chy", "phy", "shy",
+            "kwy", "gwy",
+            "ky", "gy",
+        ]
+        let chars = Array(buffer)
+        for key in clusterKeys {
+            let keyChars = Array(key)
+            guard keyChars.count <= chars.count else { continue }
+            var occurrences = 0
+            var i = 0
+            while i + keyChars.count <= chars.count {
+                var matched = true
+                for j in 0..<keyChars.count where chars[i + j] != keyChars[j] {
+                    matched = false
+                    break
+                }
+                if matched {
+                    occurrences += 1
+                    if occurrences >= 2 { return true }
+                    i += keyChars.count
+                } else {
+                    i += 1
+                }
+            }
+        }
+        return false
+    }
+
     /// TASK-071 helper. When `lhs` and `rhs` differ by exactly one
     /// scalar at the same index — one carrying an aa-family dependent
     /// vowel (U+102B / U+102C) and the other carrying a bare consonant

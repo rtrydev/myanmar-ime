@@ -160,5 +160,6 @@ public enum BurmeseTestSuites {
         MidBufferUnsupportedLetterSuite.suite,
         TASK070MidSentenceAhaPrefixSuite.suite,
         TASK071ApostropheRaConsonantSuite.suite,
+        TASK072DoubledClusterMedialConsistencySuite.suite,
     ]
 }
