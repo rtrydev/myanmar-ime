@@ -323,6 +323,13 @@ func usage() -> Never {
       --check PATH       Compare against baseline; exit 1 on regression
       --update PATH      Write current results to baseline path
       --scenario NAME    Run a single scenario (short|medium|long|incremental)
+      --samples N        Repeat the full scenario sweep N times and use the
+                         per-scenario median measurement (default: 1, or 5
+                         when --check is given). Multi-sample mode protects
+                         the regression gate against host-noise flakiness
+                         around the threshold; the median is robust to a
+                         single anomalously slow run while still failing on
+                         any consistent regression.
     """
     FileHandle.standardError.write(Data(u.utf8))
     exit(2)
@@ -331,6 +338,7 @@ func usage() -> Never {
 var checkPath: String?
 var updatePath: String?
 var singleScenario: String?
+var samplesOverride: Int?
 
 var args = Array(CommandLine.arguments.dropFirst())
 while let arg = args.first {
@@ -348,6 +356,10 @@ while let arg = args.first {
         guard let v = args.first else { usage() }
         args.removeFirst()
         singleScenario = v
+    case "--samples":
+        guard let v = args.first, let n = Int(v), n > 0 else { usage() }
+        args.removeFirst()
+        samplesOverride = n
     case "-h", "--help":
         usage()
     default:
@@ -355,6 +367,18 @@ while let arg = args.first {
         usage()
     }
 }
+
+// TASK-058: the per-keystroke bench is fundamentally noisy on Linux dev
+// hosts. A single `--check` run trips the 1.30× p99 guard ~1/5 times on
+// `plus_chain_30` even when the underlying perf state is healthy. The
+// regression gate must be median-of-N to remain meaningful — a single
+// noisy run is not evidence of a regression, and the gate must not
+// false-positive on noise.
+//
+// `--update` and ad-hoc human runs default to a single sample so the
+// captured numbers reflect a fresh measurement. `--check` defaults to
+// 5 samples so the regression gate is robust by default.
+let sampleCount: Int = samplesOverride ?? (checkPath != nil ? 5 : 1)
 
 let toRun: [Scenario]
 if let name = singleScenario {
@@ -367,15 +391,66 @@ if let name = singleScenario {
     toRun = scenarios
 }
 
-FileHandle.standardError.write(Data("Running \(toRun.count) scenario(s)...\n".utf8))
-var results: [Measurement] = []
-for s in toRun {
-    FileHandle.standardError.write(Data("  \(s.name)... ".utf8))
-    let m = runScenario(s)
+if sampleCount > 1 {
     FileHandle.standardError.write(Data(
-        "p50=\(String(format: "%.1f", m.p50Us))us p95=\(String(format: "%.1f", m.p95Us))us p99=\(String(format: "%.1f", m.p99Us))us\n".utf8
+        "Running \(toRun.count) scenario(s) × \(sampleCount) samples (median selection)...\n".utf8
     ))
-    results.append(m)
+} else {
+    FileHandle.standardError.write(Data("Running \(toRun.count) scenario(s)...\n".utf8))
+}
+
+/// Median of an odd-or-even array of `Double`. For even counts we use
+/// the lower-of-the-two middle values, which is intentionally
+/// conservative against `--check` false-positives: median selection is
+/// already a noise filter, and biasing toward the lower value when
+/// samples is even avoids inflating the reported number on a 4-fast +
+/// 1-slow split (median of 5 is strictly the middle, no bias).
+func median(_ xs: [Double]) -> Double {
+    guard !xs.isEmpty else { return 0 }
+    let sorted = xs.sorted()
+    return sorted[(sorted.count - 1) / 2]
+}
+
+func combineSamples(_ samples: [Measurement]) -> Measurement {
+    precondition(!samples.isEmpty)
+    let first = samples[0]
+    return Measurement(
+        scenario: first.scenario,
+        iterations: first.iterations,
+        p50Us: median(samples.map { $0.p50Us }),
+        p95Us: median(samples.map { $0.p95Us }),
+        p99Us: median(samples.map { $0.p99Us }),
+        maxUs: median(samples.map { $0.maxUs }),
+        allocations: 0
+    )
+}
+
+// Per-scenario sample buffers, ordered to match `toRun` so JSON output
+// preserves the scenario ordering the rest of the pipeline expects.
+var perScenario: [[Measurement]] = Array(repeating: [], count: toRun.count)
+for sample in 0..<sampleCount {
+    if sampleCount > 1 {
+        FileHandle.standardError.write(Data(
+            "Sample \(sample + 1)/\(sampleCount):\n".utf8
+        ))
+    }
+    for (idx, s) in toRun.enumerated() {
+        FileHandle.standardError.write(Data("  \(s.name)... ".utf8))
+        let m = runScenario(s)
+        FileHandle.standardError.write(Data(
+            "p50=\(String(format: "%.1f", m.p50Us))us p95=\(String(format: "%.1f", m.p95Us))us p99=\(String(format: "%.1f", m.p99Us))us\n".utf8
+        ))
+        perScenario[idx].append(m)
+    }
+}
+let results: [Measurement] = perScenario.map { combineSamples($0) }
+if sampleCount > 1 {
+    FileHandle.standardError.write(Data("Per-scenario medians:\n".utf8))
+    for m in results {
+        FileHandle.standardError.write(Data(
+            "  \(m.scenario): p50=\(String(format: "%.1f", m.p50Us))us p95=\(String(format: "%.1f", m.p95Us))us p99=\(String(format: "%.1f", m.p99Us))us\n".utf8
+        ))
+    }
 }
 
 let updateExisting = updatePath.flatMap { readBaselineDocument($0) }

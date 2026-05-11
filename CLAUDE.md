@@ -257,6 +257,16 @@ swift run -c release BurmeseBench --scenario medium
 separate platform sections. Adding a scenario requires updating every
 platform key already present; `BenchBaselineFormatSuite` checks parity.
 
+`--check` defaults to `--samples 5`: the full scenario sweep is run
+five times and the per-scenario median p50/p95/p99 is compared against
+the baseline. Median-of-N is required to keep the gate meaningful on
+noisy Linux dev hosts where a single run trips threshold scenarios
+(notably `plus_chain_30` p99) ~1/5 times even when the underlying perf
+state is healthy. Override with `--samples N` for ad-hoc runs;
+`--update` defaults to a single sample so captured baselines reflect a
+fresh measurement (and should be re-run a few times to confirm the
+captured numbers are not anomalous).
+
 ### Corpus Data
 
 ```bash
