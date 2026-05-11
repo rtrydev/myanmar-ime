@@ -29,7 +29,10 @@ import Foundation
 ///   - `kbbbbbbbbb` — lossless 1:1, literal stays at the bottom.
 ///   - `kya`, `kac`, `aungc`, `kaakaa` — borderline, ASCII-ratio path.
 ///   - `mingalarpar`, `kyaung` — real Burmese, never trigger Class B.
-///   - `tablet`, `mahabodhi`, `anaconda` — no collapse, no Class B.
+///   - `tablet`, `mahabodhi` — no collapse, no Class B. (`anaconda`
+///     was removed in TASK-068: its lone `c` is now correctly
+///     surfaced via the mid-buffer-unsupported-letter promotion
+///     path, so it is a bug-class buffer, not a carve-out target.)
 ///   - `thaaaa` (4-letter run, scalarCount=2 — fails same-letter floor
 ///     OR collapse ratio; stays out under both gates).
 public enum LiteralFallbackPrefixedRepetitionSuite {
