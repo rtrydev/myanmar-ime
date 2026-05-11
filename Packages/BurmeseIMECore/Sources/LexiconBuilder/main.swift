@@ -92,6 +92,18 @@ struct LexiconEntry {
 /// curly quotes, ellipsis, emoji, …) anchor garbage entries in the
 /// candidate panel; this guard keeps them out of the SQLite even if
 /// the upstream corpus_builder filter regresses.
+/// True when `s` contains any U+200C (ZWNJ) scalar. The corpus
+/// canonicalizer in `ingest.py` (commit b4498e6) is supposed to strip
+/// orphan ZWNJ but misses several shapes (edge ZWNJ on `နှင့်‌`,
+/// asat-then-tone-with-ZWNJ on `ဖြင်‌့`, joined-compound ZWNJ on
+/// `ရန်‌ကုန်‌`). Each polluted vocab entry has a clean peer also in
+/// vocab, so dropping at the LexiconBuilder layer is safe: the LM still
+/// carries both IDs and any candidate the engine would have produced
+/// from the polluted form is reachable via the clean peer instead.
+func surfaceContainsZWNJ(_ s: String) -> Bool {
+    s.unicodeScalars.contains { $0.value == 0x200C }
+}
+
 func surfaceContainsNonMyanmarScalar(_ s: String) -> Bool {
     if s.isEmpty { return true }
     for scalar in s.unicodeScalars {
@@ -139,6 +151,10 @@ for line in lines {
     let surface = fields[0]
     guard let frequency = Double(fields[1]) else {
         writeStderr("Warning: Invalid frequency on line \(lineNum): \(fields[1])\n")
+        continue
+    }
+    if surfaceContainsZWNJ(surface) {
+        // Polluted by orphan ZWNJ; clean peer is also in vocab.
         continue
     }
     if surfaceContainsNonMyanmarScalar(surface) {
@@ -341,6 +357,44 @@ entryLoop: for entry in entries {
             continue entryLoop
         }
         sqlite3_reset(insertComposeStmt)
+    }
+
+    // Legacy `ah-` typing convention for leading `အ` (U+1021).
+    // ReverseRomanizer (TASK-046, commit 9b8f2cd) dropped the `ah`
+    // onset from buffer-leading `အ`, so the canonical reading of
+    // `အလုပ်` / `အင်း` is now `alote2` / `in:` rather than
+    // `ahalote` / `ahin:`. Users (and the ComprehensiveRankingSuite,
+    // mid-surface `aha` collisions elsewhere) still type `ahX…`
+    // for those words, so emit an `ah`-prefixed alias whenever the
+    // surface itself starts with `အ`. Surface-gated so non-`အ`
+    // independent-vowel surfaces (`ဣ`, `ဥ`, `ဧ`, …) don't pick up
+    // spurious `ah-` lookups.
+    if entry.surface.unicodeScalars.first?.value == 0x1021 {
+        for variant in Romanization.indexedAliasReadings(for: reading) {
+            let ahAlias = "ah" + variant.aliasReading
+            sqlite3_bind_text(insertAliasStmt, 1, ahAlias, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            sqlite3_bind_text(insertAliasStmt, 2, readingCStr, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            sqlite3_bind_int64(insertAliasStmt, 3, entryId)
+            sqlite3_bind_double(insertAliasStmt, 4, score)
+            sqlite3_bind_int(insertAliasStmt, 5, Int32(variant.aliasPenalty))
+            if sqlite3_step(insertAliasStmt) != SQLITE_DONE {
+                writeStderr("Warning: failed to insert ah-prefix alias for \(entry.surface)\n")
+            }
+            sqlite3_reset(insertAliasStmt)
+        }
+        for variant in Romanization.indexedComposeReadings(for: reading) {
+            let ahCompose = "ah" + variant.composeReading
+            sqlite3_bind_text(insertComposeStmt, 1, ahCompose, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            sqlite3_bind_text(insertComposeStmt, 2, readingCStr, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            sqlite3_bind_int64(insertComposeStmt, 3, entryId)
+            sqlite3_bind_double(insertComposeStmt, 4, score)
+            sqlite3_bind_int(insertComposeStmt, 5, Int32(variant.aliasPenalty))
+            sqlite3_bind_int(insertComposeStmt, 6, Int32(variant.separatorPenalty))
+            if sqlite3_step(insertComposeStmt) != SQLITE_DONE {
+                writeStderr("Warning: failed to insert ah-prefix compose for \(entry.surface)\n")
+            }
+            sqlite3_reset(insertComposeStmt)
+        }
     }
 
     insertCount += 1

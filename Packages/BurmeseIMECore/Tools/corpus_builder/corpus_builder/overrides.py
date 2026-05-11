@@ -28,6 +28,21 @@ CURATED_OVERRIDE_READINGS: dict[str, str] = {
     "ကျပ်":    "ky2at",   # kyat (currency) — typed `-t`, coda is `-p`
     "ကျင်း":   "ky2in",   # large / broad — bare buffer drops `:` tone
     "ကျေးဇူး": "ky2ayzu", # thanks — bare buffer drops both `:` tones
+
+    # NOTE on `ဥ`: the reverse romanizer emits canonical `u` (no creaky
+    # tone). Users typing `u.` expect `ဥ` (per traditional convention).
+    # Tried `"ဥ": "u."` here — stamping `u.` as canonical breaks the
+    # `u` → `ဥ`, `u2` → `ဥ၂`, and `tasksDir03_bareVowelPrimary_u` tests
+    # because the digit-stripped alias only emits one form and the
+    # `u` form is lost. Proper fix is a Swift-side curated alias that
+    # adds `u.` without rewriting the canonical; see TASK-070.
+
+    # NOTE on `အံ`: shares canonical reading `an` with `အန်` (n-asat).
+    # The test suite expects `အံ` to win at rank 0 but the corpus
+    # frequency of `အန်` is higher. Adding `အံ → "an"` here is a no-op
+    # (canonical is already `an`) and peer-smoothing is symmetric so
+    # it cannot flip the order. Needs a stronger mechanism (preferred-
+    # peer flag or explicit frequency floor); see TASK-071.
 }
 
 
