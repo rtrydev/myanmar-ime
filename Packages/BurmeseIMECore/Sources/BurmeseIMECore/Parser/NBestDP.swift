@@ -199,6 +199,64 @@ extension SyllableParser {
                         if vowelIsMidBufferPenalised[Int(vowelEntry.id)] {
                             continue
                         }
+                        // TASK-057: triple-virama-stack rejection
+                        // (paired-arc branch). Three structural
+                        // shapes form an illegal chained-virama stack
+                        // when the current arc emits `<C><virama>`:
+                        //
+                        //   (a) previous = `onsetOnly(C)` whose
+                        //       parent ended in a virama vowel — the
+                        //       bare onset is the lower of an
+                        //       existing stack; another virama here
+                        //       builds the `<C>+<C>+<C>` triple
+                        //       stack on the following onset.
+                        //
+                        //   (b) previous = `onsetVowel(_, virama)` —
+                        //       the chain emitted `<C-1><virama>`
+                        //       directly; another
+                        //       `onsetVowel(_, virama)` adds a second
+                        //       `<C><virama>` whose orphan virama
+                        //       inevitably yields the chained-stack
+                        //       shape on the following onset.
+                        //
+                        //   (c) previous = `vowelOnly(virama)` — the
+                        //       split path `onsetOnly(_) →
+                        //       vowelOnly(+)` already emitted the
+                        //       first stack's virama; another
+                        //       `onsetVowel(_, virama)` chains the
+                        //       second virama with no consonant base
+                        //       between them.
+                        //
+                        // In every case zero the pair legality so
+                        // the soft-`+` arc wins the bestLegal
+                        // selection.
+                        var pairLegality = legality
+                        if vowelEntry.id == viramaVowelId {
+                            let wouldFormTripleStack: Bool = {
+                                switch previous.matchRef {
+                                case .onsetOnly:
+                                    guard previous.parentIdx >= 0 else { return false }
+                                    let parent = arena[Int(previous.parentIdx)]
+                                    switch parent.matchRef {
+                                    case let .onsetVowel(_, parentVowelId):
+                                        return parentVowelId == viramaVowelId
+                                    case let .vowelOnly(parentVowelId):
+                                        return parentVowelId == viramaVowelId
+                                    default:
+                                        return false
+                                    }
+                                case let .onsetVowel(_, prevVowelId):
+                                    return prevVowelId == viramaVowelId
+                                case let .vowelOnly(prevVowelId):
+                                    return prevVowelId == viramaVowelId
+                                default:
+                                    return false
+                                }
+                            }()
+                            if wouldFormTripleStack {
+                                pairLegality = 0
+                            }
+                        }
                         let pairState = ParseState(
                             parentIdx: prevIdx,
                             matchRef: .onsetVowel(onsetId: onsetEntry.id, vowelId: vowelEntry.id),
@@ -206,14 +264,14 @@ extension SyllableParser {
                             score: previous.score + scoreMatch(
                                 consumed: vowelEnd - i,
                                 ruleCount: 2,
-                                legality: legality,
+                                legality: pairLegality,
                                 aliasCost: onsetEntry.aliasCost + vowelEntry.aliasCost
                             ),
-                            legalityScore: previous.legalityScore + max(legality, 0),
+                            legalityScore: previous.legalityScore + max(pairLegality, 0),
                             aliasCost: previous.aliasCost + onsetEntry.aliasCost + vowelEntry.aliasCost,
                             syllableCount: previous.syllableCount + 1,
                             structureCost: previous.structureCost + onsetEntry.structureCost,
-                            isLegal: previous.isLegal && legality > 0
+                            isLegal: previous.isLegal && pairLegality > 0
                         )
                         insertState(&arena, &dp, at: vowelEnd, state: pairState, limit: maxResults)
                         matched = true
@@ -294,6 +352,17 @@ extension SyllableParser {
                             // the user's `+` is always a hard
                             // syllable boundary. Admit
                             // unconditionally.
+                            upperForGate = nil
+                            admit = .unconditional
+                        case .viramaStackLower:
+                            // TASK-057: bare onset sitting as the
+                            // lower of an existing virama stack.
+                            // Continuing with another `+<C>` would
+                            // build an illegal triple stack
+                            // (`<C>+<C>+<C>`), so admit the
+                            // soft-`+` arc unconditionally — the
+                            // user's `+` opens a fresh stack rather
+                            // than deepening the existing one.
                             upperForGate = nil
                             admit = .unconditional
                         }
@@ -427,6 +496,57 @@ extension SyllableParser {
                             break
                         }
                         if prevTrailsAsat && prevPreAsat != 0x1004 {
+                            legality = 0
+                        }
+                    }
+                    // TASK-057: triple-virama-stack rejection
+                    // (standalone-vowel branch). When the chain
+                    // up to this point already emitted a
+                    // `<C><virama>` and the current arc would emit
+                    // another virama, the resulting chain forms an
+                    // illegal triple-stack shape (`<C>+<C>+<C>`
+                    // after the next onset, or `<virama><C><virama>`
+                    // without one). Zero out the virama arc's
+                    // legality so the soft-`+` arc wins the
+                    // bestLegal selection at this position. Three
+                    // predecessor shapes reach this gate:
+                    //   (a) previous = `onsetOnly(C)` whose parent
+                    //       ended in a virama vowel (the bare onset
+                    //       is the lower of an existing stack;
+                    //       emitting another virama here builds the
+                    //       triple stack on the next onset).
+                    //   (b) previous = `onsetVowel(_, virama)` (the
+                    //       chain emitted `<C-1><virama>` via the
+                    //       paired arc; another `vowelOnly(virama)`
+                    //       chains a second virama with no
+                    //       consonant base in between).
+                    //   (c) previous = `vowelOnly(virama)` (the split
+                    //       path already emitted the first stack's
+                    //       virama; chaining another `vowelOnly(+)`
+                    //       compounds the illegal stack).
+                    if vowelEntry.id == viramaVowelId {
+                        let wouldFormTripleStack: Bool = {
+                            switch previous.matchRef {
+                            case .onsetOnly:
+                                guard previous.parentIdx >= 0 else { return false }
+                                let parent = arena[Int(previous.parentIdx)]
+                                switch parent.matchRef {
+                                case let .onsetVowel(_, parentVowelId):
+                                    return parentVowelId == viramaVowelId
+                                case let .vowelOnly(parentVowelId):
+                                    return parentVowelId == viramaVowelId
+                                default:
+                                    return false
+                                }
+                            case let .onsetVowel(_, prevVowelId):
+                                return prevVowelId == viramaVowelId
+                            case let .vowelOnly(prevVowelId):
+                                return prevVowelId == viramaVowelId
+                            default:
+                                return false
+                            }
+                        }()
+                        if wouldFormTripleStack {
                             legality = 0
                         }
                     }
@@ -912,6 +1032,16 @@ extension SyllableParser {
         /// bare-vowel syllable that already terminates), so the
         /// soft-`+` arc is admitted unconditionally.
         case bareVowel
+        /// TASK-057: virama-stack lower predecessor — the previous arc
+        /// is `onsetOnly(C)` whose parent is `onsetVowel(_, virama)`,
+        /// i.e. the bare onset sits as the lower of an already-formed
+        /// virama stack (`<C>+<C>`). Continuing the chain with another
+        /// `+<C>` would build a triple stack (`<C>+<C>+<C>`) which is
+        /// orthographically illegal in Burmese. The soft-`+` arc is
+        /// admitted unconditionally so the parser produces an
+        /// alternative parse where the user's next `+` opens a fresh
+        /// stack rather than deepening the existing one.
+        case viramaStackLower
         case none
     }
 
@@ -930,8 +1060,40 @@ extension SyllableParser {
             // shape after a full syllable) behave like asat-vowel
             // predecessors for gating purposes.
             guard previous.parentIdx >= 0 else { return .seedOnset(upper) }
-            if case .seed = arena[Int(previous.parentIdx)].matchRef {
+            let parent = arena[Int(previous.parentIdx)]
+            if case .seed = parent.matchRef {
                 return .seedOnset(upper)
+            }
+            // TASK-057: when the bare onset sits as the lower of an
+            // already-formed virama stack, the user's next `+` cannot
+            // legally stack again — a triple stack
+            // `<C>+<C>+<C>` is orthographically illegal. Treat the
+            // upcoming `+` as a hard syllable boundary so the parser
+            // emits an alternative parse that breaks the chain. Without
+            // this, uniform identical-letter `+`-chains beyond two
+            // segments produce only triple-stack candidates that
+            // `scanOutputLegality` rejects, leaving the panel without
+            // any Myanmar surface for the full input span.
+            //
+            // Two structural shapes reach this position:
+            //   - parent = `onsetVowel(_, virama)` — the upper consumed
+            //     `<C>+` as a single arc and this `onsetOnly(C)` is the
+            //     lower.
+            //   - parent = `vowelOnly(virama)` — the upper used the
+            //     split path `onsetOnly(C) → vowelOnly(+)` and this
+            //     `onsetOnly(C)` is the lower.
+            let parentEndsInViramaVowel: Bool = {
+                switch parent.matchRef {
+                case let .onsetVowel(_, parentVowelId):
+                    return parentVowelId == viramaVowelId
+                case let .vowelOnly(parentVowelId):
+                    return parentVowelId == viramaVowelId
+                default:
+                    return false
+                }
+            }()
+            if parentEndsInViramaVowel {
+                return .viramaStackLower
             }
             return .asatVowel(upper)
 

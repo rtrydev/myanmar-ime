@@ -82,12 +82,20 @@ public enum LiteralFallbackIllegalSurfaceSuite {
         // Class B primary regression — right-shrink collapse
         // shapes. The rank-0 Myanmar candidate has dropped 60–80%
         // of the buffer's keystrokes; the literal must take rank 0.
+        //
+        // TASK-057: the bare-`<C>+<C>+...` shapes (`k+k+k+k+k+k`,
+        // `k+k+k+k+k+k+k+k`) no longer Class-B-collapse — the
+        // soft-`+` arc breaks the chain into `(k_k)(k_k)(k_k)`
+        // 2-stack groups whose surface is structurally legal and
+        // covers every typed `k`. Those buffers now keep their full
+        // Burmese rendering at rank 0 and the literal sits lower in
+        // the panel as a fallback. Only the genuine collapse shapes
+        // (`kaaaaaaaaa`, `aaaaa` — repeated bare-vowel chains the
+        // parser cannot break) still promote the literal.
         TestCase("classB_extremeCollapsePromotesLiteralToRankZero") { ctx in
             let engine = emptyEngine()
             for buffer in [
                 "kaaaaaaaaa",
-                "k+k+k+k+k+k",
-                "k+k+k+k+k+k+k+k",
                 "aaaaa",
             ] {
                 let state = engine.update(buffer: buffer, context: [])
@@ -96,6 +104,34 @@ public enum LiteralFallbackIllegalSurfaceSuite {
                     topSurface == buffer,
                     buffer,
                     detail: "expected literal '\(buffer)' at rank 0; got '\(topSurface)' [\(hex(topSurface))]; panel=\(surfaces(state.candidates))"
+                )
+            }
+        },
+
+        // TASK-057: bare `<C>+<C>+...` plus-chains keep their
+        // full-chain Burmese rendering at rank 0 (no Class B
+        // collapse) and the literal stays reachable lower in the
+        // panel.
+        TestCase("classB_plusChainKeepsBurmeseAtRankZero") { ctx in
+            let engine = emptyEngine()
+            for buffer in [
+                "k+k+k+k+k+k",
+                "k+k+k+k+k+k+k+k",
+            ] {
+                let state = engine.update(buffer: buffer, context: [])
+                let topSurface = state.candidates.first?.surface ?? ""
+                let topIsMyanmar = topSurface.unicodeScalars.contains {
+                    $0.value >= 0x1000 && $0.value <= 0x109F
+                }
+                ctx.assertTrue(
+                    topIsMyanmar,
+                    buffer,
+                    detail: "expected rank-0 Burmese surface; got '\(topSurface)' [\(hex(topSurface))]; panel=\(surfaces(state.candidates))"
+                )
+                ctx.assertTrue(
+                    state.candidates.contains { $0.surface == buffer },
+                    buffer,
+                    detail: "literal '\(buffer)' missing from panel; got \(surfaces(state.candidates))"
                 )
             }
         },
@@ -243,7 +279,9 @@ public enum LiteralFallbackIllegalSurfaceSuite {
             }
         },
 
-        // De-dup: same for Class B.
+        // De-dup: same for Class B. (Includes both genuine
+        // collapse shapes and TASK-057 plus-chain shapes; both
+        // must still have exactly one literal entry in the panel.)
         TestCase("classB_literalNotDuplicated") { ctx in
             let engine = emptyEngine()
             for buffer in ["kaaaaaaaaa", "k+k+k+k+k+k", "aaaaa"] {

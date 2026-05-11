@@ -971,9 +971,29 @@ public enum GrammarSuite {
         // engine must not silently rescue them via the clean-stacks path.
 
         TestCase("parse_tripleViramaStack_pPlusPPlusPa_isIllegal") { ctx in
+            // TASK-057: the parser must not surface a chained
+            // triple-virama-stack (`<C> 1039 <C> 1039 <C>`) at top 1
+            // — that scalar shape is orthographically illegal and
+            // fails `scanOutputLegality`. Pre-TASK-057 the parser
+            // produced exactly that shape at top 1 with
+            // `legalityScore=0`; post-TASK-057 the soft-`+` arc fires
+            // at the lower-of-stack position so the parser surfaces
+            // the legal break-the-chain alternative `(p_p)p` instead.
+            // Either outcome is acceptable here as long as the
+            // top-1 surface has no chained-virama signature.
             let result = SyllableParser().parseCandidates("p+p+pa", maxResults: 1).first
-            ctx.assertEqual(result?.legalityScore ?? -1, 0,
-                "p+p+pa: triple consonant stack must score 0")
+            let scalars = result?.output.unicodeScalars.map(\.value) ?? []
+            var hasChainedStack = false
+            if scalars.count >= 5 {
+                for i in 0..<(scalars.count - 4) {
+                    if scalars[i + 1] == 0x1039 && scalars[i + 3] == 0x1039 {
+                        hasChainedStack = true
+                        break
+                    }
+                }
+            }
+            ctx.assertFalse(hasChainedStack,
+                "p+p+pa: triple consonant stack must not appear at top 1; got '\(result?.output ?? "")'")
         },
 
         TestCase("engine_tripleViramaStack_pPlusPPlusPa_noStackRescue") { ctx in

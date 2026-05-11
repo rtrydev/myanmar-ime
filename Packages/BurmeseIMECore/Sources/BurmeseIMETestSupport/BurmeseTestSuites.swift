@@ -153,5 +153,7 @@ public enum BurmeseTestSuites {
         MidBufferDigitTonePunctSuite.suite,
         ToneOrphanedPunctLeakSuite.suite,
         PlusBeforeClusterLetterSuite.suite,
+        UniformPlusChainStackSuite.suite,
+        DoubledPunctVowelRuleSuite.suite,
     ]
 }
