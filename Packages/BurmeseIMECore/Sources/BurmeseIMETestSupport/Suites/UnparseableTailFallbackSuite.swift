@@ -124,14 +124,22 @@ public enum UnparseableTailFallbackSuite {
             }
         },
 
-        // Sibling regression: composable tails (`ace`, `acer`) still
-        // compose cleanly to pure-Myanmar surfaces — the fix must
-        // not change the well-behaved path.
+        // Sibling regression: composable tails still compose cleanly
+        // to pure-Myanmar surfaces — the fix must not change the
+        // well-behaved path.
+        //
+        // TASK-068: `ace` and `acer` (lone `c` between `a` and the
+        // following vowel rule) were previously in this regression
+        // set and asserted the literal-`c`-dropped Myanmar surface
+        // `အယ်` / `အယ်ရ` — pinning the silent-absorption bug. With
+        // the new `class_E_unsupportedLetterMidBuffer` promotion
+        // path, the literal raw buffer correctly takes rank 0 for
+        // these lone-`c` buffers. They have been removed from this
+        // composable-tail regression; the `ab` case (no
+        // unsupported letter) remains as the regression baseline.
         TestCase("composableTailRegression") { ctx in
             let engine = emptyEngine()
-            for (buffer, expected) in [("ab", "\u{1021}\u{1018}"),
-                                       ("ace", "\u{1021}\u{101A}\u{103A}"),
-                                       ("acer", "\u{1021}\u{101A}\u{103A}\u{101B}")] {
+            for (buffer, expected) in [("ab", "\u{1021}\u{1018}")] {
                 let top = engine.update(buffer: buffer, context: []).candidates.first?.surface ?? ""
                 ctx.assertTrue(
                     top == expected,

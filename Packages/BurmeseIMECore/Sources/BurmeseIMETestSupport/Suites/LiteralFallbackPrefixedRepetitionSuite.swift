@@ -153,14 +153,24 @@ public enum LiteralFallbackPrefixedRepetitionSuite {
         },
 
         // TASK-047 carve-out — buffers that have ≥3 distinct chars
-        // and don't collapse aggressively (`mahabodhi`,
-        // `anaconda`) must NOT promote the literal. They fail the
-        // collapse-ratio gate (`scalarCount * 3 < rawCount` is
-        // false) so the relaxed distinct-char ceiling is
-        // irrelevant.
+        // and don't collapse aggressively (`mahabodhi`) must NOT
+        // promote the literal. They fail the collapse-ratio gate
+        // (`scalarCount * 3 < rawCount` is false) so the relaxed
+        // distinct-char ceiling is irrelevant.
+        //
+        // TASK-068: `anaconda` was previously in this carve-out
+        // set, but it contains a lone `c` (between `a` and `o`,
+        // not followed by `h`) that the pre-fix parser silently
+        // absorbed into a phantom `1021` anchor — the same bug
+        // TASK-068 addresses. The lone-`c` makes `anaconda` a
+        // bug-class buffer, not a carve-out target, so the new
+        // mid-buffer-unsupported-letter promotion path
+        // (`class_E_unsupportedLetterMidBuffer`) correctly elevates
+        // the literal to rank 0. Test reduced to `mahabodhi`
+        // (no unsupported letters) as the regression baseline.
         TestCase("carveOut_nonCollapseBuffers_unchanged") { ctx in
             let engine = emptyEngine()
-            for buffer in ["mahabodhi", "anaconda"] {
+            for buffer in ["mahabodhi"] {
                 let state = engine.update(buffer: buffer, context: [])
                 let topSurface = state.candidates.first?.surface ?? ""
                 ctx.assertTrue(

@@ -3160,11 +3160,75 @@ public final class BurmeseEngine: @unchecked Sendable {
                 == topSurface.unicodeScalars.count
         }()
 
+        // TASK-068: rawBuffer carries an unsupported ASCII letter
+        // (`f`, `q`, `x`) mid-buffer (i.e. between parseable Burmese
+        // fragments) and the rank-0 surface omits it. Pre-fix the
+        // parser DP would silently skip the unrecognized letter and
+        // the materialise step would inject a phantom `1021` anchor
+        // at the corresponding position — surfacing a candidate
+        // whose `reading` claimed the letter was typed but whose
+        // `surface` had dropped it. Per CLAUDE.md §3 ("digits are
+        // literal"), unrecognized user-input characters must stay
+        // at the typed position; the cleanest fix is to promote the
+        // literal raw buffer to rank 0, mirroring TASK-043's
+        // policy.
+        //
+        // Carve-outs: the buffer-leading case (`fka`, `qa`, `xa`)
+        // is already handled correctly — the parser starts AFTER the
+        // unsupported letter and the literal sits at rank 0 via the
+        // ASCII-ratio path. The bug only fires when there is a
+        // parseable Myanmar arc BEFORE the unsupported letter.
+        let class_E_unsupportedLetterMidBuffer: Bool = {
+            // Collect unsupported letters present in the rawBuffer.
+            // `f`, `q`, `x` never appear in any onset / vowel /
+            // cluster-alias rule, so the parser cannot legitimately
+            // consume them. `c` is conditionally unsupported: it
+            // appears only in the `ch` / `chw` cluster aliases, so
+            // a `c` NOT immediately followed by `h` (lone-`c`) is
+            // also unsupported. The check examines each `c` in the
+            // buffer individually.
+            let chars = Array(rawBuffer)
+            var unsupportedOffsets: [Int] = []
+            for i in 0..<chars.count {
+                let ch = chars[i]
+                if ch == "f" || ch == "q" || ch == "x" {
+                    unsupportedOffsets.append(i)
+                } else if ch == "c" {
+                    // `c` is unsupported when it is NOT followed by
+                    // `h` (the `ch`/`chw` cluster alias predecessor).
+                    let next = (i + 1 < chars.count) ? chars[i + 1] : nil
+                    if next != "h" {
+                        unsupportedOffsets.append(i)
+                    }
+                }
+            }
+            guard !unsupportedOffsets.isEmpty else { return false }
+            // The bug is position-dependent: the buffer-leading
+            // case is already handled. Require at least one
+            // unsupported letter that is NOT at the very start
+            // (i.e. has parseable composing content before it).
+            let hasMidBufferOccurrence = unsupportedOffsets.contains { $0 > 0 }
+            guard hasMidBufferOccurrence else { return false }
+            // Bug-class signal: the rank-0 surface omits at least
+            // one unsupported letter that the rawBuffer carries.
+            // The "preserve verbatim" option (a) would keep the
+            // letter in the surface; if that path ever runs, the
+            // letter is present and we don't promote literal here.
+            for offset in unsupportedOffsets {
+                let ch = chars[offset]
+                if !topSurface.contains(ch) {
+                    return true
+                }
+            }
+            return false
+        }()
+
         let placeAtRankZero = asciiRatioMet
             || class_A_violation
             || class_B_collapse
             || class_C_identicalPlusChain
             || class_D_chainedInherentATail
+            || class_E_unsupportedLetterMidBuffer
 
         var candidates = state.candidates
         if placeAtRankZero {
