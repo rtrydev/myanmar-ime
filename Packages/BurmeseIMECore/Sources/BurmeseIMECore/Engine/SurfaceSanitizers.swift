@@ -896,6 +896,24 @@ extension BurmeseEngine {
                     // `ကား.*`, `kar..*` → `ကာ့.*`) at this site.
                     return true
                 }
+                // TASK-055: tone-orphaned-punct leak — the user typed
+                // `<C><open-vowel><punct1><punct2><C><V>`, the parser
+                // peeled `<punct1>` onto the prior syllable as
+                // `1037`/`1038` tone, and the surviving `<punct2>`
+                // ended up between the tone scalar and the next
+                // Myanmar onset. The original predicate only flagged
+                // pure-strict runs of ≥2 chars or any run with `*`;
+                // a single `.` / `:` after a tone scalar fell below
+                // those thresholds. The tone-predecessor is the
+                // discriminator that distinguishes this bug from the
+                // legitimate `<C>(a)<punct><punct><C><V>` literal-
+                // flush shape pinned by `MidBufferPunctuationSuite`
+                // (where the LHS is tone-INELIGIBLE bare-`<C>a` so
+                // no tone absorption fires and the predecessor is
+                // a bare consonant, not a tone scalar).
+                if leftIsTone && hasRightMyanmar {
+                    return true
+                }
                 // Mixed run containing `*` trailing after Myanmar
                 // (consonant base or anything Myanmar) with no
                 // right-side Myanmar: the `*` is a stranded
@@ -910,6 +928,17 @@ extension BurmeseEngine {
                 }
                 i = runEnd
                 continue
+            }
+            // TASK-055: tone-orphaned strict-consume leak — symmetric
+            // to the doc-punct branch above. When the surviving
+            // punct after tone absorption is `'` (e.g. `thar.'kar`
+            // → `သာ့'ကာ`, `kar:'kar` → `ကား'ကာ`), the run is a
+            // single strict-consume char with no `*`, which would
+            // otherwise be dropped by the threshold guard below.
+            // The tone-predecessor + Myanmar-onset adjacency is
+            // again the bug discriminator.
+            if i > 0 && isMyanmarToneScalar(scalars[i - 1]) && hasRightMyanmar {
+                return true
             }
             // Strict-consume / mixed-with-`*` run. Leak when it
             // contains `*` (any count) OR has ≥2 strict-consume

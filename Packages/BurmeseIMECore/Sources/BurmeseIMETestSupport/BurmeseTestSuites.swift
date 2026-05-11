@@ -151,5 +151,6 @@ public enum BurmeseTestSuites {
         BareVowelPlusBareVowelSuite.suite,
         ExplicitKinziTonePromotionSuite.suite,
         MidBufferDigitTonePunctSuite.suite,
+        ToneOrphanedPunctLeakSuite.suite,
     ]
 }
