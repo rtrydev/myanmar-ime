@@ -136,5 +136,93 @@ class CompositionWithExistingNormalizationTests(unittest.TestCase):
         self.assertEqual(normalize_text("​၀ကျော်"), "ဝကျော်")
 
 
+class TASK059TrailingZeroAsConsonantTests(unittest.TestCase):
+    """TASK-059 Class 1 extension: a U+1040 sitting AFTER a Myanmar
+    consonant / mark with no following digit (end-of-word, mixed
+    text, …) is being used as `ဝ` (wa-consonant) and must rewrite.
+
+    Pre-fix the corpus produces lexicon entries like `ဘ၀` whose
+    canonical reading collapses to `ba` (the trailing `၀` is a
+    silent digit), poisoning the `ba` reading bucket with the
+    `Bhava` surface and displacing the bare consonant `ဘ` from
+    rank 0. Same pattern for `အ၀တ်` (`ahat*`), `ဥ၀` etc.
+    """
+
+    def test_bhava_trailing_zero(self) -> None:
+        # `ဘ၀` (Bhava with `၀` for `ဝ`) → `ဘဝ`.
+        self.assertEqual(normalize_text("ဘ၀"), "ဘဝ")
+
+    def test_consonant_zero_consonant_already_handled(self) -> None:
+        # `ဘ၀ဂ` (consonant + zero + consonant): existing Class 1
+        # already handles this via the `next is consonant` gate.
+        self.assertEqual(normalize_text("ဘ၀ဂ"), "ဘဝဂ")
+
+    def test_consonant_with_dep_vowel_then_zero(self) -> None:
+        # `အ၀` (a + zero, no following content) → `အဝ`.
+        self.assertEqual(normalize_text("အ၀"), "အဝ")
+
+
+class TASK059WaInYearShorthandTests(unittest.TestCase):
+    """TASK-059 Class 3 extensions: a U+101D (wa) sitting at the
+    EDGE of a digit run (one neighbour digit, the other end-of-word
+    or non-consonant) is being used as `၀` (digit zero) and must
+    rewrite. These are the year / number shorthands the original
+    Class 3 (between-two-digits only) missed.
+    """
+
+    def test_year_10_trailing_wa(self) -> None:
+        # `၁ဝ` ("10" with wa-as-zero, end-of-word) → `၁၀`.
+        self.assertEqual(normalize_text("၁ဝ"), "၁၀")
+
+    def test_year_20_trailing_wa(self) -> None:
+        self.assertEqual(normalize_text("၂ဝ"), "၂၀")
+
+    def test_year_30_trailing_wa(self) -> None:
+        self.assertEqual(normalize_text("၃ဝ"), "၃၀")
+
+    def test_year_50_trailing_wa(self) -> None:
+        self.assertEqual(normalize_text("၅ဝ"), "၅၀")
+
+    def test_century_100_doubled_wa(self) -> None:
+        # `၁ဝဝ` ("100" with two wa-as-zeros) → `၁၀၀`. Both wa's
+        # rewrite via the chain-resolution rule.
+        self.assertEqual(normalize_text("၁ဝဝ"), "၁၀၀")
+
+    def test_year_2010_trailing_wa(self) -> None:
+        # `၂ဝ၁ဝ` ("2010" with two wa-as-zeros, the trailing wa is
+        # the new TASK-059 case) → `၂၀၁၀`.
+        self.assertEqual(normalize_text("၂ဝ၁ဝ"), "၂၀၁၀")
+
+    def test_leading_wa_then_digit(self) -> None:
+        # `ဝ၁` (wa-as-zero at start of word) → `၀၁`.
+        self.assertEqual(normalize_text("ဝ၁"), "၀၁")
+
+    def test_wa_with_consonant_neighbour_unchanged(self) -> None:
+        """Class 3 must NOT fire when one of the wa's neighbours is
+        a Burmese consonant — the wa is real."""
+        # `ကဝ` (consonant on the left) — wa stays a consonant.
+        self.assertEqual(normalize_text("ကဝ"), "ကဝ")
+        # `ဝက` (consonant on the right) — wa stays a consonant.
+        self.assertEqual(normalize_text("ဝက"), "ဝက")
+
+    def test_bare_wa_unchanged(self) -> None:
+        # No digit anywhere — wa stays a consonant.
+        self.assertEqual(normalize_text("ဝ"), "ဝ")
+
+
+class TASK059IdempotenceTests(unittest.TestCase):
+    """The confusable rewrites are idempotent — applying them to
+    already-canonicalised text yields the same string."""
+
+    def test_canonical_bhava_unchanged(self) -> None:
+        self.assertEqual(normalize_text("ဘဝ"), "ဘဝ")
+
+    def test_canonical_year_10_unchanged(self) -> None:
+        self.assertEqual(normalize_text("၁၀"), "၁၀")
+
+    def test_canonical_year_2010_unchanged(self) -> None:
+        self.assertEqual(normalize_text("၂၀၁၀"), "၂၀၁၀")
+
+
 if __name__ == "__main__":
     unittest.main()

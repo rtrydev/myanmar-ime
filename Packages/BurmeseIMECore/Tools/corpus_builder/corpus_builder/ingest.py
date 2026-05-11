@@ -119,17 +119,29 @@ def _strip_orphan_zwnj(text: str) -> str:
 # TASK-037: confusable scalar pairs. Three rewrite directions are
 # needed:
 #
-# Class 1: leading U+1040 (digit zero) followed by a Burmese
-# consonant or stack mark → U+101D (wa-consonant). Corpus authors
+# Class 1: U+1040 (digit zero) sitting in a non-numeric context
+# (adjacent to a Burmese consonant / stack mark, or after a Burmese
+# consonant at end-of-word) → U+101D (wa-consonant). Corpus authors
 # typed `၀` for `ဝ`.
 #
 # Class 2: leading U+1044 (digit four) immediately before `င်း`
 # (U+1004 U+103A U+1038) → U+104E (aforementioned-symbol). Corpus
 # miscodes the formal-register `၎င်း` as `၄င်း`.
 #
-# Class 3: U+101D (wa-consonant) embedded between two Myanmar
-# digits → U+1040 (digit zero). Inverse of Class 1, common in date
-# strings (`၂ဝ၁၈` → `၂၀၁၈`).
+# Class 3: U+101D (wa-consonant) sitting in a numeric context
+# (between two Myanmar digits, or adjacent to a Myanmar digit at
+# word boundary with no consonant on the other side) → U+1040
+# (digit zero). Inverse of Class 1, common in date strings
+# (`၂ဝ၁၈` → `၂၀၁၈`) and at end-of-word numbers (`၁ဝ` → `၁၀`).
+#
+# TASK-059 extends Classes 1 and 3 to cover the word-boundary
+# cases the original TASK-037 rewriter missed:
+#   - `ဘ၀` (consonant + zero, end-of-word) → `ဘဝ` (Class 1).
+#   - `၁ဝ` (digit + wa, end-of-word) → `၁၀` (Class 3).
+#   - `ဝ၁` (wa + digit, start-of-word) → `၀၁` (Class 3).
+# Without these extensions, lexicon entries like `ဘ၀` and `၁ဝ`
+# carry readings (`ba` / `wa`) that promote spurious year / `Bhava`
+# surfaces above the bare consonants the user actually typed.
 _NG_SUFFIX = "င်း"  # င်း
 
 
@@ -150,43 +162,95 @@ def _canonicalize_confusables(text: str) -> str:
     n = len(chars)
     for i, ch in enumerate(chars):
         if ch == "၀":
-            # Class 1: a U+1040 followed by a Burmese consonant /
-            # stack mark / dependent vowel (anything in U+1000..U+103F)
-            # is a confusable. Only rewrite when the *previous*
-            # character is NOT a Myanmar digit (i.e., the zero is
-            # outside a digit run).
+            # Class 1: a U+1040 in a non-numeric context is a
+            # confusable for `ဝ`. Two firing shapes:
+            #   (a) The `၀` is followed by a Burmese consonant /
+            #       stack mark / dependent vowel AND the previous
+            #       character is NOT a Myanmar digit — the original
+            #       leading-position case (`၀က` → `ဝက`).
+            #   (b) TASK-059: the `၀` is preceded by a Burmese
+            #       consonant / mark AND the following character is
+            #       not a Myanmar digit (end of word, punctuation,
+            #       another non-digit). The `၀` sits as the trailing
+            #       coda-position character of a syllable cluster
+            #       — corpus authors typed `၀` for `ဝ` here too
+            #       (`ဘ၀` → `ဘဝ`).
             prev_ch = chars[i - 1] if i > 0 else ""
             next_ch = chars[i + 1] if i + 1 < n else ""
-            if (not _is_myanmar_digit(prev_ch)
-                    and _is_myanmar_consonant_or_mark(next_ch)):
+            prev_is_digit = _is_myanmar_digit(prev_ch)
+            next_is_digit = _is_myanmar_digit(next_ch)
+            prev_is_consonant_or_mark = _is_myanmar_consonant_or_mark(prev_ch)
+            next_is_consonant_or_mark = _is_myanmar_consonant_or_mark(next_ch)
+            # Shape (a): leading-position rewrite (preserved).
+            if not prev_is_digit and next_is_consonant_or_mark:
+                chars[i] = "ဝ"
+            # Shape (b): trailing-position rewrite (TASK-059). The
+            # `prev_is_consonant_or_mark` gate is symmetric with
+            # shape (a)'s `next_is_consonant_or_mark`. The
+            # `not next_is_digit` gate keeps the rewrite from
+            # firing inside numeric runs (`၂၀` should remain `၂၀`,
+            # not become `၂ဝ`).
+            elif prev_is_consonant_or_mark and not next_is_digit:
                 chars[i] = "ဝ"
         elif ch == "ဝ":
-            # Class 3: a wa-consonant between two Myanmar digits in
-            # an otherwise pure-digit numeral run is a confusable.
+            # Class 3: a wa-consonant in a numeric context is a
+            # confusable for `၀`. Three firing shapes:
+            #   (a) Original: `ဝ` between two Myanmar digits in an
+            #       otherwise pure-digit numeral run (`၂ဝ၁၈`).
+            #   (b) TASK-059: `ဝ` after a digit at end-of-word /
+            #       before a non-consonant (`၁ဝ` → `၁၀`).
+            #   (c) TASK-059: `ဝ` before a digit at start-of-word /
+            #       after a non-consonant (`ဝ၁` → `၀၁`).
             prev_ch = chars[i - 1] if i > 0 else ""
             next_ch = chars[i + 1] if i + 1 < n else ""
-            # Walk the local digit run on both sides; the wa is
-            # in-run if its immediate neighbours are both digits OR
-            # if either neighbour is itself a wa that resolves to a
-            # digit (handles consecutive `ဝဝ` in `၂ဝဝ၈`).
-            left_digit = _is_myanmar_digit(prev_ch)
-            right_digit = _is_myanmar_digit(next_ch)
-            # Allow wa to chain to wa when the chain resolves to a
-            # digit on both sides — `၂ဝဝ၈`: the first `ဝ` sees
-            # digit on left, wa on right; the second sees wa on
-            # left, digit on right. Resolve by scanning past wa runs.
-            if not left_digit and prev_ch == "ဝ":
-                # scan back through wa to find the nearest non-wa
+            # Walk the local wa run on both sides. The wa-rewrite
+            # fires when the wa run's left and right "anchors" are
+            # both compatible with the digit interpretation. An
+            # anchor is "digit-compatible" when it is either a
+            # Myanmar digit OR end-of-string AND the OTHER anchor is
+            # a Myanmar digit (so a wa-run flanked by `<digit>...end`
+            # rewrites to `0...0`, but a free-floating wa-run with
+            # no digit anywhere stays consonants).
+            left_anchor: str | None
+            right_anchor: str | None
+            # Walk left through wa run.
+            if prev_ch == "ဝ":
                 j = i - 1
                 while j > 0 and chars[j] == "ဝ":
                     j -= 1
-                left_digit = _is_myanmar_digit(chars[j])
-            if not right_digit and next_ch == "ဝ":
+                left_anchor = chars[j] if chars[j] != "ဝ" else None
+            else:
+                left_anchor = prev_ch if prev_ch else None
+            # Walk right through wa run.
+            if next_ch == "ဝ":
                 j = i + 1
                 while j + 1 < n and chars[j] == "ဝ":
                     j += 1
-                right_digit = _is_myanmar_digit(chars[j])
+                right_anchor = chars[j] if chars[j] != "ဝ" else None
+            else:
+                right_anchor = next_ch if next_ch else None
+            left_digit = left_anchor is not None and _is_myanmar_digit(left_anchor)
+            right_digit = right_anchor is not None and _is_myanmar_digit(right_anchor)
+            left_consonant = left_anchor is not None and _is_myanmar_consonant_or_mark(left_anchor)
+            right_consonant = right_anchor is not None and _is_myanmar_consonant_or_mark(right_anchor)
+            # Shape (a): both anchors are digits — pure digit run
+            # with embedded wa(s). Rewrite every wa to `၀`.
             if left_digit and right_digit:
+                chars[i] = "၀"
+            # Shape (b) (TASK-059): one anchor is a digit, the
+            # other is end-of-word AND not a Burmese consonant/mark.
+            # The wa run is being used as the trailing/leading
+            # zeros of a number. Rewrite.
+            elif left_digit and right_anchor is None:
+                chars[i] = "၀"
+            elif right_digit and left_anchor is None:
+                chars[i] = "၀"
+            # Shape (b'): one anchor is a digit, the other is a
+            # non-Myanmar character (whitespace, punctuation,
+            # Latin). Same numeric-context interpretation.
+            elif left_digit and not right_consonant and not right_digit:
+                chars[i] = "၀"
+            elif right_digit and not left_consonant and not left_digit:
                 chars[i] = "၀"
     return "".join(chars)
 
