@@ -661,17 +661,36 @@ extension BurmeseEngine {
         var out = ""
         var current = ""
         let chars = Array(s)
+        // TASK-060: doubled-document-punct (`..`/`::`/`.:`/`:.`) between
+        // a tone-eligible composable run and a Burmese-composable
+        // continuation must NOT be absorbed as a tone modifier — every
+        // tone-absorbed sibling produces a `<tone-scalar><single-punct>
+        // <Myanmar onset>` shape that the TASK-055 sanitiser correctly
+        // rejects, leaving the panel without any Burmese candidate. By
+        // refusing the tone absorption when the next char is also a
+        // composing-punct (`./:`), we surface a sibling parse where
+        // both punct chars flush as literal between the rendered
+        // syllables (`ကာ..က` style), giving the user a Burmese
+        // candidate alongside the literal fallback.
+        @inline(__always)
+        func nextIsDocPunct(after i: Int) -> Bool {
+            guard i + 1 < chars.count else { return false }
+            let n = chars[i + 1]
+            return n == "." || n == ":"
+        }
         for (idx, c) in chars.enumerated() {
             // When `.` / `:` closes a creaky-tone or tone-variant vowel
             // suffix (`u.`, `i.`, `an.`, `aw:`, …) it stays attached to
             // the current composable run instead of flushing as
             // punctuation.
             if c == ".",
+               !nextIsDocPunct(after: idx),
                Self.dotActsAsVowelModifier(prefixEndingAtDot: Substring(current + ".")) {
                 current.append(".")
                 continue
             }
             if c == ":",
+               !nextIsDocPunct(after: idx),
                Self.colonActsAsVowelModifier(prefixEndingAtColon: Substring(current + ":")) {
                 current.append(":")
                 continue
