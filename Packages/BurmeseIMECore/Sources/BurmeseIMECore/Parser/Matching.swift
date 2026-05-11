@@ -128,6 +128,15 @@ extension SyllableParser {
     /// the DP into a chained inherent-`a` parse that TASK-016
     /// then rejects, leaving the entire run unparseable and
     /// surfacing as a literal-fallback Latin leak.
+    ///
+    /// TASK-070: extend the same carve-out to the case where the
+    /// previous character is an explicit syllable boundary that the
+    /// user typed to mark a fresh `1021` anchor: tone marks `.`/`:`,
+    /// explicit stack `+`, and the apostrophe soft separator `'`.
+    /// Without this extension `thi.ahaung`, `tha:ahaung`,
+    /// `ka+ahaung`, `ka'ahaung` etc. would drop the `ah` onset and
+    /// fall through to the `<a-standalone> + ha + <V>` decomposition,
+    /// erasing the user's `အ` mid-sentence.
     private func filterAhStrandedAMatches(
         chars: [Character],
         results: inout [OnsetMatch]
@@ -146,13 +155,18 @@ extension SyllableParser {
             let isLowerLetter = ascii >= 0x61 && ascii <= 0x7A
             let isUpperLetter = ascii >= 0x41 && ascii <= 0x5A
             guard isLowerLetter || isUpperLetter else { return false }
-            // Carve-out: previous letter was `a` — keep the `ah`
-            // match. The `<C>a-aha-<X>` site is a legitimate
-            // `<C>a + 1021-anchor + <X>` shape that should not
-            // collapse into the TASK-046 collision.
+            // Carve-out: previous char was `a` or an explicit
+            // syllable-boundary marker (`.`, `:`, `+`, `'`). The
+            // `<C>a-aha-<X>` and `<...>.<aha-<X>` sites are
+            // legitimate fresh `1021`-anchor positions that should
+            // not collapse into the TASK-046 collision.
             let start = end - 2
-            if start > 0, chars[start - 1] == "a" {
-                return false
+            if start > 0 {
+                let prev = chars[start - 1]
+                if prev == "a" || prev == "." || prev == ":"
+                    || prev == "+" || prev == "'" {
+                    return false
+                }
             }
             return true
         }

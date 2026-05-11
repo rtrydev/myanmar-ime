@@ -45,6 +45,7 @@ public enum BurmeseTestSuites {
         FuzzSuite.suite,
         ComprehensiveRankingSuite.suite,
         LexiconLMDriftSuite.suite,
+        TASK059LexiconWaBaCleanRankZeroSuite.suite,
         DiphthongPlusBareNgaSuite.suite,
         MidBufferDigitStackSplitSuite.suite,
         CreakyToneOnsetlessFollowupSuite.suite,
@@ -157,5 +158,6 @@ public enum BurmeseTestSuites {
         DoubledPunctVowelRuleSuite.suite,
         BareIndepVowelAsatSuite.suite,
         MidBufferUnsupportedLetterSuite.suite,
+        TASK070MidSentenceAhaPrefixSuite.suite,
     ]
 }
