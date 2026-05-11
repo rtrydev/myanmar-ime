@@ -1005,6 +1005,67 @@ extension BurmeseEngine {
         return false
     }
 
+    /// TASK-069 sanitizer: drop candidates whose surface carries the
+    /// bare `1021 103A` adjacency — independent vowel `အ` (U+1021)
+    /// immediately followed by asat (U+103A) — where the `1021` is
+    /// NOT preceded by a digit (covered by `sanitizeDigitOrphanAsat`,
+    /// TASK-052) and NOT preceded by a tone marker (covered by
+    /// `sanitizeToneOrphanAsat`, TASK-057).
+    ///
+    /// Burmese rule reference: asat suppresses the inherent vowel of
+    /// a true consonant. The independent vowel `အ` is structurally a
+    /// placeholder consonant whose only role is to host dep-vowel
+    /// marks; suppressing its inherent vowel via asat leaves no
+    /// pronounceable syllable. The legality scan in
+    /// `Parser/Finalization.swift::scanOutputLegality` accepts the
+    /// shape because `isConsonantBase` admits U+1021 (the upper bound
+    /// of the consonant range is inclusive at U+1021 for orphan-
+    /// anchor injection purposes). This sanitizer closes the gap.
+    ///
+    /// Sibling shapes `e*`/`i*`/`o*`/`u*` route to legal forms with
+    /// real coda consonants (ya-asat / nya-asat) or particle variants
+    /// — those surfaces have `<C>` between the `1021` and `103A`
+    /// (e.g. `e*` → `1021 101A 103A`), so the adjacency check does
+    /// not flag them.
+    ///
+    /// Same fallback policy as the other orphan-asat sanitizers:
+    /// only filter when at least one clean candidate exists,
+    /// otherwise keep violators so the panel is not empty.
+    internal static func sanitizeBareIndepVowelAsat(_ candidates: [Candidate]) -> [Candidate] {
+        let cleanFiltered = candidates.filter {
+            !surfaceContainsBareIndepVowelAsat($0.surface)
+        }
+        if !cleanFiltered.isEmpty {
+            return cleanFiltered
+        }
+        return candidates
+    }
+
+    @_spi(Testing) public static func surfaceContainsBareIndepVowelAsat(_ surface: String) -> Bool {
+        let scalars = Array(surface.unicodeScalars).map(\.value)
+        guard scalars.count >= 2 else { return false }
+        @inline(__always) func isDigit(_ v: UInt32) -> Bool {
+            (v >= 0x30 && v <= 0x39) || (v >= 0x1040 && v <= 0x1049)
+        }
+        for i in 1..<scalars.count {
+            guard scalars[i - 1] == 0x1021 && scalars[i] == 0x103A else {
+                continue
+            }
+            // Defer to the TASK-052 / TASK-057 sanitizers for the
+            // digit-prefixed and tone-prefixed cases. Their own
+            // predicates cover those shapes; preserving the
+            // disjoint responsibility keeps each sanitizer's
+            // semantics scoped to its own surface shape.
+            if i >= 2 {
+                let pre = scalars[i - 2]
+                if isDigit(pre) { continue }
+                if pre == 0x1037 || pre == 0x1038 { continue }
+            }
+            return true
+        }
+        return false
+    }
+
     @_spi(Testing) public static func surfaceContainsDoubledCodaChain(_ surface: String) -> Bool {
         let scalars = Array(surface.unicodeScalars).map(\.value)
         guard scalars.count >= 4 else { return false }

@@ -155,5 +155,6 @@ public enum BurmeseTestSuites {
         PlusBeforeClusterLetterSuite.suite,
         UniformPlusChainStackSuite.suite,
         DoubledPunctVowelRuleSuite.suite,
+        BareIndepVowelAsatSuite.suite,
     ]
 }

@@ -350,6 +350,16 @@ public final class BurmeseEngine: @unchecked Sendable {
         // filter pass can promote it past the malformed Myanmar
         // candidates.
         injected.candidates = Self.sanitizeToneOrphanAsat(injected.candidates)
+        // TASK-069: same pattern — re-run the bare-indep-vowel-asat
+        // sanitizer with the literal fallback in place. Pre-fix the
+        // engine surfaced `1021 103A` (bare `အ` + asat) at rank 0 for
+        // inputs like `a*`, `aa*`, `ka+a*`, `a*ka`, `a*ya`. The
+        // legality scan accepts the shape because `isConsonantBase`
+        // admits U+1021 as a base, but `အ` is the vowel-only consonant
+        // whose inherent vowel cannot be legitimately suppressed.
+        // Once the literal fallback is injected the panel has a clean
+        // sibling so the filter pass can drop the malformed Myanmar.
+        injected.candidates = Self.sanitizeBareIndepVowelAsat(injected.candidates)
         // TASK-056: same pattern — re-run the interleaved-composing-
         // punct sanitizer with the literal fallback in place. The
         // doubled `**`, `''`, `::`, `..` runs (and trailing-singleton
@@ -2593,7 +2603,14 @@ public final class BurmeseEngine: @unchecked Sendable {
         let sanitizedAffixed4 = Self.sanitizeDoubledCodaChain(sanitizedAffixed3)
         let sanitizedAffixed5 = Self.sanitizeDigitOrphanAsat(sanitizedAffixed4)
         let sanitizedAffixed6 = Self.sanitizeToneOrphanAsat(sanitizedAffixed5)
-        let sanitizedAffixed7 = Self.sanitizeInterleavedComposingPunct(sanitizedAffixed6)
+        // TASK-069: drop candidates whose surface carries the bare
+        // `1021 103A` adjacency (independent vowel `အ` + asat) when
+        // a clean sibling exists. The `a*` family (and `aa*`, `aaa*`,
+        // `+a*`, `a*<X>`, `<C>+a*`) pre-fix surfaced this orphan
+        // adjacency at rank 0 even though the structure has no
+        // pronounceable Burmese spelling.
+        let sanitizedAffixed6b = Self.sanitizeBareIndepVowelAsat(sanitizedAffixed6)
+        let sanitizedAffixed7 = Self.sanitizeInterleavedComposingPunct(sanitizedAffixed6b)
         // TASK-030: drop candidates whose surface carries the multi-
         // cluster-on-single-anchor shape (chained vowel-rule arcs that
         // concatenate two dep-vowel clusters on one base, or same-
