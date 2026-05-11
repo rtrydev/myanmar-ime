@@ -1974,9 +1974,22 @@ public final class BurmeseEngine: @unchecked Sendable {
             // continues to promote unconditionally because there's
             // no user-explicit signal that would justify deferring
             // to lexicon over the inferred stack.
+            //
+            // TASK-056: narrow the lexicon-rank-0 protection. When
+            // the rank-0 lexicon hit's reading does NOT contain
+            // `+`, the lexicon entry describes a *different*
+            // segmentation than the user's `+`-bearing input — e.g.
+            // user typed `k+ya` (intent: two syllables `ka` + `ya`),
+            // lexicon hit is `kya` reading=`kya` (the medial
+            // cluster `ကြ`). Per CLAUDE.md §6, the user's explicit
+            // `+` must not be displaced by an LM/lexicon-favoured
+            // segmentation that ignores the boundary. Only protect
+            // lexicon rank-0 when its reading also reflects the
+            // user's `+` placement.
             let lexiconAtSlotZero = displayBuffer.contains("+")
                 && !merged.isEmpty
                 && merged[0].source == .lexicon
+                && merged[0].reading.contains("+")
             if !lexiconAtSlotZero {
                 let keeper = merged.remove(at: idx)
                 merged.insert(keeper, at: 0)
