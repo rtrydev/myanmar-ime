@@ -508,20 +508,33 @@ extension BurmeseEngine {
     }
 
     /// Emit one letter run from the tail composer. When
-    /// `preserveLeadingAsterisks` is true, peel leading `*` chars off
-    /// the run and surface them verbatim before handing the remainder
-    /// to `composedLetterRunSurface` (which would otherwise strip
-    /// them as redundant asat closers — see TASK-008 / TASK-052).
+    /// `preserveLeadingAsterisks` is true, peel leading `*` / `.` /
+    /// `:` chars off the run and surface them verbatim before
+    /// handing the remainder to `composedLetterRunSurface`.
+    ///
+    /// Asterisks are stripped because they are structurally asat
+    /// closers; with a digit on the left there is no consonant base
+    /// to anchor U+103A, so the parser would otherwise produce an
+    /// orphan-asat `200C 103A` that the orphan-mark sanitizer
+    /// anchors to a phantom `အ`, surfacing the malformed
+    /// `<digit>1021103A` adjacency forbidden by CLAUDE.md §3
+    /// (TASK-008 / TASK-052).
+    ///
+    /// `.` and `:` are stripped for the same structural reason
+    /// (TASK-054): a digit cannot anchor a tone marker (1037 / 1038
+    /// are dep-vowel-class scalars, and CLAUDE.md §3 says "a digit
+    /// never anchors asat or dependent marks"), so a `.` / `:`
+    /// directly after a digit must surface as literal punctuation
+    /// rather than being silently consumed by the parser's `.skip`
+    /// arc when the rest of the run composes cleanly. Without this
+    /// peel, `kar2.kar` collapses to `ကာ၂ကာ` (the `.` vanishes)
+    /// instead of `ကာ၂.ကာ`, mirroring the working `kar3.kar`
+    /// (digit-as-ASCII) and `kar2.` (terminal `.`) shapes.
     ///
     /// Also when `preserveLeadingAsterisks` is true and the composed
     /// surface for the run begins with the orphan-anchor cluster
-    /// `1021 103A`, fall back to the literal run. The user typed
-    /// `<digit><letter-run-with-*>` and the parser produced an orphan
-    /// asat that the sanitizer anchored to a phantom `အ`; with a
-    /// digit on the left side (the run's previous emit) the resulting
-    /// `<digit>1021103A` adjacency is the TASK-052 violation we are
-    /// guarding against. Surfacing the run verbatim keeps the
-    /// invariant intact while still preserving the user's keystrokes.
+    /// `1021 103A`, fall back to the literal run for the same
+    /// `<digit>1021103A` invariant reason (TASK-052).
     private func emitLetterRun(
         _ run: String,
         preserveLeadingAsterisks: Bool
@@ -531,8 +544,12 @@ extension BurmeseEngine {
         }
         var preserved = ""
         var rest = run
-        while rest.first == "*" {
-            preserved.append("*")
+        // Peel any contiguous run of leading `*` / `.` / `:` chars
+        // (in any order). Each is structurally a syllable-closing
+        // mark that cannot anchor onto a digit; surfacing them
+        // verbatim preserves the user's keystrokes.
+        while let first = rest.first, first == "*" || first == "." || first == ":" {
+            preserved.append(first)
             rest.removeFirst()
         }
         if rest.isEmpty { return preserved }
