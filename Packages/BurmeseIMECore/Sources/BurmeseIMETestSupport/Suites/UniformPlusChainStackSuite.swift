@@ -255,5 +255,87 @@ public enum UniformPlusChainStackSuite {
                 )
             }
         },
+
+        // TASK-067: rank-0 surface for every uniform `<C>+` × N chain
+        // with N in {10, 11, 12, 15, 20, 30} must pass
+        // `SyllableParser.scanOutputLegality`. Pre-fix the engine
+        // crossed the `compositionWindowSize = 18` threshold and the
+        // windowed glue path materialised a chained-virama surface
+        // (`<C> 1039 <C> 1039 <C> 1039 …`) that fails the legality
+        // scan. Covers the full set of doubleable consonants the
+        // task body enumerates (ka/pa/ta/ma/na/sa).
+        TestCase("uniformPlusChain_thresholdRank0Legal") { ctx in
+            let engine = emptyEngine()
+            for consonant in ["ka", "pa", "ta", "ma", "na", "sa"] {
+                for n in [10, 11, 12, 15, 20, 30] {
+                    let buffer = String(repeating: "\(consonant)+", count: n)
+                    let surface = engine.update(buffer: buffer, context: [])
+                        .candidates.first?.surface ?? ""
+                    // Literal raw buffer is acceptable as rank 0 — the
+                    // task's desired state allows either the legal
+                    // Myanmar chain OR the literal fallback. Both
+                    // satisfy `scanOutputLegality` (the literal has no
+                    // Myanmar scalars and so trivially scans clean).
+                    ctx.assertTrue(
+                        SyllableParser.scanOutputLegality(surface),
+                        "\(consonant)+×\(n)",
+                        detail: "rank-0='\(surface)' [\(hex(surface))] fails scanOutputLegality"
+                    )
+                }
+            }
+        },
+
+        // TASK-067: the triple-virama-stack signature `<C> 1039 <C>
+        // 1039 <C>` must not appear in any candidate at rank ≤ 3 for
+        // the same chain lengths. The acceptance criterion is class-
+        // level; the fix must remove the illegal shape from the
+        // upper panel, not just rank 0.
+        TestCase("uniformPlusChain_thresholdNoTripleStackTop3") { ctx in
+            let engine = emptyEngine()
+            for consonant in ["ka", "pa", "ta", "ma", "na", "sa"] {
+                for n in [10, 11, 12, 15, 20, 30] {
+                    let buffer = String(repeating: "\(consonant)+", count: n)
+                    let state = engine.update(buffer: buffer, context: [])
+                    for (rank, c) in state.candidates.prefix(3).enumerated() {
+                        let scalars = Array(c.surface.unicodeScalars.map(\.value))
+                        var hasTripleStack = false
+                        if scalars.count >= 5 {
+                            for i in 0..<(scalars.count - 4) {
+                                if scalars[i + 1] == 0x1039 && scalars[i + 3] == 0x1039 {
+                                    hasTripleStack = true
+                                    break
+                                }
+                            }
+                        }
+                        ctx.assertFalse(
+                            hasTripleStack,
+                            "\(consonant)+×\(n) rank \(rank)",
+                            detail: "rank-\(rank)='\(c.surface)' [\(hex(c.surface))] contains triple-virama-stack"
+                        )
+                    }
+                }
+            }
+        },
+
+        // TASK-067: literal raw buffer remains reachable for every
+        // long uniform chain (extends `uniformPlusChain_literalReachable`
+        // to N=10..30 across the full consonant set). The literal
+        // escape hatch must always exist somewhere in the panel
+        // (CLAUDE.md §2).
+        TestCase("uniformPlusChain_thresholdLiteralReachable") { ctx in
+            let engine = emptyEngine()
+            for consonant in ["ka", "pa", "ta", "ma", "na", "sa", "la"] {
+                for n in [10, 11, 12, 15, 20, 30] {
+                    let buffer = String(repeating: "\(consonant)+", count: n)
+                    let state = engine.update(buffer: buffer, context: [])
+                    let surfaces = state.candidates.map(\.surface)
+                    ctx.assertTrue(
+                        surfaces.contains(buffer),
+                        "\(consonant)+×\(n)",
+                        detail: "literal '\(buffer)' missing from panel"
+                    )
+                }
+            }
+        },
     ])
 }

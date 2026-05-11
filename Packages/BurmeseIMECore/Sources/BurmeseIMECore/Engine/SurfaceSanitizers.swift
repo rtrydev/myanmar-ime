@@ -1041,6 +1041,70 @@ extension BurmeseEngine {
         return candidates
     }
 
+    /// TASK-067 sanitizer: drop candidates whose surface carries the
+    /// triple-virama-stack signature — three or more consonants joined
+    /// by two or more viramas in a row (`<C> 1039 <C> 1039 <C>`).
+    /// Burmese caps virama stacks at two consonants; the chained shape
+    /// has no orthographic interpretation and is rejected by the
+    /// parser's own `SyllableParser.scanOutputLegality` predicate.
+    ///
+    /// The chained-stack surface reaches the post-affix candidate set
+    /// only via the windowed-glue path for long uniform `<C>+<C>+...`
+    /// chains (N ≥ 10, buffer length crosses `compositionWindowSize`).
+    /// In that path the frozen-prefix surface and the active-tail
+    /// surface each pass the parser's legality scan in isolation, but
+    /// their seam materialises a chained-virama-stack. The merged-
+    /// stage `sanitizeMalformedMyanmarMarks` sees no clean sibling
+    /// (every Myanmar candidate at the windowed length shares the
+    /// shape) so the "preserve when no clean sibling exists" fallback
+    /// keeps the illegal candidates. Once the literal fallback is
+    /// injected post-`updateInternal` the panel has a clean ASCII
+    /// sibling, and this targeted filter can drop the chained-virama
+    /// surfaces.
+    ///
+    /// Scoped to the triple-stack signature (rather than the full
+    /// `scanOutputLegality` predicate) so unrelated mid-typing
+    /// orphan-mark shapes (`thueiooz` and similar — incremental
+    /// typing of a long sentence where the next keystroke resolves
+    /// the orphan) stay reachable, preserving the existing
+    /// `UncoveredVowelChainShapeSuite::midTypingPrefixes_doNotForce
+    /// LiteralAtRank0` invariant.
+    ///
+    /// Same fallback policy as the other orphan sanitizers: only
+    /// filter when at least one clean candidate exists, otherwise
+    /// keep violators so the panel is not empty.
+    internal static func sanitizeTripleViramaStack(_ candidates: [Candidate]) -> [Candidate] {
+        let cleanFiltered = candidates.filter {
+            !surfaceContainsTripleViramaStack($0.surface)
+        }
+        if !cleanFiltered.isEmpty {
+            return cleanFiltered
+        }
+        return candidates
+    }
+
+    @_spi(Testing) public static func surfaceContainsTripleViramaStack(_ surface: String) -> Bool {
+        let scalars = Array(surface.unicodeScalars).map(\.value)
+        guard scalars.count >= 5 else { return false }
+        @inline(__always) func isConsonantBase(_ v: UInt32) -> Bool {
+            return (v >= 0x1000 && v <= 0x1021) || v == 0x103F
+        }
+        for i in 0..<(scalars.count - 4) {
+            // `<C> 1039 <C> 1039 <C>` — three consonants joined by
+            // two viramas. The parser's `scanOutputLegality`
+            // triple-stack guard (Parser/Finalization.swift:431-436)
+            // uses the same shape.
+            guard scalars[i + 1] == 0x1039,
+                  scalars[i + 3] == 0x1039,
+                  isConsonantBase(scalars[i]),
+                  isConsonantBase(scalars[i + 2]),
+                  isConsonantBase(scalars[i + 4])
+            else { continue }
+            return true
+        }
+        return false
+    }
+
     @_spi(Testing) public static func surfaceContainsBareIndepVowelAsat(_ surface: String) -> Bool {
         let scalars = Array(surface.unicodeScalars).map(\.value)
         guard scalars.count >= 2 else { return false }

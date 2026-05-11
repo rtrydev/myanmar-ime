@@ -360,6 +360,27 @@ public final class BurmeseEngine: @unchecked Sendable {
         // Once the literal fallback is injected the panel has a clean
         // sibling so the filter pass can drop the malformed Myanmar.
         injected.candidates = Self.sanitizeBareIndepVowelAsat(injected.candidates)
+        // TASK-067: re-run the triple-virama-stack sanitizer with
+        // the literal fallback in place. The windowed-glue path for
+        // long uniform `<C>+<C>+...` chains (N ≥ 10, buffer length
+        // crosses `compositionWindowSize = 18`) stitches a frozen-
+        // prefix surface and an active-tail surface that each pass
+        // the parser's own legality scan in isolation but whose seam
+        // materialises a chained-virama-stack
+        // (`<C> 1039 <C> 1039 <C>`) which the legality scan correctly
+        // rejects. Inside `updateInternal` the merged-stage
+        // `sanitizeMalformedMyanmarMarks` preserves the illegal
+        // candidates because every Myanmar surface for the chain
+        // shares the violation. Once the literal fallback is
+        // injected the panel has a verifiably clean sibling (pure
+        // ASCII, no Myanmar scalars), so this targeted filter can
+        // drop the post-glue triple-stack surfaces without leaving
+        // the panel empty. Scoping the filter to the triple-stack
+        // shape (rather than the full `scanOutputLegality`
+        // predicate) keeps unrelated mid-typing surfaces (orphan
+        // dep-vowel chains during incremental typing) reachable
+        // — those are not in this task's class.
+        injected.candidates = Self.sanitizeTripleViramaStack(injected.candidates)
         // TASK-056: same pattern — re-run the interleaved-composing-
         // punct sanitizer with the literal fallback in place. The
         // doubled `**`, `''`, `::`, `..` runs (and trailing-singleton
