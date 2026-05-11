@@ -91,6 +91,10 @@ public enum LexiconLMDriftSuite {
                 if candidates.isEmpty { continue }
                 var missing: [String] = []
                 for candidate in candidates where lm.wordId(for: candidate.surface) == nil {
+                    // Intentionally-OOV curated additions (`အံး`, `ကြီ`)
+                    // are reachable per CLAUDE.md §7 but absent from
+                    // LM vocab. They get the `<unk>` log-prob floor.
+                    if CuratedLexicon.oovAllowedSurfaces.contains(candidate.surface) { continue }
                     missing.append(candidate.surface)
                 }
                 ctx.assertTrue(

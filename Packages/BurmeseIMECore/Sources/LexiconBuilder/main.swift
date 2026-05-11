@@ -132,6 +132,60 @@ func isYapinReading(_ reading: String) -> Bool {
     return false
 }
 
+/// Per-surface alias rows that the reverse-romanizer convention cannot
+/// produce on its own. The canonical reading and its digit-stripped
+/// alias still come from `ReverseRomanizer.romanize` + the standard
+/// `indexedAliasReadings` pipeline; entries here are *additional* rows
+/// (typically a creaky-tone variant) that traditional typing
+/// conventions expect to reach the same surface.
+///
+/// See TASK-073: the independent vowel `ဥ` is pronounced with creaky
+/// tone (`/ʔù/`) but the letter carries no tone mark, so the romanizer
+/// emits canonical `u` (no creaky). Users typing `u.` expect `ဥ`.
+/// Stamping `ဥ → "u."` via `overrides.py` would drop the canonical
+/// `u` alias entirely (digit-stripped form is `u.`, not `u`) and
+/// break `RankingSuite.task02 / task10 / tasksDir03 / issueD.u`.
+/// Add `u.` here as an extra alias instead.
+let curatedExtraAliases: [String: [(reading: String, penalty: Int)]] = [
+    "\u{1025}": [("u.", 0)],   // ဥ
+]
+
+/// Minimum unigram score (0..1000 scale) for specific surfaces. After
+/// the log-normalized corpus-frequency score is computed, the stored
+/// score is `max(corpusScore, curatedMinScore[surface])`. Used to lift
+/// structurally-canonical surfaces above more-frequent-but-less-
+/// preferred orthographic rivals — see TASK-074 (anusvara vs n-asat
+/// for the bare `an` / `an:` readings).
+// Floors are well above the natural corpus scores of the rivals so the
+// composite-score comparator (`log(rank_score) + α·lmLogProb`, α ≈ 0.4)
+// can't let an LM-favored sibling overtake. ~900 puts the lookup well
+// past the 0.4-nat LM gap a common rival can have.
+let curatedMinScore: [String: Double] = [
+    "\u{1021}\u{1036}":         900.0,  // အံ — beats အန် (649.71) for reading `an`
+    "\u{1021}\u{1036}\u{1038}": 850.0,  // အံး — beats အန်း (515.37) for reading `an:`
+    "\u{1000}\u{103C}\u{102E}": 900.0,  // ကြီ — panel-reachable bare ya-yit i (TASK-075)
+]
+
+/// Surfaces to inject into the lexicon even if absent from the corpus
+/// vocab. Each entry is (surface, raw-frequency, override-reading).
+/// The frequency is a floor; if the surface is already present in the
+/// TSV (e.g. corpus added it) the corpus row wins. The override-reading
+/// is stamped as canonical, bypassing reverse-romanization for the
+/// injected row.
+///
+/// Surfaces here are typically *valid* Burmese words that fell below
+/// the 80k vocab cap or didn't accrue enough segmenter counts to be
+/// kept. See TASK-074 (`အံး`) and TASK-075 (`ကြီ`).
+let curatedAdditions: [(surface: String, frequency: Double, reading: String)] = [
+    ("\u{1021}\u{1036}\u{1038}", 1.0, "an:"),    // အံး — anusvara + visarga
+    ("\u{1000}\u{103C}\u{102E}", 1.0, "ky2i2"),  // ကြီ — bare ya-yit + long-i
+]
+
+/// Surfaces in `curatedAdditions` that are intentionally absent from
+/// the LM vocab. Shared with the runtime drift suite via
+/// `CuratedLexicon.oovAllowedSurfaces` in BurmeseIMECore.
+let curatedOOVAllowed: Set<String> = CuratedLexicon.oovAllowedSurfaces
+
 // Parse TSV lines
 var entries: [LexiconEntry] = []
 let lines = content.components(separatedBy: .newlines)
@@ -165,6 +219,23 @@ for line in lines {
 
     let overrideReading = fields.count >= 3 && !fields[2].isEmpty ? fields[2] : nil
     entries.append(LexiconEntry(surface: surface, frequency: frequency, overrideReading: overrideReading))
+}
+
+// Inject curated additions for surfaces absent from the corpus TSV.
+// Skip if the surface is already present (corpus row wins on frequency
+// floor) — `curatedMinScore` handles bumping existing rows.
+let existingSurfaces = Set(entries.map(\.surface))
+var injectedCount = 0
+for addition in curatedAdditions where !existingSurfaces.contains(addition.surface) {
+    entries.append(LexiconEntry(
+        surface: addition.surface,
+        frequency: addition.frequency,
+        overrideReading: addition.reading
+    ))
+    injectedCount += 1
+}
+if injectedCount > 0 {
+    writeStderr("Injected \(injectedCount) curated addition(s)\n")
 }
 
 writeStderr("Parsed \(entries.count) entries from \(inputPath)\n")
@@ -280,7 +351,8 @@ entryLoop: for entry in entries {
     }
 
     // Normalize score: log-scale frequency normalized to 0-1000
-    let score = maxFreq > 0 ? (log(entry.frequency + 1) / log(maxFreq + 1)) * 1000.0 : 0.0
+    let baseScore = maxFreq > 0 ? (log(entry.frequency + 1) / log(maxFreq + 1)) * 1000.0 : 0.0
+    let score = max(baseScore, curatedMinScore[entry.surface] ?? 0.0)
 
     // Insert into entries
     let surfaceCStr = entry.surface
@@ -397,6 +469,35 @@ entryLoop: for entry in entries {
         }
     }
 
+    // Per-surface curated extra aliases (TASK-073): reading variants
+    // the reverse-romanizer can't produce (e.g. creaky-tone form `u.`
+    // for surface `ဥ`). Emitted alongside the canonical aliases, with
+    // the table-supplied penalty.
+    if let extras = curatedExtraAliases[entry.surface] {
+        for extra in extras {
+            sqlite3_bind_text(insertAliasStmt, 1, extra.reading, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            sqlite3_bind_text(insertAliasStmt, 2, readingCStr, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            sqlite3_bind_int64(insertAliasStmt, 3, entryId)
+            sqlite3_bind_double(insertAliasStmt, 4, score)
+            sqlite3_bind_int(insertAliasStmt, 5, Int32(extra.penalty))
+            if sqlite3_step(insertAliasStmt) != SQLITE_DONE {
+                writeStderr("Warning: failed to insert curated extra alias for \(entry.surface)\n")
+            }
+            sqlite3_reset(insertAliasStmt)
+
+            sqlite3_bind_text(insertComposeStmt, 1, extra.reading, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            sqlite3_bind_text(insertComposeStmt, 2, readingCStr, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            sqlite3_bind_int64(insertComposeStmt, 3, entryId)
+            sqlite3_bind_double(insertComposeStmt, 4, score)
+            sqlite3_bind_int(insertComposeStmt, 5, Int32(extra.penalty))
+            sqlite3_bind_int(insertComposeStmt, 6, 0)
+            if sqlite3_step(insertComposeStmt) != SQLITE_DONE {
+                writeStderr("Warning: failed to insert curated extra compose for \(entry.surface)\n")
+            }
+            sqlite3_reset(insertComposeStmt)
+        }
+    }
+
     insertCount += 1
     writtenSurfaces.append(entry.surface)
 }
@@ -440,6 +541,7 @@ if let lmPath = resolvedLMPath {
         var missing: [String] = []
         let maxToList = 10
         for surface in writtenSurfaces where lm.wordId(for: surface) == nil {
+            if curatedOOVAllowed.contains(surface) { continue }
             missing.append(surface)
         }
         if missing.isEmpty {
