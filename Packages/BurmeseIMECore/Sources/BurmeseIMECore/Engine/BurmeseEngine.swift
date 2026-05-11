@@ -1936,9 +1936,44 @@ public final class BurmeseEngine: @unchecked Sendable {
         let promotedYapinGrammarFirst = appliesYapinPromotion
             && primaryGrammar.first.map { Self.isYapinReading($0.candidate.reading) } == true
 
+        // TASK-073: when the top grammar candidate matches the user's
+        // exact alias prefix AND has been absorbed via a curated
+        // lexicon row whose score sits well above the best
+        // pure-lexicon candidate's score, promote it ahead of the
+        // prioritized lexicon. The curated alias is the user-respect-
+        // ing form (`u.` → `ဥ`); the pure-lexicon sibling (`u.` →
+        // `အူ့`) carries a lower stored score and only wins the
+        // current merge order because all `exactAliasLexicon`
+        // entries are placed ahead of all grammar entries
+        // unconditionally.
+        let topGrammarBeatsPrioritizedLexicon: Bool = {
+            guard let topGrammar = primaryGrammar.first else { return false }
+            // Only when the grammar candidate's surface differs from
+            // the prioritized lexicon's top (otherwise the merge
+            // already handles them) AND the grammar candidate's
+            // alias-reading exactly matches the user prefix.
+            guard let topLex = prioritizedLexicon.first else { return false }
+            guard topGrammar.candidate.surface != topLex.candidate.surface else { return false }
+            let grammarAlias = Romanization.aliasReading(topGrammar.candidate.reading)
+            guard exactAliasPrefixes.contains(grammarAlias) else { return false }
+            // Score dominance: grammar has absorbed > 2x the top
+            // lexicon's score. Tight enough that ordinary grammar
+            // candidates with weak lexicon absorption don't trigger
+            // the override.
+            return topGrammar.candidate.score > topLex.candidate.score * 2.0
+        }()
         var merged: [Candidate]
         let primaryGrammarStart: Int
         if promotedYapinGrammarFirst, let firstGrammar = primaryGrammar.first {
+            merged = []
+            merged.append(firstGrammar.candidate)
+            primaryGrammarStart = 1
+            for lexiconCandidate in prioritizedLexicon where merged.count < candidatePageSize {
+                if !merged.contains(where: { $0.surface == lexiconCandidate.candidate.surface }) {
+                    merged.append(lexiconCandidate.candidate)
+                }
+            }
+        } else if topGrammarBeatsPrioritizedLexicon, let firstGrammar = primaryGrammar.first {
             merged = []
             merged.append(firstGrammar.candidate)
             primaryGrammarStart = 1

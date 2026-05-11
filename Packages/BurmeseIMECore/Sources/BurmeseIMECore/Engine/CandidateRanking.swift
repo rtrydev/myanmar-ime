@@ -202,6 +202,20 @@ extension BurmeseEngine {
             && abs(lmGap) > Self.lmDominanceThreshold {
             return lmGap > 0
         }
+        // TASK-073 / TASK-074: when EXACTLY one side carries a curated
+        // alias absorption whose surface is intentionally OOV in the
+        // LM vocab (`absorbedMissingFromLM == true`), the composite
+        // tilt against the `<unk>` floor punishes the curated form
+        // even though the lexicon row encodes a very high stored score
+        // (the curated alias `u.` → `ဥ` at 745, `an:` → `အံး` at 850).
+        // In that one-sided case, fall back to a direct score
+        // comparison so the curated-alias surface wins rank 0 when it
+        // dominates the parser's open-class sibling on stored score.
+        // Both candidates remain in the panel; only top-1 changes.
+        if lhs.absorbedMissingFromLM != rhs.absorbedMissingFromLM,
+           lhs.candidate.score != rhs.candidate.score {
+            return lhs.candidate.score > rhs.candidate.score
+        }
         // Composite score combines rank_score and LM log-prob. For
         // grammar candidates, `candidate.score` = raw parser DP score +
         // any absorbed lexicon frequency (see the merge loop in `update`),
