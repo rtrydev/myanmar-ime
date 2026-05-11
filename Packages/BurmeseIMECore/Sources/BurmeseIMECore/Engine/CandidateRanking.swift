@@ -115,6 +115,37 @@ extension BurmeseEngine {
                 return lhs.lmLogProb > rhs.lmLogProb
             }
         }
+        // TASK-071: when two grammar candidates differ by exactly one
+        // scalar substitution — one carrying an aa-family dependent
+        // vowel (U+102B / U+102C) and the other carrying a bare
+        // consonant base (U+1000..U+1021) at the same position — the
+        // aa-family form is the user-respecting `<C>aa` parse and the
+        // bare-base form is the unintended `<C> + <particle>`
+        // re-segmentation. The pattern arises when the buffer types
+        // `<C>ar'<X>`: the apostrophe boundary makes both parses
+        // available, the lattice's LM composite favours the bare-base
+        // form because high-frequency single-letter particles (`ရ`,
+        // `င်`, `သ`) carry strong unigram mass, but the user's
+        // typing intent is unambiguously the `<C>aa` form. Prefer the
+        // aa-family side directly when the parser score AGREES
+        // (`parserScore` is the per-arc DP score, which already
+        // reflects the parser's structural preference for the
+        // 2-syllable parse). Falling back to `parserScore` rather
+        // than running the composite avoids the LM-driven flip; the
+        // bare-base sibling stays in the panel at lower rank.
+        if let prefer = Self.preferredAaOverBareBaseSubstitution(
+            lhs: lhs.candidate.surface,
+            rhs: rhs.candidate.surface
+        ) {
+            // `prefer == .lhs` means the lhs surface is the
+            // aa-family form (the user-respecting parse).
+            switch prefer {
+            case .lhs:
+                if lhs.parserScore >= rhs.parserScore { return true }
+            case .rhs:
+                if rhs.parserScore >= lhs.parserScore { return false }
+            }
+        }
         // LM dominance: when BOTH candidates have real (non-OOV) LM
         // scores AND the log-prob gap exceeds `lmDominanceThreshold`,
         // trust LM and skip the composite score check. This prevents a
@@ -311,6 +342,68 @@ extension BurmeseEngine {
             previousWasVirama = (v == 0x1039)
         }
         return count
+    }
+
+    /// TASK-071 helper. When `lhs` and `rhs` differ by exactly one
+    /// scalar at the same index — one carrying an aa-family dependent
+    /// vowel (U+102B / U+102C) and the other carrying a bare consonant
+    /// base (U+1000..U+1021), with the bare base NOT followed by any
+    /// dep-vowel / medial / asat / virama (i.e. the base is a
+    /// stand-alone single-letter syllable, the `<particle>` shape) —
+    /// return which side is the aa-family form. Used by
+    /// `grammarCandidateIsBetter` to prefer the user-respecting
+    /// `<C>aa` parse over the lattice's LM-driven `<C> + <particle>`
+    /// re-segmentation. Returns nil when the surfaces don't fit the
+    /// pattern.
+    internal enum AaBaseSubstitutionPreference {
+        case lhs
+        case rhs
+    }
+    internal static func preferredAaOverBareBaseSubstitution(
+        lhs: String,
+        rhs: String
+    ) -> AaBaseSubstitutionPreference? {
+        let a = Array(lhs.unicodeScalars).map(\.value)
+        let b = Array(rhs.unicodeScalars).map(\.value)
+        guard a.count == b.count, a.count >= 2 else { return nil }
+        var diffIdx = -1
+        for i in 0..<a.count where a[i] != b[i] {
+            if diffIdx >= 0 { return nil }
+            diffIdx = i
+        }
+        guard diffIdx >= 0 else { return nil }
+        let va = a[diffIdx], vb = b[diffIdx]
+        @inline(__always) func isAaDepVowel(_ v: UInt32) -> Bool {
+            return v == 0x102B || v == 0x102C
+        }
+        @inline(__always) func isConsonantBase(_ v: UInt32) -> Bool {
+            return v >= 0x1000 && v <= 0x1021
+        }
+        @inline(__always) func isAttachableMark(_ v: UInt32) -> Bool {
+            return (v >= 0x102B && v <= 0x103E) || v == 0x1039
+        }
+        // Determine which side is the aa-family dep-vowel form.
+        let lhsIsAa = isAaDepVowel(va) && isConsonantBase(vb)
+        let rhsIsAa = isAaDepVowel(vb) && isConsonantBase(va)
+        guard lhsIsAa || rhsIsAa else { return nil }
+        // The aa-family scalar must attach to a consonant base
+        // (previous scalar) — confirms the substitution is a
+        // legitimate aa-vowel attached to the prior onset, not a
+        // stray dep-vowel.
+        guard diffIdx >= 1 else { return nil }
+        let prev = (lhsIsAa ? a : b)[diffIdx - 1]
+        guard isConsonantBase(prev) else { return nil }
+        // The bare-base side must be a stand-alone single-letter
+        // syllable: NOT followed by any dep-vowel / medial / asat /
+        // virama. If it carries a follow-on mark, it is a legitimate
+        // syllable in its own right (not a stranded particle) and
+        // the preference does not apply.
+        let bareSurface = lhsIsAa ? b : a
+        if diffIdx + 1 < bareSurface.count {
+            let follower = bareSurface[diffIdx + 1]
+            if isAttachableMark(follower) { return nil }
+        }
+        return lhsIsAa ? .lhs : .rhs
     }
 
     internal static func isCodaOnlySingleScalarDifference(_ lhs: String, _ rhs: String) -> Bool {
