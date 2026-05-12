@@ -19,6 +19,8 @@ struct ContentView: View {
                     .tabItem { Label("Setup", systemImage: "arrow.down.circle") }
                 PreferencesTab(vm: vm)
                     .tabItem { Label("Preferences", systemImage: "gearshape") }
+                HistoryTab(vm: vm)
+                    .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
                 SyntaxReferenceView(vm: vm)
                     .tabItem { Label("Syntax", systemImage: "character.book.closed") }
                 MyanmarToInputView()
@@ -53,6 +55,73 @@ private struct PreferencesTab: View {
             }
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+private struct HistoryTab: View {
+    @ObservedObject var vm: IMESettingsViewModel
+    @State private var showingClearConfirm = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Learned entries")
+                            .font(.headline)
+                        Text("Selections the IME has remembered. Removing one stops it from ranking above other candidates for the same input.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 12)
+                    HStack(spacing: 8) {
+                        Button("Refresh") { vm.refreshHistory() }
+                            .buttonStyle(.borderless)
+                        Button("Clear all", role: .destructive) {
+                            showingClearConfirm = true
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+
+                if vm.historyEntries.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("No learned entries yet.")
+                            .font(.callout)
+                        Text("Pick candidates from the panel; they'll appear here.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 24)
+                } else {
+                    LazyVStack(spacing: 0) {
+                        ForEach(vm.historyEntries, id: \.self) { entry in
+                            HistoryRow(entry: entry) {
+                                vm.removeHistoryEntry(reading: entry.reading, surface: entry.surface)
+                            }
+                            Divider()
+                        }
+                    }
+                }
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .onAppear { vm.refreshHistory() }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            vm.refreshHistory()
+        }
+        .confirmationDialog(
+            "Reset learned history?",
+            isPresented: $showingClearConfirm
+        ) {
+            Button("Reset", role: .destructive) { vm.resetLearnedHistory() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This clears all remembered candidate selections. This cannot be undone.")
         }
     }
 }
@@ -130,14 +199,9 @@ private struct PreferencesView: View {
                 candidateRankingSection
                 textOutputSection
                 learningSection
-                historySection
                 diagnosticsSection
             }
             .formStyle(.grouped)
-        }
-        .onAppear { vm.refreshHistory() }
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
-            vm.refreshHistory()
         }
     }
 
@@ -209,31 +273,6 @@ private struct PreferencesView: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("This clears all remembered candidate selections. This cannot be undone.")
-            }
-        }
-    }
-
-    private var historySection: some View {
-        Section("Typing history") {
-            Text("Remove individual entries the IME has learned. Removing one stops it from being ranked above other candidates for that input.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            if vm.historyEntries.isEmpty {
-                Text("No learned entries yet.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(vm.historyEntries, id: \.self) { entry in
-                            HistoryRow(entry: entry) {
-                                vm.removeHistoryEntry(reading: entry.reading, surface: entry.surface)
-                            }
-                            Divider()
-                        }
-                    }
-                }
-                .frame(maxHeight: 220)
             }
         }
     }
