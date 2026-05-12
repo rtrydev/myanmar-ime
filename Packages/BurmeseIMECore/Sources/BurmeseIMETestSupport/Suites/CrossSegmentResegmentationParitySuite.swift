@@ -26,7 +26,7 @@ import BurmeseIMECore
 /// merely sit within the 1-nat tie band. The full-buffer LM is the
 /// strongest signal available; if it prefers the new segmentation
 /// even narrowly, the anchor is stale.
-public enum TASK076CrossSegmentResegmentationSuite {
+public enum CrossSegmentResegmentationParitySuite {
 
     private static func makeBundledEngine() -> BurmeseEngine? {
         guard let lexPath = BundledArtifacts.lexiconPath,
@@ -55,7 +55,7 @@ public enum TASK076CrossSegmentResegmentationSuite {
         return state.candidates.first?.surface
     }
 
-    public static let suite = TestSuite(name: "TASK076CrossSegmentResegmentation", cases: [
+    public static let suite = TestSuite(name: "CrossSegmentResegmentationParity", cases: [
 
         // Direct repro witnesses — these are the two buffers
         // IncrementalParitySuite already exercises, called out here

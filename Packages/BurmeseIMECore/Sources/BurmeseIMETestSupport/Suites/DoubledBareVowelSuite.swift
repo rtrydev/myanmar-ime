@@ -130,8 +130,8 @@ public enum DoubledBareVowelSuite {
             }
         },
 
-        // TASK-016 baseline — `kaa` must continue to render `ကအ`.
-        TestCase("doubledA_unchanged_TASK016") { ctx in
+        // `kaa` must continue to render `ကအ` — baseline locked in.
+        TestCase("doubledA_unchanged_under_repetition") { ctx in
             let engine = emptyEngine()
             let cases: [(buffer: String, expected: [UInt32])] = [
                 ("kaa",   [0x1000, 0x1021]),

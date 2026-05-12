@@ -12,7 +12,7 @@ import BurmeseIMECore
 ///
 /// Predicate: for an input containing no ASCII digit, the rank-0 surface
 /// must contain no Myanmar digit scalar (U+1040..U+1049).
-public enum TASK059LexiconWaBaCleanRankZeroSuite {
+public enum LexiconPhantomDigitFreeRankZeroSuite {
 
     private static let myanmarDigits: ClosedRange<UInt32> = 0x1040...0x1049
 
@@ -80,6 +80,6 @@ public enum TASK059LexiconWaBaCleanRankZeroSuite {
             )
         })
 
-        return TestSuite(name: "TASK059LexiconWaBaCleanRankZero", cases: cases)
+        return TestSuite(name: "LexiconPhantomDigitFreeRankZero", cases: cases)
     }()
 }

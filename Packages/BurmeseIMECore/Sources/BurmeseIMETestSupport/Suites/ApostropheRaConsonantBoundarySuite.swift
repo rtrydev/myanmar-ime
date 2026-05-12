@@ -17,7 +17,7 @@ import BurmeseIMECore
 /// dep-vowel sibling wins when the only difference between the two
 /// candidates is a `<consonant base, no following dep-mark>` vs
 /// `<aa-family dep-vowel>` substitution at the same scalar index.
-public enum TASK071ApostropheRaConsonantSuite {
+public enum ApostropheRaConsonantBoundarySuite {
 
     private static func bundledEngine(_ ctx: TestContext) -> BurmeseEngine? {
         guard let lexPath = BundledArtifacts.lexiconPath,
@@ -119,6 +119,6 @@ public enum TASK071ApostropheRaConsonantSuite {
             )
         })
 
-        return TestSuite(name: "TASK071ApostropheRaConsonant", cases: cases)
+        return TestSuite(name: "ApostropheRaConsonantBoundary", cases: cases)
     }()
 }

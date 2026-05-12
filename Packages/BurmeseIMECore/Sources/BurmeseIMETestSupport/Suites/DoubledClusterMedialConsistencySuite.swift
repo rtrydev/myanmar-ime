@@ -19,7 +19,7 @@ import BurmeseIMECore
 /// `kyaung`, `khyin`, `gyaa`, `chu`, …), they should resolve to the
 /// same medial. Symptom 1 falls out as a consequence: with consistent
 /// medial selection, oneshot and incremental no longer disagree.
-public enum TASK072DoubledClusterMedialConsistencySuite {
+public enum DoubledClusterMedialConsistencySuite {
 
     private static func bundledEngine(_ ctx: TestContext) -> BurmeseEngine? {
         guard let lexPath = BundledArtifacts.lexiconPath,
@@ -145,6 +145,6 @@ public enum TASK072DoubledClusterMedialConsistencySuite {
             })
         }
 
-        return TestSuite(name: "TASK072DoubledClusterMedialConsistency", cases: cases)
+        return TestSuite(name: "DoubledClusterMedialConsistency", cases: cases)
     }()
 }

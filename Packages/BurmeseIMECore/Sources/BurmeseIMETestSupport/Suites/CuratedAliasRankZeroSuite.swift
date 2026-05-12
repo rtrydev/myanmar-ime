@@ -16,7 +16,7 @@ import BurmeseIMECore
 /// The acceptance criterion is the same for both tasks: the curated
 /// alias's surface must reach rank 0 when the user types the alias
 /// key. The parser-emitted sibling stays in the panel below it.
-public enum TASK073TASK074CuratedAliasRankZeroSuite {
+public enum CuratedAliasRankZeroSuite {
 
     private static func bundledEngine(_ ctx: TestContext) -> BurmeseEngine? {
         guard let lexPath = BundledArtifacts.lexiconPath,
@@ -38,7 +38,7 @@ public enum TASK073TASK074CuratedAliasRankZeroSuite {
         var cases: [TestCase] = []
 
         // TASK-073: `u.` (creaky-tone independent vowel `ဥ`).
-        cases.append(TestCase("TASK073_uDot_ranks_independent_u") { ctx in
+        cases.append(TestCase("uDot_ranks_independent_u_curatedAlias") { ctx in
             guard let engine = bundledEngine(ctx) else { return }
             let state = engine.update(buffer: "u.", context: [])
             let top = state.candidates.first?.surface ?? ""
@@ -46,7 +46,7 @@ public enum TASK073TASK074CuratedAliasRankZeroSuite {
         })
 
         // TASK-074: `an:` (anusvara `အံး`).
-        cases.append(TestCase("TASK074_anColon_ranks_anusvara_form") { ctx in
+        cases.append(TestCase("anColon_ranks_anusvara_form_curatedAlias") { ctx in
             guard let engine = bundledEngine(ctx) else { return }
             let state = engine.update(buffer: "an:", context: [])
             let top = state.candidates.first?.surface ?? ""
@@ -89,6 +89,6 @@ public enum TASK073TASK074CuratedAliasRankZeroSuite {
             })
         }
 
-        return TestSuite(name: "TASK073TASK074CuratedAliasRankZero", cases: cases)
+        return TestSuite(name: "CuratedAliasRankZero", cases: cases)
     }()
 }

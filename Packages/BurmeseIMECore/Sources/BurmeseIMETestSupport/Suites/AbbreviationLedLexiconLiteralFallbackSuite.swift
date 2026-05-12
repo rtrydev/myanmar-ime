@@ -36,7 +36,7 @@ import Foundation
 /// - TASK-050c (romanization-scheme expansion question — adding
 ///   `ein`/`oun` as phonetic aliases of `ain`/`own`): deferred,
 ///   needs explicit product call. See task body.
-public enum TASK050OunEinIllegalSurfaceSuite {
+public enum AbbreviationLedLexiconLiteralFallbackSuite {
 
     private static func emptyEngine() -> BurmeseEngine {
         BurmeseEngine(candidateStore: EmptyCandidateStore(), languageModel: NullLanguageModel())
@@ -61,7 +61,7 @@ public enum TASK050OunEinIllegalSurfaceSuite {
             .joined(separator: " ")
     }
 
-    public static let suite = TestSuite(name: "TASK050OunEinIllegalSurface", cases: [
+    public static let suite = TestSuite(name: "AbbreviationLedLexiconLiteralFallback", cases: [
 
         // TASK-050b core: bare `ein` panel must contain the
         // literal-ASCII fallback. Reproduces the §2 violation

@@ -13,7 +13,7 @@ import BurmeseIMECore
 ///
 /// Failing pattern shape: `<syllable-with-trailing-boundary>aha<X>`
 /// where the buffer wants the second `a` to anchor a fresh U+1021.
-public enum TASK070MidSentenceAhaPrefixSuite {
+public enum MidSentenceAhaPrefixAfterBoundarySuite {
 
     private static func bundledEngine(_ ctx: TestContext) -> BurmeseEngine? {
         guard let lexPath = BundledArtifacts.lexiconPath,
@@ -141,6 +141,6 @@ public enum TASK070MidSentenceAhaPrefixSuite {
             })
         }
 
-        return TestSuite(name: "TASK070MidSentenceAhaPrefix", cases: cases)
+        return TestSuite(name: "MidSentenceAhaPrefixAfterBoundary", cases: cases)
     }()
 }
