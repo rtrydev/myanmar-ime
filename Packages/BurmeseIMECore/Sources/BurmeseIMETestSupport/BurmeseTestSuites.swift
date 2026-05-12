@@ -162,5 +162,6 @@ public enum BurmeseTestSuites {
         TASK071ApostropheRaConsonantSuite.suite,
         TASK072DoubledClusterMedialConsistencySuite.suite,
         TASK073TASK074CuratedAliasRankZeroSuite.suite,
+        TASK076CrossSegmentResegmentationSuite.suite,
     ]
 }

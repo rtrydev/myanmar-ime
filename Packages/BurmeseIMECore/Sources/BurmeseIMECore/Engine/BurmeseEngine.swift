@@ -2300,6 +2300,45 @@ public final class BurmeseEngine: @unchecked Sendable {
                            !isCodaSwap {
                             continue
                         }
+                        // TASK-076: cross-segment re-segmentation guard.
+                        // The recording-time dominance gate at the
+                        // anchor-append site is structurally blind to
+                        // competitors that emerge from a different
+                        // segmentation one keystroke later (an anchor
+                        // committed at `achitthon` cannot see the
+                        // `chit+tho+ne` reading that the full
+                        // `achitthone` lattice prefers — it does not
+                        // exist in the length-9 panel). When the
+                        // anchor's surface is NOT a scalar prefix of
+                        // the comparator-chosen merged top AND the
+                        // surfaces differ by more than a medial / coda
+                        // swap, the candidate represents a different
+                        // segmentation that the comparator has already
+                        // out-voted using structural + lexicon + LM
+                        // factors combined. The < 1.0 nat LM "tie
+                        // band" that legitimate anchor-prefix
+                        // extensions ride on is the wrong gate here:
+                        // the per-prefix LM that recorded the anchor
+                        // never had to compete with the longer-buffer
+                        // parse, so a near-tie LM at the longer buffer
+                        // is not evidence that the anchor is still
+                        // valid. Refuse promotion unless the anchor-
+                        // extension candidate STRICTLY dominates the
+                        // comparator-top on LM by at least
+                        // `lmDominanceThreshold` nats — the symmetric
+                        // mirror of the existing line above that
+                        // refuses promotion when LM strongly favours
+                        // candidate in re-segmentation but the
+                        // comparator's structural factors disagree.
+                        let anchorIsPrefixOfTop = Self.scalarHasPrefix(
+                            topStrippedHere, anchorKey
+                        )
+                        if !anchorIsPrefixOfTop,
+                           !isMedialOnlySwap,
+                           !isCodaSwap,
+                           candidateLM - topLM <= Self.lmDominanceThreshold {
+                            continue
+                        }
                     }
                     let keeper = merged.remove(at: idx)
                     merged.insert(keeper, at: 0)
