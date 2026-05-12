@@ -380,6 +380,29 @@ local install and manual typing in real apps.
 - `data/`: GSettings schema, IBus component XML, desktop file, icon.
 - `debian/` and `scripts/`: packaging and dev-install entry points.
 
+`IBusMyanglerEngine` runs `burmese_engine_update` on a per-engine
+worker thread for the same reason the macOS controller uses
+`engineQueue`: a slow per-keystroke parse must not block
+`process_key_event`. The coordination shape is the same — the IBus
+main thread owns `buffer`, `lookup_table`, `last_snapshot`, and
+`last_rendered_buffer`; `update_preedit_from_buffer` echoes the raw
+Latin buffer inline on every keystroke; `schedule_engine_update`
+overwrites `pending_buffer` so a typing burst coalesces to at most
+two worker runs; results are marshalled back via
+`g_main_context_invoke` and dropped by `deliver_engine_result` if the
+buffer has moved past the one the worker ran against. Commit / cancel
+/ clear paths call `drain_and_wait_idle` before touching the FFI so
+main and worker never reach the engine concurrently. The worker holds
+a `g_object_ref` for each work cycle and a `dispose` vfunc joins the
+thread before refs are released — this closes the ref-resurrection
+race during engine teardown. `disable` nulls `self->handle` under
+`worker_mutex` so a result still en route to the main loop is a
+NULL-checked no-op. When editing `engine.c`, preserve these
+invariants: never call FFI from the main thread without first
+draining pending work, never assume an async snapshot is still the
+user's current buffer, and never destroy state the worker thread can
+still touch.
+
 Dev loop:
 
 ```bash
