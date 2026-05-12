@@ -35,7 +35,7 @@ swift build
 swift run TestRunner
 ```
 
-Current local status: 1612/1612 cases and 8935/8935 assertions pass.
+Current local status: 1636/1636 cases and 8959/8959 assertions pass.
 `swift test` is secondary; plain SPM toolchains may not provide XCTest.
 
 ## Layout
@@ -95,6 +95,11 @@ absent. Copy that pattern for rank-0 claims. Existing examples include
 `AnchorStabilitySuite`, `LexiconRankingSuite`,
 `MidBufferStackInferenceSuite`, `WindowingKinziAcrossThresholdSuite`,
 and `ExplicitPlusKinziDisplacementSuite`.
+
+Suite filenames describe the use case the suite protects rather than
+the TASK code that originally introduced it. When adding a new suite,
+follow that convention — TASK-NNN references live in archived task
+notes and durable rule text, not in suite filenames.
 
 ## Durable Behavior Rules
 
@@ -226,6 +231,31 @@ Performance regressions are guarded by `BurmeseBench` and a per-platform
 baseline. Cache changes should preserve parser diversity for realistic
 well-formed input, not just pass pathological repeated-letter tests.
 
+The per-keystroke hot path has several caches that must be considered
+together when touching ranking, lookup, or LM code:
+
+- `SQLiteCandidateStore` keeps bounded LRUs for both exact-match
+  (`exactLookupCache`, `latticeExactLookupCache`) and prefix
+  (`prefixLookupCache`) queries. Composite indexes
+  `(alias_reading, alias_penalty, rank_score DESC)` cover the exact
+  paths so the `ORDER BY` no longer spills into a temp B-tree;
+  prefix-range queries still need the sort and rely on the LRU.
+- `TrigramLanguageModel` pins the mmapped buffer's base pointer once
+  at init and caches `surface → wordId` lookups. The `LanguageModel`
+  protocol exposes `wordIdForSurface(_:)` and
+  `logProb(wordId:prevId:lastId:)` so callers can skip per-call
+  surface resolution; defaults keep non-vocab models working.
+- `WordLatticeDecoder` keeps a decoder-level lexicon-arc cache. An
+  identical buffer reuses the arcs verbatim; a strict prefix extension
+  only looks up the new spans; a strict prefix truncation (backspace)
+  drops trailing positions and filters arcs — no new SQL is issued.
+  It also keeps a bounded LM LRU keyed on `(surfaceId, prevId, lastId)`
+  `UInt32` tuples.
+
+These caches assume the lexicon and LM are immutable once opened; if a
+new feature needs to mutate either, invalidate or partition explicitly
+rather than skipping the cache layer.
+
 ## Build and Test Details
 
 ### Core
@@ -267,6 +297,17 @@ state is healthy. Override with `--samples N` for ad-hoc runs;
 fresh measurement (and should be re-run a few times to confirm the
 captured numbers are not anomalous).
 
+Scenarios come in two flavors: `bare` (parser-only engine) and `_prod`
+(bundled lexicon + trigram LM + fresh user history). Prod scenarios
+are the gate for production-equivalent latency claims and skip cleanly
+when the bundled artifacts are absent. `ProductionBenchScenarioParitySuite`
+enforces that every bare scenario name has a `_prod` peer that exists
+in `baseline.json`. The truncation kind (`long_backspace_prod`,
+`ain_colon_chain_backspace_prod`) feeds the engine the full buffer
+off-clock then samples per-keystroke truncation cost — guards the
+`WordLatticeDecoder` prefix-truncation cache path that hold-backspace
+exercises.
+
 ### Corpus Data
 
 ```bash
@@ -291,6 +332,26 @@ SQLite, or LM binary directly.
 installer. The controller loads the shared production stack at startup:
 SQLite lexicon, trigram LM, SQLite user history, and shared
 `IMESettings`.
+
+`BurmeseInputController` dispatches `engine.update` to a private serial
+queue rather than running it inline on the IMK keystroke. The main
+queue owns `rawBuffer` and the marked text (raw Latin), so the user's
+typing always renders immediately; the candidate panel updates when
+each async engine result arrives. Coalescing on the main side means a
+typing burst during a slow engine call produces at most two engine
+runs — the in-flight one plus one for the final buffer. The committing
+paths (`commitSelection`, `commitComposition`, `commitRaw`,
+`reconcileClusterAliasesIfNeeded`) `engineQueue.sync` so the engine is
+never accessed concurrently. When editing the controller, preserve
+this rule: never call `engine.update` / `engine.commit` /
+`engine.recordSelection` from the main queue without going through
+`engineQueue`, and never assume an async result is still relevant —
+compare against the current `rawBuffer` before applying.
+
+The Preferences app exposes five tabs: Setup, Preferences, History
+(learned entries with per-row delete and clear-all), Syntax, and
+Convert. The History tab was split out so the Preferences tab stays
+focused on toggles.
 
 CLI builds that need full Xcode should set `DEVELOPER_DIR` inline:
 

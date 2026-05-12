@@ -12,7 +12,7 @@ macOS ships an InputMethodKit bundle plus a SwiftUI Preferences app and
 unsigned `.pkg` installer. Linux ships an IBus engine plus a GTK4 /
 libadwaita Preferences app packaged as `ibus-myangler.deb`; see
 [`native/linux/README.md`](native/linux/README.md). On this checkout,
-`swift run TestRunner` passes **1612/1612 cases** and **8935/8935
+`swift run TestRunner` passes **1636/1636 cases** and **8959/8959
 assertions**.
 
 ---
@@ -329,9 +329,9 @@ with:
 
 ```text
 === Summary ===
-  Cases: 1355/1355 passed
-  Assertions: 5721/5721 passed
-ALL 5721 TESTS PASSED
+  Cases: 1636/1636 passed
+  Assertions: 8959/8959 passed
+ALL 8959 TESTS PASSED
 ```
 
 Use the right engine layer for a test:
