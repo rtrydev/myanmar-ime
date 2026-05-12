@@ -51,6 +51,29 @@ public final class TrigramLanguageModel: LanguageModel, @unchecked Sendable {
     private let header: Header
     private let layout: Layout
 
+    // Cached base pointer into the (mmapped) `data` blob. The Data is
+    // initialized with `.mappedIfSafe` and stored as `private let`, so
+    // its backing memory is stable for the LM's lifetime. Grabbing the
+    // baseAddress once at init avoids reopening `withUnsafeBytes` on
+    // every primitive read — the n-gram binary searches do thousands of
+    // 4-byte reads per `decode()` call and the per-call bridging cost
+    // dominates the actual byte access. `data` is retained as a `let`
+    // so the mmap stays alive for the pointer's lifetime.
+    private let basePtr: UnsafePointer<UInt8>
+
+    // Surface → wordId resolution memo. `logProb` is called thousands of
+    // times per keystroke from the lattice's Viterbi inner loop, and the
+    // same surfaces (`ပါ`, `ဖြစ်`, `တယ်`) get re-resolved every time
+    // because each call drops back into the 17-step binary search over
+    // the 80k vocab. A bounded per-engine cache collapses each repeat to
+    // a dictionary hit. Bounded eviction matches the candidate-store
+    // pattern: drop the oldest 25% rather than wiping the whole map.
+    private var idCache: [String: UInt32] = [:]
+    private var idCacheOrder: [String] = []
+    private let idCacheLock = NSLock()
+    private static let idCacheCapacity = 8192
+    private static let idCacheEvictBatch = 2048
+
     public init(path: String) throws {
         let url = URL(fileURLWithPath: path)
         guard FileManager.default.fileExists(atPath: path) else {
@@ -121,6 +144,16 @@ public final class TrigramLanguageModel: LanguageModel, @unchecked Sendable {
             bigramOffset: bigramOffset,
             trigramOffset: trigramOffset
         )
+        // Pin a base pointer to the (mmapped) buffer. We hold `data` for
+        // the LM's lifetime, so the underlying mmap pages stay resident
+        // and the pointer remains valid. Safer than the alternative of
+        // re-entering `withUnsafeBytes` per byte read because there is
+        // no possible re-entrance: the LM is a read-only view, and the
+        // value-type Data cannot be mutated through any path that
+        // wouldn't also drop `self`.
+        self.basePtr = data.withUnsafeBytes { raw in
+            raw.bindMemory(to: UInt8.self).baseAddress!
+        }
     }
 
     // MARK: - LanguageModel
@@ -210,7 +243,29 @@ public final class TrigramLanguageModel: LanguageModel, @unchecked Sendable {
     // MARK: - ID resolution
 
     private func resolveId(_ surface: String) -> UInt32 {
-        lookupSurface(surface) ?? header.idUnk
+        idCacheLock.lock()
+        if let hit = idCache[surface] {
+            idCacheLock.unlock()
+            return hit
+        }
+        idCacheLock.unlock()
+
+        let resolved = lookupSurface(surface) ?? header.idUnk
+
+        idCacheLock.lock()
+        if idCache[surface] == nil {
+            if idCache.count >= Self.idCacheCapacity {
+                let drop = min(Self.idCacheEvictBatch, idCacheOrder.count)
+                for key in idCacheOrder.prefix(drop) {
+                    idCache.removeValue(forKey: key)
+                }
+                idCacheOrder.removeFirst(drop)
+            }
+            idCache[surface] = resolved
+            idCacheOrder.append(surface)
+        }
+        idCacheLock.unlock()
+        return resolved
     }
 
     /// Binary search over the surface-sorted table. Each entry is a `u32`
@@ -238,17 +293,14 @@ public final class TrigramLanguageModel: LanguageModel, @unchecked Sendable {
     /// Returns negative if needle < id's surface, zero if equal, positive if greater.
     private func compareToSurface(needle: [UInt8], id: UInt32) -> Int {
         let (offset, length) = idIndexEntry(id)
-        return data.withUnsafeBytes { raw -> Int in
-            let base = raw.baseAddress!.advanced(by: layout.blobOffset + Int(offset))
-                .assumingMemoryBound(to: UInt8.self)
-            let n = min(needle.count, Int(length))
-            for i in 0..<n {
-                let a = needle[i]
-                let b = base[i]
-                if a != b { return Int(a) - Int(b) }
-            }
-            return needle.count - Int(length)
+        let base = basePtr.advanced(by: layout.blobOffset + Int(offset))
+        let n = min(needle.count, Int(length))
+        for i in 0..<n {
+            let a = needle[i]
+            let b = base[i]
+            if a != b { return Int(a) - Int(b) }
         }
+        return needle.count - Int(length)
     }
 
     private func idIndexEntry(_ id: UInt32) -> (offset: UInt32, length: UInt32) {
@@ -366,16 +418,18 @@ public final class TrigramLanguageModel: LanguageModel, @unchecked Sendable {
 
     // MARK: - Primitive reads
 
+    // `loadUnaligned` is required because the variable-length blob means
+    // the trailing tables (idIndex, surface-sorted, n-grams) are not
+    // guaranteed 4-byte aligned in the file. Both x86_64 and arm64 handle
+    // unaligned 32-bit loads in hardware without penalty.
+    @inline(__always)
     private func readU32At(_ offset: Int) -> UInt32 {
-        data.withUnsafeBytes { raw -> UInt32 in
-            raw.loadUnaligned(fromByteOffset: offset, as: UInt32.self)
-        }
+        UnsafeRawPointer(basePtr).loadUnaligned(fromByteOffset: offset, as: UInt32.self)
     }
 
+    @inline(__always)
     private func readF32At(_ offset: Int) -> Float {
-        data.withUnsafeBytes { raw -> Float in
-            raw.loadUnaligned(fromByteOffset: offset, as: Float.self)
-        }
+        UnsafeRawPointer(basePtr).loadUnaligned(fromByteOffset: offset, as: Float.self)
     }
 
     private static func readU32(_ data: Data, at offset: Int) -> UInt32 {

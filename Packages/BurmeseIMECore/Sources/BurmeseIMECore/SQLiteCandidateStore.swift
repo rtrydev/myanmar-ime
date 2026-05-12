@@ -27,8 +27,31 @@ public final class SQLiteCandidateStore: CandidateStore, @unchecked Sendable {
     // do not exist as lexicon entries, so a cheap per-engine-instance cache
     // collapses each repeat lookup to a dictionary hit.
     private var exactLookupCache: [String: [Candidate]] = [:]
+    private var exactLookupCacheOrder: [String] = []
     private let exactLookupCacheLock = NSLock()
     private static let exactLookupCacheCapacity = 4096
+
+    // The lattice decoder issues O(buffer² ) `lookupExactForLattice` calls
+    // per `decode()` — one per (start, length) substring up to 24 chars.
+    // Same shape of lookup as `lookupExact`, but needed separately because
+    // the lattice keeps the raw `alias_penalty` instead of folding it into
+    // `Candidate.score`. Without a cache here, incremental typing pays full
+    // SQL bind + step + per-row String materialisation on every keystroke.
+    private var latticeLookupCache: [String: [LatticeLookupRow]] = [:]
+    private var latticeLookupCacheOrder: [String] = []
+    private let latticeLookupCacheLock = NSLock()
+    private static let latticeLookupCacheCapacity = 4096
+
+    // Eviction batch for both caches. On overflow we drop the oldest 25%
+    // rather than clearing the whole map: a full wipe causes a hit-rate
+    // cliff where every keystroke after the cache fills pays full SQL
+    // cost again, which is exactly what these caches exist to avoid.
+    private static let lookupCacheEvictBatch = 1024
+
+    private struct LatticeLookupRow {
+        let candidate: Candidate
+        let aliasPenalty: Int
+    }
 
     /// Open a lexicon database at the given path.
     /// Returns nil if the database cannot be opened.
@@ -96,6 +119,14 @@ public final class SQLiteCandidateStore: CandidateStore, @unchecked Sendable {
 
     public func lookupExactForLattice(reading: String) -> [(candidate: Candidate, aliasPenalty: Int)] {
         guard !reading.isEmpty else { return [] }
+
+        latticeLookupCacheLock.lock()
+        if let hit = latticeLookupCache[reading] {
+            latticeLookupCacheLock.unlock()
+            return hit.map { ($0.candidate, $0.aliasPenalty) }
+        }
+        latticeLookupCacheLock.unlock()
+
         var results: [(candidate: Candidate, aliasPenalty: Int)] = []
         for variant in Romanization.lookupAliasReadings(for: reading) {
             results += lookupExactAliasWithPenalty(reading: variant.aliasReading).map {
@@ -114,6 +145,21 @@ public final class SQLiteCandidateStore: CandidateStore, @unchecked Sendable {
         for row in results where seen.insert(row.candidate.surface).inserted {
             deduped.append(row)
         }
+
+        let cacheRows = deduped.map { LatticeLookupRow(candidate: $0.candidate, aliasPenalty: $0.aliasPenalty) }
+        latticeLookupCacheLock.lock()
+        if latticeLookupCache[reading] == nil {
+            if latticeLookupCache.count >= Self.latticeLookupCacheCapacity {
+                let drop = min(Self.lookupCacheEvictBatch, latticeLookupCacheOrder.count)
+                for key in latticeLookupCacheOrder.prefix(drop) {
+                    latticeLookupCache.removeValue(forKey: key)
+                }
+                latticeLookupCacheOrder.removeFirst(drop)
+            }
+            latticeLookupCache[reading] = cacheRows
+            latticeLookupCacheOrder.append(reading)
+        }
+        latticeLookupCacheLock.unlock()
         return deduped
     }
 
@@ -146,10 +192,17 @@ public final class SQLiteCandidateStore: CandidateStore, @unchecked Sendable {
         let deduped = deduplicateCandidates(candidates)
 
         exactLookupCacheLock.lock()
-        if exactLookupCache.count >= Self.exactLookupCacheCapacity {
-            exactLookupCache.removeAll(keepingCapacity: true)
+        if exactLookupCache[cacheKey] == nil {
+            if exactLookupCache.count >= Self.exactLookupCacheCapacity {
+                let drop = min(Self.lookupCacheEvictBatch, exactLookupCacheOrder.count)
+                for key in exactLookupCacheOrder.prefix(drop) {
+                    exactLookupCache.removeValue(forKey: key)
+                }
+                exactLookupCacheOrder.removeFirst(drop)
+            }
+            exactLookupCache[cacheKey] = deduped
+            exactLookupCacheOrder.append(cacheKey)
         }
-        exactLookupCache[cacheKey] = deduped
         exactLookupCacheLock.unlock()
         return deduped
     }
