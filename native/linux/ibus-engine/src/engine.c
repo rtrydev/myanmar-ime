@@ -16,6 +16,27 @@
  * and freed on `disable`. IBus may instantiate multiple engines for
  * different focus contexts simultaneously, so `current_handle` must
  * never be a process-global.
+ *
+ * Threading:
+ *   - process_key_event, focus_*, reset, enable/disable, property
+ *     activations, and GSettings callbacks all run on the IBus
+ *     main-loop thread. `buffer`, `lookup_table`, `last_snapshot`,
+ *     and `last_rendered_buffer` are touched only from that thread.
+ *   - `worker_thread` runs `burmese_engine_update` calls off the
+ *     keystroke path so a slow per-keystroke parse never blocks key
+ *     event handling. The worker coordinates with the main thread via
+ *     `worker_mutex` + two condition variables.
+ *   - Results from the worker are posted back via
+ *     `g_main_context_invoke` so all preedit / lookup-table mutations
+ *     stay on the IBus thread.
+ *   - Coalescing on the main side guarantees only the *latest* buffer
+ *     ever reaches the engine after a typing burst — three keystrokes
+ *     during a 60ms engine call produce at most two engine runs (the
+ *     in-flight one, then one for the final buffer).
+ *   - Commit / cancel / clear paths drain `pending_has_work` and wait
+ *     for `in_flight` to clear before issuing synchronous engine
+ *     calls, so engine state is never accessed concurrently from main
+ *     and worker.
  */
 struct _IBusMyanglerEngine {
     IBusEngine parent;
@@ -23,7 +44,10 @@ struct _IBusMyanglerEngine {
     burmese_engine_t* handle;
     GSettings* settings;
 
-    /* Roman composition buffer (lowercased, ASCII-only). Owned. */
+    /* Roman composition buffer (lowercased, ASCII-only). Owned. This
+       always reflects the user's keystrokes immediately; the engine's
+       view of the buffer (mirrored by `last_rendered_buffer`) lags
+       behind by up to one async update. */
     GString* buffer;
 
     /* Most recent JSON snapshot from the FFI. Owned. The candidate
@@ -31,6 +55,13 @@ struct _IBusMyanglerEngine {
        moves don't need a re-parse. */
     JsonNode* last_snapshot;
     int last_candidate_count;
+
+    /* The buffer that produced the snapshot currently visible in the
+       lookup table. Used by commit to decide whether the in-engine
+       state matches what the user is looking at (cursor index is
+       meaningful) versus whether the engine is still behind (must
+       re-update synchronously and commit candidate 0). Owned. */
+    GString* last_rendered_buffer;
 
     /* IBus surfaces. Owned by the parent class once installed; we hold
        weak refs for refresh. */
@@ -42,6 +73,19 @@ struct _IBusMyanglerEngine {
     gboolean compose_enabled;
     IBusProperty* compose_property;
     IBusPropList* prop_list;
+
+    /* --- Async engine coordination -------------------------------- */
+    GThread* worker_thread;
+    GMutex worker_mutex;
+    GCond  worker_cond;  /* signaled when pending arrives or shutting down */
+    GCond  idle_cond;    /* signaled when in_flight transitions to FALSE */
+    GMainContext* main_context;  /* captured at init for posting results */
+
+    /* All four fields below are protected by worker_mutex. */
+    gboolean worker_shutdown;
+    gboolean pending_has_work;
+    GString* pending_buffer;
+    gboolean in_flight;
 };
 
 G_DEFINE_TYPE(IBusMyanglerEngine, ibus_myangler_engine, IBUS_TYPE_ENGINE)
@@ -94,12 +138,55 @@ static void clear_snapshot(IBusMyanglerEngine* self)
         self->last_snapshot = NULL;
     }
     self->last_candidate_count = 0;
+    g_string_truncate(self->last_rendered_buffer, 0);
 }
 
-static void render_from_snapshot(IBusMyanglerEngine* self, const char* json_str)
+/* Update the inline preedit to the user's raw buffer. Runs on the IBus
+   main thread on every keystroke so the user always sees their typing
+   land immediately, independent of how long the async engine call
+   takes. Mirrors the macOS controller's `setMarkedText(display:)` —
+   the Linux FFI also emits `preedit == rawBuffer` in its snapshot, so
+   nothing about the rendered string is engine-dependent. */
+static void update_preedit_from_buffer(IBusMyanglerEngine* self)
 {
-    clear_snapshot(self);
-    if (!json_str || !*json_str) return;
+    if (self->buffer->len == 0) {
+        ibus_engine_hide_preedit_text(IBUS_ENGINE(self));
+        return;
+    }
+    IBusText* text = ibus_text_new_from_string(self->buffer->str);
+    ibus_text_append_attribute(text, IBUS_ATTR_TYPE_UNDERLINE,
+                               IBUS_ATTR_UNDERLINE_SINGLE,
+                               0, -1);
+    ibus_engine_update_preedit_text(
+        IBUS_ENGINE(self),
+        text,
+        g_utf8_strlen(self->buffer->str, -1),
+        TRUE);
+}
+
+/* Render the lookup table from a fresh JSON snapshot. Preedit is NOT
+   touched here — the keystroke path already updated it from the raw
+   buffer. Stores the snapshot for later reads (commit, cursor moves)
+   and remembers which buffer it came from in `last_rendered_buffer`
+   so commit can tell whether the in-engine state matches what the
+   user is looking at. */
+static void render_lookup_from_snapshot(IBusMyanglerEngine* self,
+                                        const char* source_buffer,
+                                        const char* json_str)
+{
+    /* Drop the previous snapshot first; we'll repopulate below. */
+    if (self->last_snapshot) {
+        json_node_free(self->last_snapshot);
+        self->last_snapshot = NULL;
+    }
+    self->last_candidate_count = 0;
+
+    if (!json_str || !*json_str) {
+        ibus_lookup_table_clear(self->lookup_table);
+        ibus_engine_hide_lookup_table(IBUS_ENGINE(self));
+        g_string_truncate(self->last_rendered_buffer, 0);
+        return;
+    }
 
     JsonParser* parser = json_parser_new();
     GError* err = NULL;
@@ -116,13 +203,10 @@ static void render_from_snapshot(IBusMyanglerEngine* self, const char* json_str)
         return;
     }
 
-    /* Snapshot survives the parser; copy it. */
     self->last_snapshot = json_node_copy(root);
     g_object_unref(parser);
 
     JsonObject* obj = json_node_get_object(self->last_snapshot);
-    const gchar* preedit = json_object_has_member(obj, "preedit")
-        ? json_object_get_string_member(obj, "preedit") : "";
     JsonArray* candidates = json_object_has_member(obj, "candidates")
         ? json_object_get_array_member(obj, "candidates") : NULL;
     int selected = json_object_has_member(obj, "selected")
@@ -130,20 +214,6 @@ static void render_from_snapshot(IBusMyanglerEngine* self, const char* json_str)
     self->last_candidate_count =
         candidates ? (int)json_array_get_length(candidates) : 0;
 
-    /* Update preedit */
-    {
-        IBusText* text = ibus_text_new_from_string(preedit ? preedit : "");
-        ibus_text_append_attribute(text, IBUS_ATTR_TYPE_UNDERLINE,
-                                   IBUS_ATTR_UNDERLINE_SINGLE,
-                                   0, -1);
-        gboolean visible = (preedit && *preedit);
-        ibus_engine_update_preedit_text(IBUS_ENGINE(self),
-                                        text,
-                                        visible ? g_utf8_strlen(preedit, -1) : 0,
-                                        visible);
-    }
-
-    /* Update lookup table */
     ibus_lookup_table_clear(self->lookup_table);
     if (candidates) {
         guint n = json_array_get_length(candidates);
@@ -163,10 +233,129 @@ static void render_from_snapshot(IBusMyanglerEngine* self, const char* json_str)
     ibus_engine_update_lookup_table_fast(IBUS_ENGINE(self),
                                          self->lookup_table,
                                          show_table);
+
+    g_string_assign(self->last_rendered_buffer,
+                    source_buffer ? source_buffer : "");
+}
+
+/* ------------------------------------------------------------------ */
+/* Async engine coordination                                          */
+/* ------------------------------------------------------------------ */
+
+/* Result envelope produced on the worker thread and consumed on the
+   IBus main thread via g_main_context_invoke. Owned by the consumer. */
+typedef struct {
+    IBusMyanglerEngine* self;  /* strong ref */
+    gchar* buffer;             /* the buffer the engine ran against */
+    char* json;                /* malloc'd by FFI; free with
+                                  burmese_engine_string_free */
+} EngineResult;
+
+static gboolean deliver_engine_result(gpointer data)
+{
+    EngineResult* r = (EngineResult*)data;
+    IBusMyanglerEngine* self = r->self;
+
+    /* The user may have typed further or committed since this call
+       started — only apply the result if the buffer still matches.
+       Otherwise the panel would flash an out-of-date candidate set. */
+    if (self->handle != NULL
+        && g_strcmp0(r->buffer, self->buffer->str) == 0) {
+        render_lookup_from_snapshot(self, r->buffer, r->json);
+    }
+
+    if (r->json) burmese_engine_string_free(r->json);
+    g_free(r->buffer);
+    g_object_unref(r->self);
+    g_free(r);
+    return G_SOURCE_REMOVE;
+}
+
+static gpointer engine_worker_thread(gpointer data)
+{
+    IBusMyanglerEngine* self = (IBusMyanglerEngine*)data;
+
+    for (;;) {
+        g_mutex_lock(&self->worker_mutex);
+        while (!self->worker_shutdown && !self->pending_has_work) {
+            g_cond_wait(&self->worker_cond, &self->worker_mutex);
+        }
+        if (self->worker_shutdown) {
+            g_mutex_unlock(&self->worker_mutex);
+            break;
+        }
+        gchar* buf = g_strdup(self->pending_buffer->str);
+        self->pending_has_work = FALSE;
+        self->in_flight = TRUE;
+        burmese_engine_t* handle_snapshot = self->handle;
+        /* Hold a ref on `self` for the duration of this work cycle so
+           the engine cannot be disposed while we're calling into the
+           FFI or constructing an EngineResult below. Released after
+           we transition back to in_flight=FALSE. Without this ref,
+           IBus dropping its ref while we're mid-update would let
+           dispose race the worker's `g_object_ref` call (which would
+           "resurrect" a refcount-0 object). */
+        g_object_ref(self);
+        g_mutex_unlock(&self->worker_mutex);
+
+        /* Run the (possibly slow) engine call without holding any
+           lock — the FFI is internally locked, so commit/cancel paths
+           on the main thread that take h->lock won't be reordered
+           with this update. */
+        char* json = NULL;
+        if (handle_snapshot) {
+            json = burmese_engine_update(handle_snapshot, buf);
+        }
+
+        /* Marshal the result back to the IBus main thread. */
+        EngineResult* r = g_new0(EngineResult, 1);
+        r->self = g_object_ref(self);
+        r->buffer = buf;        /* takes ownership */
+        r->json = json;         /* takes ownership */
+        g_main_context_invoke(self->main_context, deliver_engine_result, r);
+
+        g_mutex_lock(&self->worker_mutex);
+        self->in_flight = FALSE;
+        g_cond_broadcast(&self->idle_cond);
+        g_mutex_unlock(&self->worker_mutex);
+        g_object_unref(self);  /* balances ref taken at cycle start */
+    }
+    return NULL;
+}
+
+/* Queue the latest buffer for async processing. Repeated calls during
+   a typing burst simply overwrite `pending_buffer`, so only the most
+   recent buffer the user has typed reaches the engine once it becomes
+   idle. Must be called from the IBus main thread. */
+static void schedule_engine_update(IBusMyanglerEngine* self)
+{
+    g_mutex_lock(&self->worker_mutex);
+    g_string_assign(self->pending_buffer, self->buffer->str);
+    self->pending_has_work = TRUE;
+    g_cond_signal(&self->worker_cond);
+    g_mutex_unlock(&self->worker_mutex);
+}
+
+/* Discard any queued work and block until the worker is idle. After
+   this returns the main thread holds exclusive logical access to the
+   engine: no FFI call is in flight, no further worker call will start
+   until schedule_engine_update is called again. Any result already
+   marshalled back to the main loop will still fire, but the stale-
+   buffer guard in deliver_engine_result drops it. Must be called from
+   the IBus main thread. */
+static void drain_and_wait_idle(IBusMyanglerEngine* self)
+{
+    g_mutex_lock(&self->worker_mutex);
+    self->pending_has_work = FALSE;
+    while (self->in_flight) {
+        g_cond_wait(&self->idle_cond, &self->worker_mutex);
+    }
+    g_mutex_unlock(&self->worker_mutex);
 }
 
 static void clear_ime_state(IBusMyanglerEngine* self)
 {
+    drain_and_wait_idle(self);
     g_string_truncate(self->buffer, 0);
     if (self->handle) {
         char* json = burmese_engine_update(self->handle, "");
@@ -178,15 +367,6 @@ static void clear_ime_state(IBusMyanglerEngine* self)
     ibus_engine_hide_lookup_table(IBUS_ENGINE(self));
 }
 
-static void push_buffer_to_engine(IBusMyanglerEngine* self)
-{
-    if (!self->handle) return;
-    char* json = burmese_engine_update(self->handle, self->buffer->str);
-    if (!json) return;
-    render_from_snapshot(self, json);
-    burmese_engine_string_free(json);
-}
-
 /* ------------------------------------------------------------------ */
 /* Commit + cancel                                                     */
 /* ------------------------------------------------------------------ */
@@ -194,11 +374,33 @@ static void push_buffer_to_engine(IBusMyanglerEngine* self)
 static void commit_selected(IBusMyanglerEngine* self)
 {
     if (!self->handle) return;
-    /* Sync the selection cursor back to the engine before committing —
-       arrow keys edit the IBus lookup-table cursor only, the Swift
-       side hasn't seen the move yet. */
-    int idx = (int)ibus_lookup_table_get_cursor_pos(self->lookup_table);
-    burmese_engine_set_selected(self->handle, (int32_t)idx);
+
+    /* Drain any queued typing work and wait for an in-flight update
+       to finish so the engine isn't being touched from the worker
+       while we run the commit sequence below. */
+    drain_and_wait_idle(self);
+
+    /* If the engine is still behind the user's buffer (a slow update
+       was in flight or coalesced away), refresh the engine state to
+       match the latest typed buffer before committing. In that case
+       the visible lookup table is from an older buffer and any cursor
+       navigation was made against stale candidates, so we commit
+       candidate 0 of the fresh state — same trade-off as the macOS
+       controller in this race. When the engine is already caught up,
+       respect the user's arrow-key navigation by syncing the cursor
+       index into the engine before committing. */
+    gboolean engine_caught_up =
+        (g_strcmp0(self->last_rendered_buffer->str, self->buffer->str) == 0)
+        && self->last_candidate_count > 0;
+
+    if (!engine_caught_up) {
+        char* json = burmese_engine_update(self->handle, self->buffer->str);
+        if (json) burmese_engine_string_free(json);
+        burmese_engine_set_selected(self->handle, 0);
+    } else {
+        int idx = (int)ibus_lookup_table_get_cursor_pos(self->lookup_table);
+        burmese_engine_set_selected(self->handle, (int32_t)idx);
+    }
 
     char* surface = burmese_engine_commit(self->handle);
     if (surface && *surface) {
@@ -217,6 +419,9 @@ static void commit_selected(IBusMyanglerEngine* self)
 static void cancel_buffer(IBusMyanglerEngine* self)
 {
     if (!self->handle) return;
+    /* Drop any queued typing work — we're about to commit the buffer
+       verbatim, the engine result wouldn't reach the panel anyway. */
+    drain_and_wait_idle(self);
     char* raw = burmese_engine_cancel(self->handle);
     if (raw && *raw) {
         IBusText* text = ibus_text_new_from_string(raw);
@@ -283,7 +488,13 @@ static gboolean ibus_myangler_engine_process_key_event(IBusEngine* engine,
            '.', ',', '!', '?', ';', insert the Myanmar equivalent
            directly. Mirrors BurmeseInputController.swift:178. The
            Swift FFI checks settings + context tail; we only act on a
-           non-NULL return. */
+           non-NULL return.
+
+           The map call is synchronous because the result is needed
+           before deciding whether to commit immediately versus
+           appending to the buffer. It's cheap (a settings + tail
+           check) and only runs when the buffer is empty, so it
+           doesn't interact with the async update path. */
         if (self->buffer->len == 0 && self->handle) {
             char* mapped = burmese_engine_map_empty_buffer_punctuation(
                 self->handle, (int32_t)(unsigned char)km.typed_char);
@@ -296,13 +507,32 @@ static gboolean ibus_myangler_engine_process_key_event(IBusEngine* engine,
             }
         }
         g_string_append_c(self->buffer, km.typed_char);
-        push_buffer_to_engine(self);
+        /* Show the user's typing immediately; the engine runs async. */
+        update_preedit_from_buffer(self);
+        schedule_engine_update(self);
         return TRUE;
     }
     case KEYMAP_BACKSPACE: {
         if (self->buffer->len == 0) return FALSE;
         g_string_truncate(self->buffer, self->buffer->len - 1);
-        push_buffer_to_engine(self);
+        if (self->buffer->len == 0) {
+            /* Whole composition gone. Discard any pending engine work
+               and reset the engine state immediately so the next
+               keystroke starts clean — no need to wait for a worker
+               round trip that would only land an empty snapshot. */
+            drain_and_wait_idle(self);
+            if (self->handle) {
+                char* json = burmese_engine_update(self->handle, "");
+                if (json) burmese_engine_string_free(json);
+            }
+            clear_snapshot(self);
+            ibus_engine_hide_preedit_text(IBUS_ENGINE(self));
+            ibus_lookup_table_clear(self->lookup_table);
+            ibus_engine_hide_lookup_table(IBUS_ENGINE(self));
+        } else {
+            update_preedit_from_buffer(self);
+            schedule_engine_update(self);
+        }
         return TRUE;
     }
     case KEYMAP_COMMIT: {
@@ -356,9 +586,12 @@ static void ibus_myangler_engine_focus_in(IBusEngine* engine)
         ibus_engine_register_properties(engine, self->prop_list);
     }
     /* Re-show the preedit if we still have a buffer. IBus sometimes
-       drops it on focus_out → focus_in. */
+       drops it on focus_out → focus_in. The preedit is the raw
+       buffer (no engine call), and a fresh async update repopulates
+       the lookup table without blocking focus restoration. */
     if (self->buffer->len > 0) {
-        push_buffer_to_engine(self);
+        update_preedit_from_buffer(self);
+        schedule_engine_update(self);
     }
 }
 
@@ -410,9 +643,17 @@ static void ibus_myangler_engine_disable(IBusEngine* engine)
         myangler_settings_disconnect(self->settings);
         self->settings = NULL;
     }
-    if (self->handle) {
-        burmese_engine_free(self->handle);
-        self->handle = NULL;
+    /* clear_ime_state already drained pending work and waited for any
+       in-flight update; null out the handle under the worker mutex so
+       a result still en route to the main loop, or a follow-up
+       schedule_engine_update before re-enable, can't reach a freed
+       engine. */
+    g_mutex_lock(&self->worker_mutex);
+    burmese_engine_t* to_free = self->handle;
+    self->handle = NULL;
+    g_mutex_unlock(&self->worker_mutex);
+    if (to_free) {
+        burmese_engine_free(to_free);
     }
 }
 
@@ -445,6 +686,7 @@ static void ibus_myangler_engine_init(IBusMyanglerEngine* self)
     self->buffer = g_string_new(NULL);
     self->last_snapshot = NULL;
     self->last_candidate_count = 0;
+    self->last_rendered_buffer = g_string_new(NULL);
     self->compose_enabled = TRUE;
 
     /* Default page size is 9 (matches macOS); GSettings will override
@@ -465,11 +707,68 @@ static void ibus_myangler_engine_init(IBusMyanglerEngine* self)
     self->prop_list = ibus_prop_list_new();
     g_object_ref_sink(self->prop_list);
     ibus_prop_list_append(self->prop_list, self->compose_property);
+
+    /* Async engine coordination. The worker thread is spun up here
+       and lives until finalize. It runs idle (blocked in g_cond_wait)
+       when there's no pending work or no handle yet. We capture the
+       main context so results posted from the worker land on the
+       IBus main thread regardless of which context happens to be
+       default when g_main_context_invoke is called. */
+    g_mutex_init(&self->worker_mutex);
+    g_cond_init(&self->worker_cond);
+    g_cond_init(&self->idle_cond);
+    self->worker_shutdown = FALSE;
+    self->pending_has_work = FALSE;
+    self->pending_buffer = g_string_new(NULL);
+    self->in_flight = FALSE;
+    self->main_context = g_main_context_ref(g_main_context_default());
+    self->worker_thread = g_thread_new(
+        "myangler-engine", engine_worker_thread, self);
+}
+
+/* GObject dispose runs at the first refcount-0 transition, before
+   finalize, and is the appropriate place to release refs to other
+   objects and stop background work. The worker thread holds a ref on
+   `self` whenever it's processing an update, so dispose can only be
+   reached when the worker is idle (waiting on its condition). We tell
+   it to exit and join it here so finalize can free state without any
+   live thread that might still touch it. Dispose is allowed to run
+   more than once; the worker_thread NULL-check makes that safe. */
+static void ibus_myangler_engine_dispose(GObject* object)
+{
+    IBusMyanglerEngine* self = IBUS_MYANGLER_ENGINE(object);
+
+    if (self->worker_thread) {
+        g_mutex_lock(&self->worker_mutex);
+        self->worker_shutdown = TRUE;
+        self->pending_has_work = FALSE;
+        g_cond_broadcast(&self->worker_cond);
+        g_mutex_unlock(&self->worker_mutex);
+        g_thread_join(self->worker_thread);
+        self->worker_thread = NULL;
+    }
+
+    G_OBJECT_CLASS(ibus_myangler_engine_parent_class)->dispose(object);
 }
 
 static void ibus_myangler_engine_finalize(GObject* object)
 {
     IBusMyanglerEngine* self = IBUS_MYANGLER_ENGINE(object);
+
+    /* Worker thread has already been joined in dispose. Free the
+       coordination primitives now that nothing is using them. */
+    g_mutex_clear(&self->worker_mutex);
+    g_cond_clear(&self->worker_cond);
+    g_cond_clear(&self->idle_cond);
+    if (self->main_context) {
+        g_main_context_unref(self->main_context);
+        self->main_context = NULL;
+    }
+    if (self->pending_buffer) {
+        g_string_free(self->pending_buffer, TRUE);
+        self->pending_buffer = NULL;
+    }
+
     if (self->settings) {
         myangler_settings_disconnect(self->settings);
         self->settings = NULL;
@@ -482,6 +781,10 @@ static void ibus_myangler_engine_finalize(GObject* object)
     if (self->buffer) {
         g_string_free(self->buffer, TRUE);
         self->buffer = NULL;
+    }
+    if (self->last_rendered_buffer) {
+        g_string_free(self->last_rendered_buffer, TRUE);
+        self->last_rendered_buffer = NULL;
     }
     if (self->lookup_table) {
         g_object_unref(self->lookup_table);
@@ -499,6 +802,7 @@ static void ibus_myangler_engine_class_init(IBusMyanglerEngineClass* klass)
     GObjectClass* gobject_class = G_OBJECT_CLASS(klass);
     IBusEngineClass* engine_class = IBUS_ENGINE_CLASS(klass);
 
+    gobject_class->dispose          = ibus_myangler_engine_dispose;
     gobject_class->finalize         = ibus_myangler_engine_finalize;
 
     engine_class->process_key_event = ibus_myangler_engine_process_key_event;
