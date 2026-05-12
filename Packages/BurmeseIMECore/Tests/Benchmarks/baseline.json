@@ -140,6 +140,42 @@
       "p95_us" : 5001.9200000000001,
       "p99_us" : 5054.2399999999998,
       "scenario" : "vowel_rule_chain_in_10"
+    },
+    {
+      "scenario" : "short_prod",
+      "p95_us" : 0,
+      "p99_us" : 0,
+      "placeholder" : true
+    },
+    {
+      "scenario" : "medium_prod",
+      "p95_us" : 0,
+      "p99_us" : 0,
+      "placeholder" : true
+    },
+    {
+      "scenario" : "long_prod",
+      "p95_us" : 0,
+      "p99_us" : 0,
+      "placeholder" : true
+    },
+    {
+      "scenario" : "incremental_prod",
+      "p95_us" : 0,
+      "p99_us" : 0,
+      "placeholder" : true
+    },
+    {
+      "scenario" : "garbage_incremental_prod",
+      "p95_us" : 0,
+      "p99_us" : 0,
+      "placeholder" : true
+    },
+    {
+      "scenario" : "vowel_rule_chain_in_10_prod",
+      "p95_us" : 0,
+      "p99_us" : 0,
+      "placeholder" : true
     }
   ]
 },
@@ -148,142 +184,196 @@
         {
     "scenario": "short",
     "iterations": 1000,
-    "p50_us": 93.33,
-    "p95_us": 104.46,
-    "p99_us": 116.88,
-    "max_us": 180.42,
+    "p50_us": 105.83,
+    "p95_us": 111.33,
+    "p99_us": 125.83,
+    "max_us": 246.50,
     "allocations": 0
   },
           {
     "scenario": "medium",
     "iterations": 1000,
-    "p50_us": 151.79,
-    "p95_us": 169.42,
-    "p99_us": 183.42,
-    "max_us": 434.62,
+    "p50_us": 182.25,
+    "p95_us": 202.29,
+    "p99_us": 220.62,
+    "max_us": 514.96,
     "allocations": 0
   },
           {
     "scenario": "long",
     "iterations": 500,
-    "p50_us": 275.83,
-    "p95_us": 304.58,
-    "p99_us": 332.58,
-    "max_us": 2281.62,
+    "p50_us": 328.21,
+    "p95_us": 343.46,
+    "p99_us": 363.62,
+    "max_us": 2521.25,
     "allocations": 0
   },
           {
     "scenario": "incremental",
     "iterations": 481,
-    "p50_us": 768.00,
-    "p95_us": 2011.17,
-    "p99_us": 2119.08,
-    "max_us": 2193.62,
+    "p50_us": 877.96,
+    "p95_us": 2150.92,
+    "p99_us": 2258.71,
+    "max_us": 2294.79,
     "allocations": 0
   },
           {
     "scenario": "garbage",
     "iterations": 200,
-    "p50_us": 330.46,
-    "p95_us": 358.71,
-    "p99_us": 368.33,
-    "max_us": 381.96,
+    "p50_us": 396.42,
+    "p95_us": 416.62,
+    "p99_us": 453.12,
+    "max_us": 468.83,
     "allocations": 0
   },
           {
     "scenario": "garbage_incremental",
     "iterations": 496,
-    "p50_us": 241.67,
-    "p95_us": 330.33,
-    "p99_us": 352.29,
-    "max_us": 382.75,
+    "p50_us": 291.83,
+    "p95_us": 389.21,
+    "p99_us": 402.42,
+    "max_us": 435.75,
     "allocations": 0
   },
           {
     "scenario": "repetition_t16",
     "iterations": 200,
-    "p50_us": 638.42,
-    "p95_us": 673.12,
-    "p99_us": 698.92,
-    "max_us": 1109.04,
+    "p50_us": 674.58,
+    "p95_us": 786.71,
+    "p99_us": 825.04,
+    "max_us": 1157.04,
     "allocations": 0
   },
           {
     "scenario": "plus_chain_30",
     "iterations": 200,
-    "p50_us": 249.25,
-    "p95_us": 264.38,
-    "p99_us": 274.21,
-    "max_us": 283.75,
+    "p50_us": 228.54,
+    "p95_us": 242.67,
+    "p99_us": 252.75,
+    "max_us": 5896.21,
     "allocations": 0
   },
           {
     "scenario": "cluster_alias_j16",
     "iterations": 200,
-    "p50_us": 785.21,
-    "p95_us": 826.71,
-    "p99_us": 869.79,
-    "max_us": 1485.38,
+    "p50_us": 826.08,
+    "p95_us": 848.62,
+    "p99_us": 875.25,
+    "max_us": 1617.25,
     "allocations": 0
   },
           {
     "scenario": "repetition_tha30",
     "iterations": 200,
-    "p50_us": 1071.33,
-    "p95_us": 1114.25,
-    "p99_us": 1173.46,
-    "max_us": 18997.08,
+    "p50_us": 1108.38,
+    "p95_us": 1129.04,
+    "p99_us": 1149.58,
+    "max_us": 19315.04,
     "allocations": 0
   },
           {
     "scenario": "vowel_rule_chain_aing_8",
     "iterations": 200,
-    "p50_us": 870.00,
-    "p95_us": 920.00,
-    "p99_us": 970.00,
-    "max_us": 13859.29,
+    "p50_us": 874.62,
+    "p95_us": 904.83,
+    "p99_us": 1015.83,
+    "max_us": 5812.29,
     "allocations": 0
   },
           {
     "scenario": "vowel_rule_chain_aing_4",
     "iterations": 200,
-    "p50_us": 553.92,
-    "p95_us": 587.25,
-    "p99_us": 609.08,
-    "max_us": 1587.08,
+    "p50_us": 614.54,
+    "p95_us": 664.04,
+    "p99_us": 686.17,
+    "max_us": 2276.62,
     "allocations": 0
   },
           {
     "scenario": "vowel_rule_chain_aing_2",
     "iterations": 200,
-    "p50_us": 104.17,
-    "p95_us": 116.29,
-    "p99_us": 136.62,
-    "max_us": 184.54,
+    "p50_us": 116.71,
+    "p95_us": 121.88,
+    "p99_us": 133.12,
+    "max_us": 285.92,
     "allocations": 0
   },
           {
     "scenario": "vowel_rule_chain_aung_8",
     "iterations": 200,
-    "p50_us": 328.62,
-    "p95_us": 351.96,
-    "p99_us": 386.46,
-    "max_us": 3755.38,
+    "p50_us": 363.62,
+    "p95_us": 382.21,
+    "p99_us": 405.12,
+    "max_us": 1870.08,
     "allocations": 0
   },
           {
     "scenario": "vowel_rule_chain_in_10",
     "iterations": 200,
-    "p50_us": 1994.50,
-    "p95_us": 2062.42,
-    "p99_us": 2207.67,
-    "max_us": 12428.67,
+    "p50_us": 2184.75,
+    "p95_us": 2229.83,
+    "p99_us": 2243.38,
+    "max_us": 14033.29,
+    "allocations": 0
+  },
+          {
+    "scenario": "short_prod",
+    "iterations": 1000,
+    "p50_us": 357.12,
+    "p95_us": 376.00,
+    "p99_us": 425.67,
+    "max_us": 751.83,
+    "allocations": 0
+  },
+          {
+    "scenario": "medium_prod",
+    "iterations": 1000,
+    "p50_us": 275.04,
+    "p95_us": 288.38,
+    "p99_us": 317.00,
+    "max_us": 686.50,
+    "allocations": 0
+  },
+          {
+    "scenario": "long_prod",
+    "iterations": 500,
+    "p50_us": 11398.17,
+    "p95_us": 11850.12,
+    "p99_us": 12645.08,
+    "max_us": 14754.38,
+    "allocations": 0
+  },
+          {
+    "scenario": "incremental_prod",
+    "iterations": 481,
+    "p50_us": 5987.92,
+    "p95_us": 17321.29,
+    "p99_us": 31204.96,
+    "max_us": 32384.46,
+    "allocations": 0
+  },
+          {
+    "scenario": "garbage_incremental_prod",
+    "iterations": 496,
+    "p50_us": 461.46,
+    "p95_us": 556.04,
+    "p99_us": 578.12,
+    "max_us": 609.92,
+    "allocations": 0
+  },
+          {
+    "scenario": "vowel_rule_chain_in_10_prod",
+    "iterations": 200,
+    "p50_us": 8325.88,
+    "p95_us": 8552.17,
+    "p99_us": 8700.54,
+    "max_us": 21086.25,
     "allocations": 0
   }
     ],
     "meta": {
-      "commit": "ae9dfcb",
-      "date": "2026-05-05T12:48:27Z"
+      "commit": "b3803fe",
+      "date": "2026-05-12T14:50:28Z"
     }
   }
   }

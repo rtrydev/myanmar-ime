@@ -165,5 +165,6 @@ public enum BurmeseTestSuites {
         CrossSegmentResegmentationParitySuite.suite,
         AbbreviationLedLexiconLiteralFallbackSuite.suite,
         AprefixIndependentVowelReachabilitySuite.suite,
+        ProductionBenchScenarioParitySuite.suite,
     ]
 }

@@ -8,6 +8,7 @@ struct Scenario {
     let name: String
     let kind: Kind
     let iterations: Int
+    let profile: Profile
 
     enum Kind {
         /// Same buffer rendered `iterations` times with a fresh engine each
@@ -16,6 +17,24 @@ struct Scenario {
         /// `buffer` typed one character at a time; each per-keystroke call is
         /// one sample. `iterations` is clamped to `buffer.count`.
         case incremental(String)
+    }
+
+    /// Engine construction shape exercised by the scenario. `bare` is the
+    /// parser-only fast path; `prod` loads the bundled `BurmeseLexicon.sqlite`
+    /// + `BurmeseLM.bin` and a fresh tempfile-backed `UserHistoryStore`, so
+    /// per-keystroke regressions in lexicon prefix-scan / LM scoring / history
+    /// merge land on the gate. `prod` scenarios skip cleanly when the bundled
+    /// artifacts are absent (fresh checkout, no `LexiconBuilder` run yet).
+    enum Profile: Equatable {
+        case bare
+        case prod
+    }
+
+    init(name: String, kind: Kind, iterations: Int, profile: Profile = .bare) {
+        self.name = name
+        self.kind = kind
+        self.iterations = iterations
+        self.profile = profile
     }
 }
 
@@ -101,6 +120,45 @@ let scenarios: [Scenario] = [
     Scenario(name: "vowel_rule_chain_in_10",
              kind: .fullBuffer(String(repeating: "in", count: 10)),
              iterations: 200),
+
+    // TASK-077: production-equivalent scenarios. Each one constructs a
+    // `BurmeseEngine` with the bundled `BurmeseLexicon.sqlite` +
+    // `BurmeseLM.bin` and a fresh tempfile-backed `SQLiteUserHistoryStore`
+    // so the lexicon prefix-scan, LM scoring, and history-merge code
+    // paths are in the hot loop — the same shape the macOS IMK and Linux
+    // IBus engines run. `BundledArtifacts` is `nil`-safe; the runner
+    // skips these scenarios cleanly on a fresh checkout where the
+    // lexicon / LM artifacts have not been built yet.
+    Scenario(name: "short_prod",
+             kind: .fullBuffer("mingal"),
+             iterations: 1000,
+             profile: .prod),
+    Scenario(name: "medium_prod",
+             kind: .fullBuffer("mingalarpar"),
+             iterations: 1000,
+             profile: .prod),
+    Scenario(name: "long_prod",
+             kind: .fullBuffer("mingalarparshinbyarthwarmaylay"),
+             iterations: 500,
+             profile: .prod),
+    Scenario(name: "incremental_prod",
+             kind: .incremental("mingalarparshinbyarthwarmaylaynaykaun"),
+             iterations: 500,
+             profile: .prod),
+    // Bash-string keyboard-bashing under the full stack. Lexicon is
+    // all-miss but the LM still scores every parser-emitted sibling,
+    // so this scenario surfaces LM scoring / fallback ranking
+    // regressions a bare-engine bench can't see.
+    Scenario(name: "garbage_incremental_prod",
+             kind: .incremental("jeiowfgneiorngieorndmfsoigjeiorngieorjgjerogijeqoprjgpojergpoj"),
+             iterations: 500,
+             profile: .prod),
+    // Worst-case bare-engine scenario reshaped under the full stack —
+    // sets the realistic per-keystroke ceiling the user could hit.
+    Scenario(name: "vowel_rule_chain_in_10_prod",
+             kind: .fullBuffer(String(repeating: "in", count: 10)),
+             iterations: 200,
+             profile: .prod),
 ]
 
 // MARK: - Timing
@@ -146,10 +204,70 @@ func percentile(_ sorted: [UInt64], _ p: Double) -> Double {
     return Double(sorted[idx]) / 1000.0
 }
 
-func runScenario(_ s: Scenario) -> Measurement {
+/// Cached production-engine artifact paths. Resolving the bundled
+/// lexicon + LM via `BundledArtifacts` is `nil`-safe — when either
+/// artifact is missing on the running host, every `prod` scenario
+/// skips cleanly with exit code 0 (same pattern the bundled-data
+/// test suites use). The paths are computed once at process start
+/// so a fresh-checkout sweep doesn't repeat the disk probe per
+/// scenario.
+let bundledLexiconPath: String? = BundledArtifacts.lexiconPath
+let bundledTrigramLMPath: String? = BundledArtifacts.trigramLMPath
+let productionArtifactsAvailable: Bool =
+    bundledLexiconPath != nil && bundledTrigramLMPath != nil
+
+/// Per-bench-run scratch directory for the production `SQLiteUserHistoryStore`.
+/// Created lazily on first use and removed at process exit so a
+/// `BurmeseBench` run can never accidentally read from or write to the
+/// user's real `~/Library/Application Support/.../UserHistory.sqlite`.
+let benchHistoryTempDir: URL = {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("BurmeseBench-\(UUID().uuidString)", isDirectory: true)
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    atexit_b {
+        try? FileManager.default.removeItem(at: dir)
+    }
+    return dir
+}()
+
+/// Construct an engine for `profile`. For `.bare`, returns the parser-only
+/// configuration used by the original scenarios. For `.prod`, returns an
+/// engine wired with the bundled lexicon, the bundled trigram LM, and a
+/// fresh tempfile-backed `SQLiteUserHistoryStore`. Returns `nil` when
+/// `profile == .prod` but the bundled artifacts are missing — callers
+/// should treat that as "skip this scenario".
+func makeEngine(profile: Scenario.Profile) -> BurmeseEngine? {
+    switch profile {
+    case .bare:
+        return BurmeseEngine()
+    case .prod:
+        guard let lexPath = bundledLexiconPath,
+              let lmPath = bundledTrigramLMPath,
+              let store = SQLiteCandidateStore(path: lexPath),
+              let lm = try? TrigramLanguageModel(path: lmPath)
+        else { return nil }
+        // Fresh per-engine tempfile so concurrent / repeated `--samples`
+        // runs don't fight over the same history DB and so we never
+        // touch the user's real history file. The temp DB is opened
+        // empty; the production code path that records new history is
+        // not exercised by `bench.update(...)` reads, so the file
+        // stays empty for the lifetime of the bench process.
+        let historyURL = benchHistoryTempDir
+            .appendingPathComponent("UserHistory-\(UUID().uuidString).sqlite")
+        let historyStore: any UserHistoryStore =
+            SQLiteUserHistoryStore(path: historyURL.path) ?? EmptyUserHistoryStore()
+        return BurmeseEngine(
+            candidateStore: store,
+            historyStore: historyStore,
+            languageModel: lm
+        )
+    }
+}
+
+func runScenario(_ s: Scenario) -> Measurement? {
     // Warm-up: 50 iterations discarded.
     let warmup = 50
-    let engine = BurmeseEngine()
+    guard let engine = makeEngine(profile: s.profile) else { return nil }
 
     switch s.kind {
     case .fullBuffer(let buf):
@@ -163,8 +281,8 @@ func runScenario(_ s: Scenario) -> Measurement {
     }
 
     // Three passes, pick the middle distribution (median of three by p95).
-    func singlePass() -> [UInt64] {
-        let engine = BurmeseEngine()
+    func singlePass() -> [UInt64]? {
+        guard let engine = makeEngine(profile: s.profile) else { return nil }
         var samples: [UInt64] = []
         switch s.kind {
         case .fullBuffer(let buf):
@@ -180,7 +298,7 @@ func runScenario(_ s: Scenario) -> Measurement {
             let runs = max(1, s.iterations / chars)
             samples.reserveCapacity(runs * chars)
             for _ in 0..<runs {
-                let engine = BurmeseEngine()
+                guard let engine = makeEngine(profile: s.profile) else { return nil }
                 for i in 1...chars {
                     let prefix = String(buf.prefix(i))
                     let t0 = nowNanos()
@@ -194,7 +312,9 @@ func runScenario(_ s: Scenario) -> Measurement {
         return samples
     }
 
-    let runs = [singlePass(), singlePass(), singlePass()]
+    guard let p1 = singlePass(), let p2 = singlePass(), let p3 = singlePass()
+    else { return nil }
+    let runs = [p1, p2, p3]
     let p95s = runs.map { percentile($0, 0.95) }
     let middleIdx = Array(0..<3).sorted(by: { p95s[$0] < p95s[$1] })[1]
     let sorted = runs[middleIdx]
@@ -225,7 +345,35 @@ func emitJSON(
     commit: String?,
     existingDocument: [String: Any]? = nil
 ) -> String {
-    let frags = measurements.map { $0.jsonFragment() }.joined(separator: ",\n          ")
+    // TASK-077: `_prod` scenarios skip cleanly when bundled lexicon /
+    // LM artifacts are absent. If a scenario was skipped this run but
+    // a prior captured number exists in the running platform's
+    // section, preserve it verbatim — a partial run on a fresh checkout
+    // should NOT wipe valid baseline rows the rest of the fleet
+    // relies on. The measured scenarios overwrite, the rest are
+    // copied through.
+    var preservedFragments: [String] = []
+    let measuredNames = Set(measurements.map { $0.scenario })
+    if let existing = existingDocument,
+       let platforms = existing["platforms"] as? [String: Any],
+       let currentSection = platforms[currentPlatformKey] as? [String: Any],
+       let priorScenarios = currentSection["scenarios"] as? [[String: Any]] {
+        for entry in priorScenarios {
+            guard let name = entry["scenario"] as? String,
+                  !measuredNames.contains(name)
+            else { continue }
+            if let serialized = try? JSONSerialization.data(
+                withJSONObject: entry,
+                options: [.prettyPrinted, .sortedKeys]
+            ),
+               let pretty = String(data: serialized, encoding: .utf8) {
+                preservedFragments.append(pretty)
+            }
+        }
+    }
+    let measuredFragments = measurements.map { $0.jsonFragment() }
+    let allFragments = measuredFragments + preservedFragments
+    let frags = allFragments.joined(separator: ",\n          ")
     let commitField = commit ?? "unknown"
     let date = ISO8601DateFormatter().string(from: Date())
     let sectionBody = """
@@ -428,6 +576,7 @@ func combineSamples(_ samples: [Measurement]) -> Measurement {
 // Per-scenario sample buffers, ordered to match `toRun` so JSON output
 // preserves the scenario ordering the rest of the pipeline expects.
 var perScenario: [[Measurement]] = Array(repeating: [], count: toRun.count)
+var skippedScenarios: [String] = []
 for sample in 0..<sampleCount {
     if sampleCount > 1 {
         FileHandle.standardError.write(Data(
@@ -436,14 +585,29 @@ for sample in 0..<sampleCount {
     }
     for (idx, s) in toRun.enumerated() {
         FileHandle.standardError.write(Data("  \(s.name)... ".utf8))
-        let m = runScenario(s)
+        guard let m = runScenario(s) else {
+            // TASK-077: `.prod` scenarios skip cleanly when the
+            // bundled lexicon / LM artifacts are missing on the
+            // running host. Record the name so a fresh-checkout
+            // run logs which scenarios were skipped without
+            // crashing the gate.
+            FileHandle.standardError.write(Data("skipped (artifacts missing)\n".utf8))
+            if !skippedScenarios.contains(s.name) {
+                skippedScenarios.append(s.name)
+            }
+            continue
+        }
         FileHandle.standardError.write(Data(
             "p50=\(String(format: "%.1f", m.p50Us))us p95=\(String(format: "%.1f", m.p95Us))us p99=\(String(format: "%.1f", m.p99Us))us\n".utf8
         ))
         perScenario[idx].append(m)
     }
 }
-let results: [Measurement] = perScenario.map { combineSamples($0) }
+// Preserve `toRun` order even after dropping skipped scenarios so JSON
+// output keeps the scenario list stable between runs.
+let results: [Measurement] = perScenario
+    .filter { !$0.isEmpty }
+    .map { combineSamples($0) }
 if sampleCount > 1 {
     FileHandle.standardError.write(Data("Per-scenario medians:\n".utf8))
     for m in results {
@@ -451,6 +615,12 @@ if sampleCount > 1 {
             "  \(m.scenario): p50=\(String(format: "%.1f", m.p50Us))us p95=\(String(format: "%.1f", m.p95Us))us p99=\(String(format: "%.1f", m.p99Us))us\n".utf8
         ))
     }
+}
+if !skippedScenarios.isEmpty {
+    let joined = skippedScenarios.joined(separator: ", ")
+    FileHandle.standardError.write(Data(
+        "Skipped \(skippedScenarios.count) scenario(s) (no bundled artifacts): \(joined)\n".utf8
+    ))
 }
 
 let updateExisting = updatePath.flatMap { readBaselineDocument($0) }
