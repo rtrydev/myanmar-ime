@@ -359,6 +359,8 @@ public final class WordLatticeDecoder: @unchecked Sendable {
             return result
         }
         // Path 2: prefix extension — copy cached arcs and append new ones.
+        // Path 3: prefix truncation (backspace hold) — drop trailing
+        // positions and filter remaining arcs to those that still fit.
         let cachedSnapshot = lexiconArcsCache
         lexiconArcsCacheLock.unlock()
 
@@ -410,7 +412,37 @@ public final class WordLatticeDecoder: @unchecked Sendable {
             return arcsByStart
         }
 
-        // Path 3: cold build.
+        if let cached = cachedSnapshot,
+           cached.normalized.hasPrefix(normalized),
+           cached.chars.count > n {
+            // Drop trailing positions and keep only the arcs that still
+            // fit inside `[0, n)`. Arcs at start ≥ n vanish entirely;
+            // arcs at start < n with end > n are filtered out. No new
+            // lexicon lookups are issued — every arc that survives was
+            // already enumerated for the prior buffer.
+            var arcsByStart: [[LatticeArc]] = Array(cached.arcsByStart.prefix(n))
+            for start in 0..<n {
+                let bucket = arcsByStart[start]
+                // Common case: every arc at this start ends within the
+                // new buffer. `last?.end <= n` is a quick check because
+                // arcs at a given start are appended in increasing-end
+                // order by the build path.
+                if let lastEnd = bucket.last?.end, lastEnd <= n {
+                    continue
+                }
+                arcsByStart[start] = bucket.filter { $0.end <= n }
+            }
+            lexiconArcsCacheLock.lock()
+            lexiconArcsCache = LexiconArcsCache(
+                normalized: normalized,
+                chars: chars,
+                arcsByStart: arcsByStart
+            )
+            lexiconArcsCacheLock.unlock()
+            return arcsByStart
+        }
+
+        // Path 4: cold build.
         var arcsByStart: [[LatticeArc]] = Array(repeating: [], count: n)
         for start in 0..<n {
             let maxLen = min(Self.maxLexiconArcLen, n - start)

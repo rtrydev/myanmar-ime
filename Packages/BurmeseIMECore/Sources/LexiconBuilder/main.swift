@@ -562,9 +562,28 @@ sqlite3_finalize(insertComposeStmt)
 exec("COMMIT")
 
 // Create indexes
+//
+// The alias / compose indexes are composite so they cover the runtime
+// `ORDER BY alias_penalty ASC, rank_score DESC` (and the compose query's
+// `separator_penalty ASC, alias_penalty ASC, rank_score DESC`) clauses.
+// Without this, short prefix lookups (`a` alone matches ~47k rows in the
+// 80k vocab) force SQLite into a `USE TEMP B-TREE FOR ORDER BY` plan that
+// walks every matching row before `LIMIT 20` can apply — costing ~60 ms
+// per call on the user-facing path. The composite indexes let SQLite walk
+// the prefix range in already-sorted order and stop after 20 rows.
+//
+// `rank_score DESC` is inverted in the index so the bundled DB layout
+// matches the query's `ORDER BY ... rank_score DESC` direction; without
+// the DESC the planner falls back to a sort for that column.
 exec("CREATE INDEX idx_reading ON reading_index (canonical_reading)")
-exec("CREATE INDEX idx_reading_alias ON reading_alias_index (alias_reading)")
-exec("CREATE INDEX idx_reading_compose ON reading_compose_index (compose_reading)")
+exec("""
+CREATE INDEX idx_reading_alias ON reading_alias_index
+    (alias_reading, alias_penalty, rank_score DESC)
+""")
+exec("""
+CREATE INDEX idx_reading_compose ON reading_compose_index
+    (compose_reading, separator_penalty, alias_penalty, rank_score DESC)
+""")
 exec("CREATE INDEX idx_entry_reading ON entries (canonical_reading)")
 
 // WAL was used to speed up bulk inserts. The shipped DB is read-only at

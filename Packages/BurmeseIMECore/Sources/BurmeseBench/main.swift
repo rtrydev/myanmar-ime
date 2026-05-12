@@ -17,6 +17,14 @@ struct Scenario {
         /// `buffer` typed one character at a time; each per-keystroke call is
         /// one sample. `iterations` is clamped to `buffer.count`.
         case incremental(String)
+        /// Backspace-hold shape: a fresh engine is fed the full `buffer`
+        /// once off-clock so its internal state matches a user who has
+        /// just finished typing, then the buffer is truncated by one
+        /// character per call (sample) down to length 1. Mirrors the
+        /// "hold backspace" cadence the native shells expose. Without
+        /// this scenario, regressions in prefix-truncation cache paths
+        /// hide behind incremental's prefix-extension cost.
+        case truncation(String)
     }
 
     /// Engine construction shape exercised by the scenario. `bare` is the
@@ -159,6 +167,32 @@ let scenarios: [Scenario] = [
              kind: .fullBuffer(String(repeating: "in", count: 10)),
              iterations: 200,
              profile: .prod),
+    // Repeated closed-syllable + tone-marker chain typed incrementally.
+    // The native shells reported visible choppiness on `ain:ain:...`
+    // patterns: every fourth keystroke completes a syllable + tone
+    // composition, and the per-keystroke buffer crosses the lattice
+    // threshold around the third group. This scenario locks in a
+    // per-keystroke budget for that user-felt pattern.
+    Scenario(name: "ain_colon_chain_incremental_prod",
+             kind: .incremental(String(repeating: "ain:", count: 6)),
+             iterations: 200,
+             profile: .prod),
+    // Backspace-hold from a full closed-syllable+tone chain. Same
+    // shape as the incremental sibling above but shrinking — locks
+    // in a budget for the lexicon-arc truncation path the
+    // backspace-hold UI exercises. The 24-char buffer (`ain:` × 6)
+    // covers six lattice-active backspaces plus the sub-threshold
+    // tail.
+    Scenario(name: "ain_colon_chain_backspace_prod",
+             kind: .truncation(String(repeating: "ain:", count: 6)),
+             iterations: 200,
+             profile: .prod),
+    // Backspace-hold from the longest realistic buffer shape. Same
+    // string as `long_prod` but truncated one char at a time.
+    Scenario(name: "long_backspace_prod",
+             kind: .truncation("mingalarparshinbyarthwarmaylay"),
+             iterations: 500,
+             profile: .prod),
 ]
 
 // MARK: - Timing
@@ -278,6 +312,19 @@ func runScenario(_ s: Scenario) -> Measurement? {
                 _ = engine.update(buffer: String(buf.prefix(i)), context: [])
             }
         }
+    case .truncation(let buf):
+        // Prime the engine with the full buffer once per warm-up cycle,
+        // then walk down to length 1 so any cache state the truncation
+        // path expects (lexicon arcs for the full buffer) is hot
+        // before the timed pass begins.
+        for _ in 0..<warmup {
+            _ = engine.update(buffer: buf, context: [])
+            var i = buf.count - 1
+            while i >= 1 {
+                _ = engine.update(buffer: String(buf.prefix(i)), context: [])
+                i -= 1
+            }
+        }
     }
 
     // Three passes, pick the middle distribution (median of three by p95).
@@ -305,6 +352,29 @@ func runScenario(_ s: Scenario) -> Measurement? {
                     _ = engine.update(buffer: prefix, context: [])
                     let t1 = nowNanos()
                     samples.append(t1 - t0)
+                }
+            }
+        case .truncation(let buf):
+            let chars = buf.count
+            // Each run does `chars - 1` timed samples (length chars → 1).
+            // Match the per-run sample count of `.incremental` so
+            // `iterations` is the total sample budget the same way.
+            let perRun = max(1, chars - 1)
+            let runs = max(1, s.iterations / perRun)
+            samples.reserveCapacity(runs * perRun)
+            for _ in 0..<runs {
+                guard let engine = makeEngine(profile: s.profile) else { return nil }
+                // Inflate the buffer to full off-clock so the engine
+                // matches a user who has just finished typing.
+                _ = engine.update(buffer: buf, context: [])
+                var i = chars - 1
+                while i >= 1 {
+                    let prefix = String(buf.prefix(i))
+                    let t0 = nowNanos()
+                    _ = engine.update(buffer: prefix, context: [])
+                    let t1 = nowNanos()
+                    samples.append(t1 - t0)
+                    i -= 1
                 }
             }
         }

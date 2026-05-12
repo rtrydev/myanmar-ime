@@ -42,6 +42,23 @@ public final class SQLiteCandidateStore: CandidateStore, @unchecked Sendable {
     private let latticeLookupCacheLock = NSLock()
     private static let latticeLookupCacheCapacity = 4096
 
+    // The engine's `lookup(prefix:)` call is the slowest single SQL the IME
+    // issues: for a short prefix (`a`, `t`, `k`) the WHERE clause selects
+    // tens of thousands of rows, and the bundled lexicon's
+    // `idx_reading_alias` is not covering for the `ORDER BY alias_penalty
+    // ASC, rank_score DESC` clause, so SQLite walks the full range into a
+    // temp B-tree before LIMIT 20 can apply. On macOS that's ~60 ms per
+    // call, ~120 ms per keystroke (the engine calls `lookup(prefix:)`
+    // twice per keystroke in the non-windowed path). Caching the result
+    // turns every repeat keystroke for the same prefix into a dictionary
+    // hit; the `previousSurface` parameter is ignored on the SQLite path,
+    // so the cache key is the raw prefix string. Same drop-25%-on-overflow
+    // eviction the other two caches use.
+    private var prefixLookupCache: [String: [Candidate]] = [:]
+    private var prefixLookupCacheOrder: [String] = []
+    private let prefixLookupCacheLock = NSLock()
+    private static let prefixLookupCacheCapacity = 4096
+
     // Eviction batch for both caches. On overflow we drop the oldest 25%
     // rather than clearing the whole map: a full wipe causes a hit-rate
     // cliff where every keystroke after the cache fills pays full SQL
@@ -99,6 +116,13 @@ public final class SQLiteCandidateStore: CandidateStore, @unchecked Sendable {
     public func lookup(prefix: String, previousSurface: String?) -> [Candidate] {
         guard !prefix.isEmpty else { return [] }
 
+        prefixLookupCacheLock.lock()
+        if let hit = prefixLookupCache[prefix] {
+            prefixLookupCacheLock.unlock()
+            return hit
+        }
+        prefixLookupCacheLock.unlock()
+
         var candidates: [Candidate] = []
         for variant in Romanization.lookupAliasReadings(for: prefix) {
             let upperBound = prefixUpperBound(variant.aliasReading)
@@ -114,7 +138,22 @@ public final class SQLiteCandidateStore: CandidateStore, @unchecked Sendable {
                 variant.extraPenalty
             )
         }
-        return deduplicateCandidates(candidates)
+        let deduped = deduplicateCandidates(candidates)
+
+        prefixLookupCacheLock.lock()
+        if prefixLookupCache[prefix] == nil {
+            if prefixLookupCache.count >= Self.prefixLookupCacheCapacity {
+                let drop = min(Self.lookupCacheEvictBatch, prefixLookupCacheOrder.count)
+                for key in prefixLookupCacheOrder.prefix(drop) {
+                    prefixLookupCache.removeValue(forKey: key)
+                }
+                prefixLookupCacheOrder.removeFirst(drop)
+            }
+            prefixLookupCache[prefix] = deduped
+            prefixLookupCacheOrder.append(prefix)
+        }
+        prefixLookupCacheLock.unlock()
+        return deduped
     }
 
     public func lookupExactForLattice(reading: String) -> [(candidate: Candidate, aliasPenalty: Int)] {
@@ -564,14 +603,23 @@ public final class SQLiteCandidateStore: CandidateStore, @unchecked Sendable {
             return nil
         }
 
+        // Mirror the LexiconBuilder's composite indexes — covering the
+        // runtime `ORDER BY` clauses so short prefix lookups don't pay
+        // the ~60 ms temp-B-tree sort cost (see LexiconBuilder comment).
         if createAliasIndex,
-           !exec("CREATE INDEX idx_reading_alias ON reading_alias_index (alias_reading)", in: lookupDB) {
+           !exec(
+            "CREATE INDEX idx_reading_alias ON reading_alias_index (alias_reading, alias_penalty, rank_score DESC)",
+            in: lookupDB
+        ) {
             sqlite3_close(lookupDB)
             return nil
         }
 
         if createComposeIndex,
-           !exec("CREATE INDEX idx_reading_compose ON reading_compose_index (compose_reading)", in: lookupDB) {
+           !exec(
+            "CREATE INDEX idx_reading_compose ON reading_compose_index (compose_reading, separator_penalty, alias_penalty, rank_score DESC)",
+            in: lookupDB
+        ) {
             sqlite3_close(lookupDB)
             return nil
         }

@@ -256,8 +256,12 @@ extension BurmeseEngine {
     internal static let midBufferComposingPunctuation: Set<Character> = [".", ":", "*", "'"]
 
     internal func splitAtLastEmbeddedComposingPunct(_ buffer: String) -> EmbeddedPunctSplit? {
-        var split: EmbeddedPunctSplit? = nil
-        for idx in buffer.indices {
+        // Reverse-iterate and return on the first qualifying position
+        // so multi-`:` / multi-`.` buffers (`ain:ain:ain:ain:`) don't
+        // call the expensive `renderFrozenPunctSegments` per qualifying
+        // index only to throw all but the last result away. Mirrors the
+        // pattern already used in `splitAtLastEmbeddedLiteralPunct`.
+        for idx in buffer.indices.reversed() {
             guard shouldSplitEmbeddedComposingPunct(in: buffer, at: idx) else { continue }
             let after = buffer.index(after: idx)
             guard after != buffer.endIndex else { continue }
@@ -266,12 +270,12 @@ extension BurmeseEngine {
             }
             let renderedPrefix = renderFrozenPunctSegments(String(buffer[..<after]))
             guard !Self.hasAsciiLetters(renderedPrefix) else { continue }
-            split = EmbeddedPunctSplit(
+            return EmbeddedPunctSplit(
                 renderedPrefix: renderedPrefix,
                 activeBuffer: String(buffer[after...])
             )
         }
-        return split
+        return nil
     }
 
     private func shouldSplitEmbeddedComposingPunct(
