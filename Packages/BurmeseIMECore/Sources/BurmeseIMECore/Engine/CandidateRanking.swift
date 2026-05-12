@@ -386,6 +386,26 @@ extension BurmeseEngine {
     /// single-occurrence clusters keep the lattice's per-position
     /// medial choice.
     internal static func bufferHasRepeatedClusterAliasShape(_ buffer: String) -> Bool {
+        // Cheap fast-path: every cluster-alias key in the table below
+        // starts with one of `k`, `g`, `c`, `p`, `s`. If the buffer
+        // does not contain any of those first-chars (e.g. `aing*8` or
+        // any all-vowel typing), no key can match anywhere, so we can
+        // short-circuit before paying for the per-key character scan.
+        // This keeps the TASK-072 mixed-medial guard off the hot path
+        // for the common case where the buffer has no candidate
+        // cluster keystrokes at all (BurmeseBench `vowel_rule_chain_*`
+        // scenarios).
+        var hasClusterFirstChar = false
+        for scalar in buffer.unicodeScalars {
+            let v = scalar.value
+            if v == 0x6B /* k */ || v == 0x67 /* g */
+                || v == 0x63 /* c */ || v == 0x70 /* p */
+                || v == 0x73 /* s */ {
+                hasClusterFirstChar = true
+                break
+            }
+        }
+        guard hasClusterFirstChar else { return false }
         // Cluster-alias keys whose Cy / Cwy spellings represent a
         // user-visible medial choice. Sorted longest-first so the
         // scanner doesn't double-count a `kwy` cluster as `ky`.
