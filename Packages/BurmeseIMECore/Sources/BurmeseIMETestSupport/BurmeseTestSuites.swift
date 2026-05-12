@@ -163,5 +163,6 @@ public enum BurmeseTestSuites {
         TASK072DoubledClusterMedialConsistencySuite.suite,
         TASK073TASK074CuratedAliasRankZeroSuite.suite,
         TASK076CrossSegmentResegmentationSuite.suite,
+        TASK050OunEinIllegalSurfaceSuite.suite,
     ]
 }

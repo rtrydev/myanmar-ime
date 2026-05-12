@@ -2916,8 +2916,31 @@ public final class BurmeseEngine: @unchecked Sendable {
         guard !rawBuffer.isEmpty else { return state }
         // Carve-out: lexicon hit at rank 0 means the user is composing a
         // known dictionary word — don't echo the romanization back.
+        //
+        // TASK-050b: narrow the carve-out so it excludes lexicon rows
+        // whose surface starts with a Myanmar abbreviation mark
+        // (U+104A..U+104F — `၊ ။ ၌ ၍ ၎ ၏`). Those scalars are
+        // standalone punctuation marks that never head a multi-scalar
+        // Burmese word, so a row whose surface begins with one is
+        // structurally suspect corpus pollution (sentence-boundary
+        // collisions like `surface='၏န' reading='eina'`, where `…၏`
+        // ended one corpus sentence and `န…` started the next).
+        // For an `ein` buffer this row otherwise wins the prefix
+        // lookup at rank 0 and the broader lexicon-source carve-out
+        // would suppress the literal-ASCII echo, leaving the user
+        // with no way to commit `ein` as typed (CLAUDE.md §2
+        // violation). Falling through to the literal-fallback path
+        // here keeps the abbreviation-led row reachable in the
+        // panel as a lower-ranked alternative while restoring the
+        // literal as a clean exit. The common case (lexicon hit
+        // starting with a composable Burmese scalar) still
+        // early-returns.
         let firstCandidate = state.candidates.first
-        if firstCandidate?.source == .lexicon { return state }
+        if firstCandidate?.source == .lexicon {
+            let firstScalarValue = firstCandidate?.surface.unicodeScalars.first?.value ?? 0
+            let isAbbreviationLed = firstScalarValue >= 0x104A && firstScalarValue <= 0x104F
+            if !isAbbreviationLed { return state }
+        }
 
         // Hot path: empty panel → literal is the only candidate.
         if firstCandidate == nil {
