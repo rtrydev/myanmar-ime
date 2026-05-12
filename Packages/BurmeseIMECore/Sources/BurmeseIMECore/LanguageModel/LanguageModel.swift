@@ -46,6 +46,21 @@ public protocol LanguageModel: Sendable {
     /// `scoreSurface`, which may decompose a multi-word surface into known
     /// pieces even when the full string is not a single LM token.
     func containsSurface(_ surface: String) -> Bool
+
+    /// Resolve `surface` to the LM's internal word id, falling back to a
+    /// stable sentinel when the surface is not in vocabulary. Lattice-style
+    /// callers use the returned id as a hash key in the Viterbi inner loop
+    /// so the per-state context need not be re-resolved (and need not
+    /// allocate a String) on every score lookup. Default returns
+    /// `UInt32.max`; vocab-bearing LMs should override.
+    func wordIdForSurface(_ surface: String) -> UInt32
+
+    /// Trigram score for `wordId` given the two-word context
+    /// `(prevId, lastId)`, with all three ids already resolved by the
+    /// caller via `wordIdForSurface(_:)`. Used by the lattice decoder's
+    /// hot loop to skip per-call surface→id resolution. Default forwards
+    /// to `unknownLogProb`; vocab-bearing LMs should override.
+    func logProb(wordId: UInt32, prevId: UInt32, lastId: UInt32) -> Double
 }
 
 extension LanguageModel {
@@ -58,6 +73,12 @@ extension LanguageModel {
     public var unknownLogProb: Double { -.infinity }
 
     public func containsSurface(_ surface: String) -> Bool { false }
+
+    public func wordIdForSurface(_ surface: String) -> UInt32 { UInt32.max }
+
+    public func logProb(wordId: UInt32, prevId: UInt32, lastId: UInt32) -> Double {
+        unknownLogProb
+    }
 }
 
 /// A no-op language model: returns a small constant log-prob for every

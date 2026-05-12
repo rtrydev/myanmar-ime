@@ -96,6 +96,44 @@ public final class WordLatticeDecoder: @unchecked Sendable {
     /// BOS sentinels for the trigram context at position 0.
     private static let bosToken = "<s>"
 
+    /// Decoder-level memo for `(arcSurfaceId, prevId, lastId) → lmScore`.
+    /// The same trigram tuple recurs both inside a single Viterbi pass
+    /// (many parent states share a context) and across consecutive
+    /// keystrokes that extend the same buffer prefix. Holding the memo
+    /// at the decoder rather than per-decode means an incremental
+    /// session amortises every score lookup over the whole session
+    /// rather than the single call. Bounded with the same drop-25%
+    /// eviction pattern the lexicon / id caches use.
+    private var lmScoreCache: [LMKey: Double] = [:]
+    private var lmScoreCacheOrder: [LMKey] = []
+    private let lmScoreCacheLock = NSLock()
+    private static let lmScoreCacheCapacity = 8192
+    private static let lmScoreCacheEvictBatch = 2048
+
+    /// Decoder-level memo for the lexicon arc table. Keyed by the most
+    /// recent decoded `normalized` buffer. When the next call's buffer
+    /// equals the cached one, the lexicon arcs are reused verbatim
+    /// (huge win for the repeat-the-same-buffer bench scenarios). When
+    /// the next call's buffer extends the cached one (`startsWith`
+    /// holds), only arcs that span past the previous end need to be
+    /// looked up — typically ~2 × `maxLexiconArcLen` new lookups per
+    /// keystroke instead of the full O(N × maxLexiconArcLen). On any
+    /// other change (truncation, totally different buffer) the cache is
+    /// invalidated and the full O(N × 24) build runs.
+    ///
+    /// Syllable arcs come from a separate `parser.syllableArcs` call
+    /// and continue to rebuild every decode — parser DP is fast and
+    /// the per-position syllable list is not as obviously incremental
+    /// as the substring lexicon lookups.
+    private var lexiconArcsCache: LexiconArcsCache?
+    private let lexiconArcsCacheLock = NSLock()
+
+    private struct LexiconArcsCache {
+        let normalized: String
+        let chars: [Character]
+        let arcsByStart: [[LatticeArc]]
+    }
+
     public init(
         parser: SyllableParser,
         candidateStore: any CandidateStore,
@@ -137,49 +175,20 @@ public final class WordLatticeDecoder: @unchecked Sendable {
         let n = chars.count
         guard n > 0 else { return [] }
 
-        // --- Build arcs ---
-        var arcsByStart: [[LatticeArc]] = Array(repeating: [], count: n)
+        // --- Build arcs (lexicon part uses the prefix-extension cache) ---
 
-        // Lexicon arcs. Uses `lookupExactForLattice` which returns the
-        // raw rank_score and the alias_penalty separately so the decoder
-        // can keep its own policy (LM decides variants; alias_penalty
-        // only applies a soft, LM-comparable cost).
-        //
-        // `lookupExactForLattice` normalises both sides through
-        // `aliasReading` / `composeLookupKey`, so a query `kwyantaw`
-        // can match both `ကျွန်တော်` (canonical `kwyantaw`) and
-        // `ကျွန်တော့်` (canonical `kwyantaw.` in some corpora — the
-        // trailing dot is a tone mark the user did NOT type here).
-        // Dropping arcs whose canonical reading carries MORE tone-mark
-        // diacritics (`.`, `:`) than the slice we're looking up keeps
-        // the lattice from injecting unrequested tone-variant surfaces.
-        for start in 0..<n {
-            let maxLen = min(Self.maxLexiconArcLen, n - start)
-            for len in 1...maxLen {
-                let sub = String(chars[start..<(start + len)])
-                let queryToneMarks = Self.toneMarkCount(sub)
-                let hits = candidateStore.lookupExactForLattice(reading: sub)
-                for (cand, aliasPenalty) in hits
-                where !cand.surface.isEmpty
-                    && Self.surfaceIsLexicallyClean(cand.surface)
-                    && Self.toneMarkCount(cand.reading) <= queryToneMarks {
-                    let aliasCost = Double(aliasPenalty) * Self.lexiconAliasPenaltyCost
-                    arcsByStart[start].append(LatticeArc(
-                        start: start,
-                        end: start + len,
-                        surface: cand.surface,
-                        reading: cand.reading,
-                        isLexicon: true,
-                        aliasCost: aliasPenalty,
-                        baseScore: Self.lexiconRankScale * cand.score + aliasCost
-                    ))
-                }
-            }
-        }
+        let lexiconArcsByStart = lexiconArcsByStart(
+            normalized: normalized,
+            chars: chars
+        )
+
+        var arcsByStart: [[LatticeArc]] = lexiconArcsByStart
 
         // Syllable fallback arcs. These are needed so every position has
         // at least one outgoing arc (otherwise Viterbi cannot traverse
-        // gaps in the lexicon).
+        // gaps in the lexicon). Rebuilt every decode — the parser DP is
+        // not the dominant cost here and `parser.syllableArcs` is not
+        // structured for incremental extension.
         let syllableArcs = parser.syllableArcs(normalized)
         for arc in syllableArcs where !arc.output.isEmpty && !Self.surfaceContainsLatin(arc.output) {
             let legalPenalty = arc.isLegal ? 0.0 : Self.illegalArcCost
@@ -204,6 +213,32 @@ public final class WordLatticeDecoder: @unchecked Sendable {
         // lattice to reach 5 cleanly). The final `table[n]` emptiness
         // check below is the authoritative "unreachable" signal.
 
+        // --- Resolve every arc's surface to a word id once ---
+
+        // The Viterbi inner loop hashes `(arcSurfaceId, prevId, lastId)`
+        // for the score memo and `(prevId, lastId)` for the prune-time
+        // dedup; resolving each surface once up front means the
+        // ~N × 50 (arc × parent) probes in the loop pay no per-probe
+        // String hashing. The LM's own id cache absorbs the resolution
+        // itself for surfaces seen in prior decode calls.
+        //
+        // Arcs are flattened into parallel arrays keyed by absolute arc
+        // index; `arcIndexByStart[s]` lists the indices of arcs that
+        // begin at position `s` so the Viterbi loop iterates positions
+        // in order without re-walking `arcsByStart`.
+        var arcRefs: [LatticeArc] = []
+        arcRefs.reserveCapacity(64)
+        var arcSurfaceIds: [UInt32] = []
+        arcSurfaceIds.reserveCapacity(64)
+        var arcIndexByStart: [[Int]] = Array(repeating: [], count: n)
+        for start in 0..<n {
+            for arc in arcsByStart[start] {
+                arcIndexByStart[start].append(arcRefs.count)
+                arcRefs.append(arc)
+                arcSurfaceIds.append(languageModel.wordIdForSurface(arc.surface))
+            }
+        }
+
         // --- Viterbi ---
 
         // Seed the table with a BOS-context state at position 0 carrying
@@ -222,40 +257,44 @@ public final class WordLatticeDecoder: @unchecked Sendable {
             seedPrev = baseContext[baseContext.count - 2]
             seedLast = baseContext[baseContext.count - 1]
         }
+        let seedPrevId = languageModel.wordIdForSurface(seedPrev)
+        let seedLastId = languageModel.wordIdForSurface(seedLast)
         let seedState = ViterbiState(
             cumScore: 0,
             cumLM: 0,
             contextPrev: seedPrev,
             contextLast: seedLast,
+            contextPrevId: seedPrevId,
+            contextLastId: seedLastId,
             backpointer: nil
         )
 
         var table: [[ViterbiState]] = Array(repeating: [], count: n + 1)
         table[0] = [seedState]
 
-        // In-call LM memo: same (surface, context) is scored many times
-        // across states that share prefix contexts.
-        var lmCache: [LMKey: Double] = [:]
         let alpha = tuning.alpha
 
         for start in 0..<n {
             // Prune table[start] to the beam before fanning out. Dedupe
-            // by (contextPrev, contextLast) so a single wrong-word
+            // by (contextPrevId, contextLastId) so a single wrong-word
             // history doesn't hog the whole beam.
             pruneStates(&table[start])
             guard !table[start].isEmpty else { continue }
 
-            for arc in arcsByStart[start] {
+            for arcIdx in arcIndexByStart[start] {
+                let arc = arcRefs[arcIdx]
+                let arcSurfaceId = arcSurfaceIds[arcIdx]
                 for (parentIdx, parent) in table[start].enumerated() {
-                    let ctx = [parent.contextPrev, parent.contextLast]
-                    let lmKey = LMKey(surface: arc.surface, prev: parent.contextPrev, last: parent.contextLast)
-                    let lmScore: Double
-                    if let cached = lmCache[lmKey] {
-                        lmScore = cached
-                    } else {
-                        lmScore = languageModel.logProb(surface: arc.surface, context: ctx)
-                        lmCache[lmKey] = lmScore
-                    }
+                    let lmKey = LMKey(
+                        surfaceId: arcSurfaceId,
+                        prevId: parent.contextPrevId,
+                        lastId: parent.contextLastId
+                    )
+                    let lmScore = cachedLMScore(
+                        lmKey: lmKey,
+                        arcSurface: arc.surface,
+                        parent: parent
+                    )
                     let arcScore = arc.baseScore + alpha * lmScore
                     let newCum = parent.cumScore + arcScore
                     let newLM = parent.cumLM + lmScore
@@ -265,6 +304,8 @@ public final class WordLatticeDecoder: @unchecked Sendable {
                         cumLM: newLM,
                         contextPrev: parent.contextLast,
                         contextLast: arc.surface,
+                        contextPrevId: parent.contextLastId,
+                        contextLastId: arcSurfaceId,
                         backpointer: Backpointer(
                             arc: arc,
                             parentPosition: start,
@@ -297,16 +338,193 @@ public final class WordLatticeDecoder: @unchecked Sendable {
         return outputs
     }
 
+    // MARK: - Arc table caching
+
+    /// Return the lexicon-arc table for `normalized`. On exact match
+    /// against the cache, returns the cached arrays directly. On a
+    /// prefix-extension (cached buffer is a strict prefix of the new
+    /// one), copies the cached arrays and looks up only the substrings
+    /// that span past the previous end. Otherwise rebuilds from scratch.
+    private func lexiconArcsByStart(
+        normalized: String,
+        chars: [Character]
+    ) -> [[LatticeArc]] {
+        let n = chars.count
+
+        // Path 1: identical buffer — full reuse.
+        lexiconArcsCacheLock.lock()
+        if let cached = lexiconArcsCache, cached.normalized == normalized {
+            let result = cached.arcsByStart
+            lexiconArcsCacheLock.unlock()
+            return result
+        }
+        // Path 2: prefix extension — copy cached arcs and append new ones.
+        let cachedSnapshot = lexiconArcsCache
+        lexiconArcsCacheLock.unlock()
+
+        if let cached = cachedSnapshot,
+           normalized.hasPrefix(cached.normalized),
+           cached.chars.count < n {
+            let oldN = cached.chars.count
+            var arcsByStart: [[LatticeArc]] = cached.arcsByStart
+            arcsByStart.reserveCapacity(n)
+            while arcsByStart.count < n {
+                arcsByStart.append([])
+            }
+            // For each old start, look up the new lengths that didn't
+            // fit before (lengths that now end past `oldN`, capped by
+            // `maxLexiconArcLen` and the new buffer length).
+            for start in 0..<oldN {
+                let maxLen = min(Self.maxLexiconArcLen, n - start)
+                let firstNewLen = oldN - start + 1
+                if firstNewLen > maxLen { continue }
+                for len in firstNewLen...maxLen {
+                    appendLexiconArcs(
+                        chars: chars,
+                        start: start,
+                        len: len,
+                        into: &arcsByStart
+                    )
+                }
+            }
+            // For each new start position, look up every length that fits.
+            for start in oldN..<n {
+                let maxLen = min(Self.maxLexiconArcLen, n - start)
+                if maxLen < 1 { continue }
+                for len in 1...maxLen {
+                    appendLexiconArcs(
+                        chars: chars,
+                        start: start,
+                        len: len,
+                        into: &arcsByStart
+                    )
+                }
+            }
+            lexiconArcsCacheLock.lock()
+            lexiconArcsCache = LexiconArcsCache(
+                normalized: normalized,
+                chars: chars,
+                arcsByStart: arcsByStart
+            )
+            lexiconArcsCacheLock.unlock()
+            return arcsByStart
+        }
+
+        // Path 3: cold build.
+        var arcsByStart: [[LatticeArc]] = Array(repeating: [], count: n)
+        for start in 0..<n {
+            let maxLen = min(Self.maxLexiconArcLen, n - start)
+            for len in 1...maxLen {
+                appendLexiconArcs(
+                    chars: chars,
+                    start: start,
+                    len: len,
+                    into: &arcsByStart
+                )
+            }
+        }
+        lexiconArcsCacheLock.lock()
+        lexiconArcsCache = LexiconArcsCache(
+            normalized: normalized,
+            chars: chars,
+            arcsByStart: arcsByStart
+        )
+        lexiconArcsCacheLock.unlock()
+        return arcsByStart
+    }
+
+    /// Issue a single `lookupExactForLattice` call for `chars[start..<(start+len)]`
+    /// and append the surviving hits as lexicon arcs into `arcsByStart`.
+    /// Lifts the body of the original arc-build inner loop so both the
+    /// cold and prefix-extension paths share the same filter logic.
+    private func appendLexiconArcs(
+        chars: [Character],
+        start: Int,
+        len: Int,
+        into arcsByStart: inout [[LatticeArc]]
+    ) {
+        let sub = String(chars[start..<(start + len)])
+        let queryToneMarks = Self.toneMarkCount(sub)
+        let hits = candidateStore.lookupExactForLattice(reading: sub)
+        for (cand, aliasPenalty) in hits
+        where !cand.surface.isEmpty
+            && Self.surfaceIsLexicallyClean(cand.surface)
+            && Self.toneMarkCount(cand.reading) <= queryToneMarks {
+            let aliasCost = Double(aliasPenalty) * Self.lexiconAliasPenaltyCost
+            arcsByStart[start].append(LatticeArc(
+                start: start,
+                end: start + len,
+                surface: cand.surface,
+                reading: cand.reading,
+                isLexicon: true,
+                aliasCost: aliasPenalty,
+                baseScore: Self.lexiconRankScale * cand.score + aliasCost
+            ))
+        }
+    }
+
     // MARK: - Viterbi helpers
+
+    /// Look up the LM trigram score for `(arc.surface | parent.contextPrev, parent.contextLast)`
+    /// through the decoder-level cache. On miss, falls back to the id-aware
+    /// `LanguageModel.logProb(wordId:prevId:lastId:)` so vocab-bearing LMs
+    /// can skip the per-call surface→id resolution they would otherwise
+    /// do inside `logProb(surface:context:)`. On a model without a real
+    /// vocabulary the protocol default routes back through the string
+    /// `logProb` so behaviour stays correct.
+    private func cachedLMScore(
+        lmKey: LMKey,
+        arcSurface: String,
+        parent: ViterbiState
+    ) -> Double {
+        lmScoreCacheLock.lock()
+        if let cached = lmScoreCache[lmKey] {
+            lmScoreCacheLock.unlock()
+            return cached
+        }
+        lmScoreCacheLock.unlock()
+
+        let score: Double
+        if languageModel.hasVocabulary {
+            score = languageModel.logProb(
+                wordId: lmKey.surfaceId,
+                prevId: lmKey.prevId,
+                lastId: lmKey.lastId
+            )
+        } else {
+            score = languageModel.logProb(
+                surface: arcSurface,
+                context: [parent.contextPrev, parent.contextLast]
+            )
+        }
+
+        lmScoreCacheLock.lock()
+        if lmScoreCache[lmKey] == nil {
+            if lmScoreCache.count >= Self.lmScoreCacheCapacity {
+                let drop = min(Self.lmScoreCacheEvictBatch, lmScoreCacheOrder.count)
+                for key in lmScoreCacheOrder.prefix(drop) {
+                    lmScoreCache.removeValue(forKey: key)
+                }
+                lmScoreCacheOrder.removeFirst(drop)
+            }
+            lmScoreCache[lmKey] = score
+            lmScoreCacheOrder.append(lmKey)
+        }
+        lmScoreCacheLock.unlock()
+        return score
+    }
 
     private func pruneStates(_ states: inout [ViterbiState]) {
         guard states.count > 1 else { return }
         states.sort { $0.cumScore > $1.cumScore }
-        var seen: Set<String> = []
+        var seen: Set<UInt64> = []
+        seen.reserveCapacity(Self.beamPerEndpoint)
         var deduped: [ViterbiState] = []
         deduped.reserveCapacity(Self.beamPerEndpoint)
         for s in states {
-            let key = s.contextPrev + "\u{1F}" + s.contextLast
+            // Pack (prevId, lastId) into a single UInt64 so the dedup
+            // key never allocates a String. Word ids fit in UInt32.
+            let key = (UInt64(s.contextPrevId) << 32) | UInt64(s.contextLastId)
             if seen.insert(key).inserted {
                 deduped.append(s)
                 if deduped.count >= Self.beamPerEndpoint { break }
@@ -399,6 +617,8 @@ private struct ViterbiState {
     let cumLM: Double
     let contextPrev: String
     let contextLast: String
+    let contextPrevId: UInt32
+    let contextLastId: UInt32
     let backpointer: Backpointer?
 }
 
@@ -409,7 +629,7 @@ private struct Backpointer {
 }
 
 private struct LMKey: Hashable {
-    let surface: String
-    let prev: String
-    let last: String
+    let surfaceId: UInt32
+    let prevId: UInt32
+    let lastId: UInt32
 }

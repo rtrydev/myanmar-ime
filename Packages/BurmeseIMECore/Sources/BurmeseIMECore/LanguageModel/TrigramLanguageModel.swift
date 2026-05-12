@@ -181,6 +181,14 @@ public final class TrigramLanguageModel: LanguageModel, @unchecked Sendable {
         lookupSurface(surface) != nil
     }
 
+    public func wordIdForSurface(_ surface: String) -> UInt32 {
+        resolveId(surface)
+    }
+
+    public func logProb(wordId w3: UInt32, prevId w1: UInt32, lastId w2: UInt32) -> Double {
+        trigramScore(w1: w1, w2: w2, w3: w3)
+    }
+
     /// Greedy longest-match decomposition of `surface` against the
     /// vocabulary, summing per-word contextual log-probs. When a prefix
     /// of the remaining surface is in vocab, it's scored given the
