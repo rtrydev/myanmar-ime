@@ -164,5 +164,6 @@ public enum BurmeseTestSuites {
         TASK073TASK074CuratedAliasRankZeroSuite.suite,
         TASK076CrossSegmentResegmentationSuite.suite,
         TASK050OunEinIllegalSurfaceSuite.suite,
+        AprefixIndependentVowelReachabilitySuite.suite,
     ]
 }

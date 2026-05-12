@@ -186,6 +186,20 @@ let curatedAdditions: [(surface: String, frequency: Double, reading: String)] = 
 /// `CuratedLexicon.oovAllowedSurfaces` in BurmeseIMECore.
 let curatedOOVAllowed: Set<String> = CuratedLexicon.oovAllowedSurfaces
 
+/// Alias penalty for the `ah-` prefix block (legacy typing convention
+/// for buffer-leading U+1021). Defined as a named constant so the
+/// symmetric `a-` block below can pick a strictly larger penalty.
+let kAliasPenaltyAhPrefix: Int = 0
+
+/// Alias penalty for the symmetric `a-` prefix block. Users who type
+/// the bare `a` onset variant (`ain:` for `အင်း`, `aaung` for `အောင်`)
+/// expect the U+1021-leading lexicon entry to surface in the panel,
+/// but the same buffers are also valid parser rules for the dot-above
+/// `ai-` shape (`အိန်း` `အိမ်း`). A strictly higher penalty than
+/// `kAliasPenaltyAhPrefix` keeps the structural parser rule at rank-0
+/// while exposing the synthetic alias mid-panel.
+let kAliasPenaltyAPrefix: Int = 2
+
 // Parse TSV lines
 var entries: [LexiconEntry] = []
 let lines = content.components(separatedBy: .newlines)
@@ -448,7 +462,7 @@ entryLoop: for entry in entries {
             sqlite3_bind_text(insertAliasStmt, 2, readingCStr, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
             sqlite3_bind_int64(insertAliasStmt, 3, entryId)
             sqlite3_bind_double(insertAliasStmt, 4, score)
-            sqlite3_bind_int(insertAliasStmt, 5, Int32(variant.aliasPenalty))
+            sqlite3_bind_int(insertAliasStmt, 5, Int32(variant.aliasPenalty + kAliasPenaltyAhPrefix))
             if sqlite3_step(insertAliasStmt) != SQLITE_DONE {
                 writeStderr("Warning: failed to insert ah-prefix alias for \(entry.surface)\n")
             }
@@ -460,12 +474,50 @@ entryLoop: for entry in entries {
             sqlite3_bind_text(insertComposeStmt, 2, readingCStr, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
             sqlite3_bind_int64(insertComposeStmt, 3, entryId)
             sqlite3_bind_double(insertComposeStmt, 4, score)
-            sqlite3_bind_int(insertComposeStmt, 5, Int32(variant.aliasPenalty))
+            sqlite3_bind_int(insertComposeStmt, 5, Int32(variant.aliasPenalty + kAliasPenaltyAhPrefix))
             sqlite3_bind_int(insertComposeStmt, 6, Int32(variant.separatorPenalty))
             if sqlite3_step(insertComposeStmt) != SQLITE_DONE {
                 writeStderr("Warning: failed to insert ah-prefix compose for \(entry.surface)\n")
             }
             sqlite3_reset(insertComposeStmt)
+        }
+
+        // Symmetric `a-` prefix typing convention for buffer-leading
+        // U+1021. The `ah-` block above covers users who learnt the
+        // legacy `ahin:` / `ahaung` typing; this block covers the bare
+        // `a-` onset (`ain:` / `aaung`). Many such buffers (e.g.
+        // `ain:`) collide with a valid parser rule for a different
+        // surface (dot-above ai-vowel `အိန်း`), so the synthetic
+        // alias is emitted at a strictly higher penalty than the
+        // `ah-` block so that:
+        //   - the structural parser surface stays at rank 0;
+        //   - the U+1021-leading lexicon hit remains panel-reachable.
+        // No deduping against the `ah-` block: when an aliasReading
+        // already begins with `a` (e.g. `aung`, `ar:`) the resulting
+        // `aaung` / `aar:` alias serves the user's `a + canonical`
+        // intent for typed buffers like `aaung` (which they expect
+        // to reach `အအောင်` or `အောင်`). The `aa-` form is a deliberate
+        // double-onset alias, not a duplicate of the `ah-` row.
+        //
+        // The `a-` rows are written ONLY to `reading_alias_index`, not
+        // `reading_compose_index`. The user-typed buffers this block
+        // serves (`ain:` / `aaung` / `aalote` / …) never contain `+`
+        // or `'` separators, so the alias-prefix path covers them on
+        // its own. Skipping the compose mirror keeps the size growth
+        // contained — the SQLite is ~7% larger with both blocks vs.
+        // ~3% larger with alias-only, and `BurmeseBench`'s noisier
+        // garbage-incremental scenario is sensitive to that delta.
+        for variant in Romanization.indexedAliasReadings(for: reading) {
+            let aAlias = "a" + variant.aliasReading
+            sqlite3_bind_text(insertAliasStmt, 1, aAlias, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            sqlite3_bind_text(insertAliasStmt, 2, readingCStr, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            sqlite3_bind_int64(insertAliasStmt, 3, entryId)
+            sqlite3_bind_double(insertAliasStmt, 4, score)
+            sqlite3_bind_int(insertAliasStmt, 5, Int32(variant.aliasPenalty + kAliasPenaltyAPrefix))
+            if sqlite3_step(insertAliasStmt) != SQLITE_DONE {
+                writeStderr("Warning: failed to insert a-prefix alias for \(entry.surface)\n")
+            }
+            sqlite3_reset(insertAliasStmt)
         }
     }
 
