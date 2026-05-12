@@ -12,7 +12,7 @@ macOS ships an InputMethodKit bundle plus a SwiftUI Preferences app and
 unsigned `.pkg` installer. Linux ships an IBus engine plus a GTK4 /
 libadwaita Preferences app packaged as `ibus-myangler.deb`; see
 [`native/linux/README.md`](native/linux/README.md). On this checkout,
-`swift run TestRunner` passes **1355/1355 cases** and **5721/5721
+`swift run TestRunner` passes **1612/1612 cases** and **8935/8935
 assertions**.
 
 ---

@@ -35,7 +35,7 @@ swift build
 swift run TestRunner
 ```
 
-Current local status: 1599/1599 cases and 8828/8828 assertions pass.
+Current local status: 1612/1612 cases and 8935/8935 assertions pass.
 `swift test` is secondary; plain SPM toolchains may not provide XCTest.
 
 ## Layout
