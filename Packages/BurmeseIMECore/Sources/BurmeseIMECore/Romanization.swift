@@ -498,6 +498,7 @@ public enum Romanization {
         }
     }
 
+
     private struct LoanwordClusterAliasRule: Sendable {
         let canonical: String
         let aliases: [String]
@@ -506,14 +507,34 @@ public enum Romanization {
     private static let loanwordClusterAliasPenalty = 10
     private static let bareRaAsYaAliasPenalty = 1
 
-    /// Conservative context for the native Burmese `ရ` / `ယ` homophony:
-    /// only rewrite a bare onset-like `r`/`y`, not the `r` inside `ar`
-    /// or the `y` used as a medial after another consonant.
+    /// Context for the native Burmese `ရ` / `ယ` homophony rewrite. A
+    /// bare onset `r`/`y` is aliased only when the previous character
+    /// already ends the prior syllable (so the `r`/`y` cannot be a
+    /// medial on a still-open onset cluster) and the following
+    /// character begins a new vowel or medial sequence. The previous
+    /// set therefore covers every possible syllable terminator the
+    /// romanization can emit: pure-vowel letters (`a i u e o`), tone /
+    /// asat marks (`: . *`), and the coda consonants (`r` from `-ar`,
+    /// `n m` from nasal codas, `t` from stops, `w` from `-aw`, `y`
+    /// from `-ay` / asat-coda spellings). Without the coda chars the
+    /// alias misfires whenever the prior syllable ends in a vowel-coda
+    /// pair (`hnaryay` -> `hnarray`, `lwanyay` -> `lwanray`,
+    /// `pawyay` -> `pawray`, …).
+    ///
+    /// The following set similarly accepts medial starters (`h w` for
+    /// ha-htoe / wa-hswe) so bare-onset `y`/`r` can be aliased even
+    /// when the new syllable opens with a medial rather than a pure
+    /// vowel (`yhar` -> `rhar`, `ywar` -> `rwar`). `y` itself is the
+    /// source/target of the rewrite and is intentionally excluded
+    /// from the following set.
     private static let bareRaYaPreviousTerminators: Set<Character> = [
-        "a", "i", "u", "e", "o", ":", ".", "*"
+        "a", "i", "u", "e", "o",
+        ":", ".", "*",
+        "r", "n", "m", "t", "w", "y"
     ]
     private static let bareRaYaFollowingVowelStarters: Set<Character> = [
-        "a", "i", "u", "e", "o"
+        "a", "i", "u", "e", "o",
+        "h", "w"
     ]
 
     private static let loanwordClusterAliasRules: [LoanwordClusterAliasRule] = [

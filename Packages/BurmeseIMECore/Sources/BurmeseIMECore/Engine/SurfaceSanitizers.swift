@@ -1703,6 +1703,87 @@ extension BurmeseEngine {
     /// sibling inherits the original ranking signals, but recomputes
     /// structural legality from the promoted surface so it can pass the
     /// same acceptable-parse gates as parser-native legal output.
+    /// Synthesize alias-variant parses by swapping every syllable-onset
+    /// `ယ` (U+101A) in `parse.output` to `ရ` (U+101B). The bumped
+    /// `aliasCost` makes the variant lose composite-score ties to the
+    /// canonical parse so the canonical surface stays at rank 0
+    /// unless the LM strongly prefers the swapped reading.
+    ///
+    /// Reasoning: the lexicon already carries `y` ↔ `r` aliases for
+    /// every compound it stores (`hsayar` -> ဆရာ), but compounds the
+    /// lexicon does not hold (`နှာရေ`, `ပန်ရေ`, `လွန်ရေ`, …) come
+    /// straight from the parser's canonical romanization, which has no
+    /// notion of the homophony. Surface-level synthesis closes that
+    /// gap without re-parsing the alias-rewritten buffer (which would
+    /// inject competing interpretations that shift medial selection,
+    /// Pali-stack inference, and anchor monotonicity on unrelated
+    /// buffers).
+    ///
+    /// Only ya -> ra runs: `r` is the canonical romanization for ရ
+    /// so a user who typed `r` is already asking for ra at that
+    /// position and the canonical parse already covers it. The
+    /// `arcBoundaries` are inherited verbatim — the swap is a 1-for-1
+    /// scalar replacement at known syllable starts. Returns one
+    /// variant per swappable onset (does not enumerate the
+    /// combinatorial cross-product when multiple syllables are
+    /// eligible); the panel reachability rule only requires the
+    /// intended surface be reachable.
+    internal static func bareYaAsRaSurfaceVariants(of parse: SyllableParse) -> [SyllableParse] {
+        guard parse.arcBoundaries.count > 1 else { return [] }
+        let scalars = Array(parse.output.unicodeScalars)
+        let readingChars = Array(parse.reading)
+        let yaScalar: UInt32 = 0x101A
+        let raScalar: UInt32 = 0x101B
+        var variants: [SyllableParse] = []
+        for boundaryIndex in 0..<(parse.arcBoundaries.count - 1) {
+            let startScalar = parse.arcBoundaries[boundaryIndex].scalarOffset
+            guard startScalar < scalars.count,
+                  scalars[startScalar].value == yaScalar else { continue }
+            // Only swap syllables whose reading onset is literally
+            // `y` — that's the user's typing intent the alias targets.
+            // The parser also emits `ya` scalars as the prefix of the
+            // `e` vowel ending (`ယ်`), but those scalars are syllable
+            // codas, not onsets; the arc-boundary scalar offset there
+            // happens to land on the `ya` scalar only when the
+            // syllable has no real onset consonant (`e` vowel after a
+            // standalone tone / asat). Restricting to a leading `y`
+            // in the reading keeps the swap aligned with the user's
+            // intent.
+            let readingStart = parse.arcBoundaries[boundaryIndex].charEnd
+            guard readingStart < readingChars.count,
+                  readingChars[readingStart] == "y" else { continue }
+            // Skip the swap when the user typed an explicit `+` right
+            // before this syllable's onset. The `+` is a hard
+            // boundary that pins the consonant the user typed
+            // (CLAUDE.md §6) — `k+ya` is unambiguously ka + ya, and
+            // the alias variant would otherwise outrank the
+            // user-intended surface under a vocabulary-bearing LM
+            // that happens to weight `ka + ra` higher.
+            if readingStart > 0,
+               readingStart - 1 < readingChars.count,
+               readingChars[readingStart - 1] == "+" {
+                continue
+            }
+            var replaced = scalars
+            replaced[startScalar] = Unicode.Scalar(raScalar)!
+            var scalarView = String.UnicodeScalarView()
+            scalarView.append(contentsOf: replaced)
+            let output = String(scalarView)
+            variants.append(SyllableParse(
+                output: output,
+                reading: parse.reading,
+                aliasCost: parse.aliasCost + 1,
+                legalityScore: parse.legalityScore,
+                score: parse.score,
+                structureCost: parse.structureCost,
+                syllableCount: parse.syllableCount,
+                rarityPenalty: parse.rarityPenalty,
+                arcBoundaries: parse.arcBoundaries
+            ))
+        }
+        return variants
+    }
+
     @_spi(Testing) public static func promoteOrphanZwnjToImplicitA(_ parse: SyllableParse) -> SyllableParse? {
         let scalars = Array(parse.output.unicodeScalars)
         guard scalars.count >= 2, scalars[0].value == 0x200C else { return nil }

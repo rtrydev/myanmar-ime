@@ -5,6 +5,7 @@ import Foundation
 /// enumerates suites.
 public enum BurmeseTestSuites {
     public static let all: [TestSuite] = [
+        BareYaRaHomophonyAliasSuite.suite,
         RomanizationSuite.suite,
         GrammarSuite.suite,
         ReverseRomanizerSuite.suite,

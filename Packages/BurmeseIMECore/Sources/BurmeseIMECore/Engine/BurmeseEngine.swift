@@ -1897,6 +1897,52 @@ public final class BurmeseEngine: @unchecked Sendable {
             }
         }
 
+        // Bare ya/ra homophony surface variants: the lexicon emission
+        // and lookup paths thread `y` ↔ `r` aliases through entries
+        // the shipped SQLite carries (`hsayar` -> ဆရာ), but
+        // parser-synthesized compounds the lexicon does NOT hold
+        // (`နှာရေ` from `hnaryay`, `ပန်ရေ` from `panyay`,
+        // `လွန်ရေ` from `lwanyay`, …) come straight from canonical
+        // romanization — which has no notion of the homophony.
+        // Synthesize a surface variant for every parse syllable whose
+        // onset is a bare `ယ` (the parser's literal mapping of `y`),
+        // swapping it to `ရ`. Variants are appended AFTER all parser
+        // ranking, promotion, and pruning steps so they cannot
+        // displace the canonical surface at rank 0 — they enter the
+        // panel as additional reachable candidates. Only the `y -> r`
+        // direction runs: `r` is the canonical romanization for ရ
+        // and a user who typed `r` is already asking for ra at that
+        // position. The `+` gate inside the helper skips the swap on
+        // syllables whose user-typed reading is pinned by an explicit
+        // boundary (`k+ya` stays ka + ya).
+        var bareYaAsRaVariantSurfaces: Set<String> = []
+        if !effectiveWindowed {
+            var aliasSeenSurfaces = Set(grammarCandidates.map { $0.candidate.surface })
+            for parse in grammarParses {
+                for variant in Self.bareYaAsRaSurfaceVariants(of: parse)
+                where !Self.hasInterleavedLatin(variant.output)
+                   && aliasSeenSurfaces.insert(variant.output).inserted {
+                    bareYaAsRaVariantSurfaces.insert(variant.output)
+                    grammarCandidates.append(RankedGrammarCandidate(
+                        candidate: Candidate(
+                            surface: variant.output,
+                            reading: variant.reading,
+                            source: .grammar,
+                            score: Double(variant.score)
+                        ),
+                        legalityScore: variant.legalityScore,
+                        aliasCost: variant.aliasCost,
+                        parserScore: variant.score,
+                        structureCost: variant.structureCost,
+                        syllableCount: variant.syllableCount,
+                        rarityPenalty: variant.rarityPenalty,
+                        lmLogProb: scoreSurfaceCached(variant.output, context: context, cache: &lmCache),
+                        absorbedMissingFromLM: false
+                    ))
+                }
+            }
+        }
+
         // History lookup uses the same alias key as the lexicon so stored
         // reads (written by `recordSelection`) line up exactly with reads.
         // Unlike lexicon candidates, history entries carry a self-contained
@@ -2032,6 +2078,21 @@ public final class BurmeseEngine: @unchecked Sendable {
             let mergedSurfaces = Set(merged.map(\.surface))
             for grammarCandidate in grammarCandidates
             where strictInferredStackOutputs.contains(grammarCandidate.candidate.surface)
+                && !mergedSurfaces.contains(grammarCandidate.candidate.surface) {
+                merged.append(grammarCandidate.candidate)
+            }
+        }
+        // Bare ya/ra alias variant injection: same pattern as the
+        // strict-inferred-stack injection above — if the variant got
+        // crowded out of the page-size-capped merge by lexicon /
+        // grammar siblings, append it past the cap so the user can
+        // still reach it. The variant is a panel-reachability fix,
+        // not a ranking promotion, so it never displaces existing
+        // higher-ranked candidates.
+        if !bareYaAsRaVariantSurfaces.isEmpty {
+            let mergedSurfaces = Set(merged.map(\.surface))
+            for grammarCandidate in grammarCandidates
+            where bareYaAsRaVariantSurfaces.contains(grammarCandidate.candidate.surface)
                 && !mergedSurfaces.contains(grammarCandidate.candidate.surface) {
                 merged.append(grammarCandidate.candidate)
             }
