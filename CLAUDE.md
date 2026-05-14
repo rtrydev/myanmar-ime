@@ -56,7 +56,6 @@ Packages/BurmeseIMECore/        pure Swift engine package
   Tools/corpus_builder/         corpus -> TSV + SQLite + LM
 native/macos/                   IMK bundle, SwiftUI prefs, installer
 native/linux/                   IBus C engine, Swift FFI, GTK prefs, deb
-tasks/                          open/archived task notes, mostly ignored
 ```
 
 The core has no macOS-only runtime dependency. SQLite imports must use:
@@ -97,14 +96,12 @@ absent. Copy that pattern for rank-0 claims. Existing examples include
 and `ExplicitPlusKinziDisplacementSuite`.
 
 Suite filenames describe the use case the suite protects rather than
-the TASK code that originally introduced it. When adding a new suite,
-follow that convention — TASK-NNN references live in archived task
-notes and durable rule text, not in suite filenames.
+the bug ID that originally introduced it. When adding a new suite,
+follow that convention.
 
 ## Durable Behavior Rules
 
-These are the logic decisions distilled from the archived tasks and the
-current suites.
+These are the logic decisions encoded in the current suites.
 
 ### 1. Grammar and Sanitizers
 
@@ -178,31 +175,33 @@ default, and applies only in Myanmar context.
 ### 5. Romanization Conventions
 
 Ha-htoe is a prefix before the consonant: `hma`, `hna`, `hla`, `hnga`,
-`hmar`. Inputs like `mhar` mean `ma + ha...` under this scheme; archived
-TASK-065 is invalid for that reason.
+`hmar`. Inputs like `mhar` mean `ma + ha...` under this scheme — do not
+"fix" that direction.
 
 `y` after a consonant is structural ya-yit. Ya-pin-dominant clusters are
 promoted by engine ranking and cluster shortcuts (`j`, `ch`, `gy`, `sh`)
-while ya-yit siblings stay reachable. TASK-058 fixed the `Cyw` / `Cwy`
-typing-order asymmetry.
+while ya-yit siblings stay reachable. The `Cyw` / `Cwy` typing-order
+asymmetry was fixed and is protected by suites; preserve it.
 
-Open TASK-062 is deliberately narrow: add a phonetic `y` -> spelling `r`
-reading alias for native lemmas such as `hsayar -> ဆရာ`. It is not a
-general fuzzy-matching or loanword-pronunciation project.
+A narrow open alias gap remains: phonetic `y` -> spelling `r` reading
+aliasing for native lemmas such as `hsayar -> ဆရာ`. This is deliberately
+scoped — it is not a general fuzzy-matching or loanword-pronunciation
+project.
 
 ### 6. Explicit `+`
 
 User-typed `+` is a hard syllable / stack boundary. The LM may rank among
 legal stack variants, but it should not displace the user's explicit
-kinzi/stack intent with an unrelated segmentation. TASK-031 made
-explicit `+` as strong as inferred stack markers for rank-0 promotion.
+kinzi/stack intent with an unrelated segmentation. Explicit `+` is at
+least as strong as inferred stack markers for rank-0 promotion; the
+`ExplicitPlusKinziDisplacementSuite` and friends guard this.
 
 ### 7. Variants and Panel Reachability
 
 Homophonous variants should surface in the candidate panel for the
 digit-less reading. They do not have to be rank 0 or on the first page.
-TASK-063 was invalid because the structural variant was present but the
-test was paging-blind.
+Reachability tests must page through results — a variant on page 2 is
+not a bug.
 
 User history records the selected surface under the alias-normalized
 reading and may promote that surface above the LM/lexicon order later.
@@ -217,7 +216,7 @@ versus an in-flight typing prefix of a corpus word (`apha` mid-stream
 of `aphaya`) — and rank-0 promotion would require a commit-vs-preview
 signal the engine does not have. In such cases, panel presence
 satisfies the rule; do not trade ranking regressions for rank-0
-purity. See archived TASK-039 / TASK-042 for the worked example.
+purity.
 
 ### 8. Windowing and Performance
 
@@ -235,7 +234,7 @@ The per-keystroke hot path has several caches that must be considered
 together when touching ranking, lookup, or LM code:
 
 - `SQLiteCandidateStore` keeps bounded LRUs for both exact-match
-  (`exactLookupCache`, `latticeExactLookupCache`) and prefix
+  (`exactLookupCache`, `latticeLookupCache`) and prefix
   (`prefixLookupCache`) queries. Composite indexes
   `(alias_reading, alias_penalty, rank_score DESC)` cover the exact
   paths so the `ORDER BY` no longer spills into a temp B-tree;
@@ -457,10 +456,3 @@ the Swift engine because `SyllableParser` bakes that flag at init time.
   targets.
 - Throwaway probes belong under `/tmp/`; anything worth preserving
   becomes a suite case. Always choose the engine layer first.
-
-## Open Tasks
-
-Open tasks are listed in [`tasks/README.md`](tasks/README.md). Archived
-tasks are useful as design history, but many are filesystem-only because
-`tasks/` is ignored in this repository. Treat invalid archived tasks as
-product decisions, not loose ends.

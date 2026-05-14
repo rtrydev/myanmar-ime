@@ -83,7 +83,7 @@ tone, and Unicode storage-order rules before a candidate reaches the
 panel. Illegal surfaces are either dropped in favor of clean siblings or
 fall back to the raw typed buffer when no Burmese interpretation is safe.
 
-Recent archived tasks tightened the durable invariants around:
+The durable invariants enforced today include:
 
 - no dependent vowel or combining mark without an anchor;
 - no medial after a vowel mark;
@@ -194,12 +194,10 @@ Shortcuts coexist with structural typing:
 | `gy`, `gyw` | `ဂျ`, `ဂျွ` | ga + ya-pin |
 | `sh`, `shw` | `ရှ`, `ရွှ` | ra + ha / wa + ha |
 
-The open task
-[`TASK-062`](tasks/TASK-062-multi-syllable-canonical-surface-not-reached.md)
-tracks a narrow missing alias: phonetic `y` should be able to reach
+A narrow open alias gap remains: phonetic `y` should be able to reach
 some spelling-`r` lemmas such as `hsayar -> ဆရာ`. Broader loanword
-spellings from that task were validated as wrong-input artifacts and
-are not planned as fuzzy matching.
+spellings investigated alongside that were validated as wrong-input
+artifacts and are not planned as fuzzy matching.
 
 ### Variants and Digits
 
@@ -251,8 +249,7 @@ myanmar-ime/
 │   ├── Tools/corpus_builder/       corpus -> TSV + SQLite + LM
 │   └── Tests/
 ├── native/macos/                   IMK bundle, SwiftUI Preferences, pkg
-├── native/linux/                   IBus engine, Swift shim, GTK prefs, deb
-└── tasks/                          open and archived task notes
+└── native/linux/                   IBus engine, Swift shim, GTK prefs, deb
 ```
 
 The core package has no macOS-only runtime dependency. SQLite imports use
