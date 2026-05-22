@@ -104,3 +104,17 @@ set_target_properties(BurmeseIMETIP PROPERTIES
     PREFIX ""
     SUFFIX ".dll"
 )
+
+# Helper exe: install / uninstall the TIP via the DLL's own
+# DllRegisterServer / DllUnregisterServer. Friendlier than regsvr32,
+# same code path. Built next to BurmeseIMETIP.dll so the exe can
+# resolve the DLL by sibling path. Must be run elevated.
+add_executable(register_profile
+    tools/register_profile/main.cpp
+)
+set_target_properties(register_profile PROPERTIES
+    OUTPUT_NAME "register_profile"
+)
+target_link_libraries(register_profile PRIVATE
+    ole32       # CoInitializeEx / CoUninitialize
+)

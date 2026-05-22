@@ -1,24 +1,37 @@
-// COM registration entry points — DllRegisterServer / DllUnregisterServer.
+// Registration entry points — DllRegisterServer / DllUnregisterServer.
 //
-// Writes the two registry shapes a TSF text service requires:
+// Three things must be in place for Windows to load + activate the
+// TIP, all done here so both regsvr32 and the register_profile.exe
+// helper produce identical state:
 //
-//   1. HKLM\Software\Classes\CLSID\{TIP-CLSID}\InprocServer32 (default
-//      = DLL path, ThreadingModel = Apartment) — so CoCreateInstance
-//      can find and load us.
-//   2. The language profile is registered separately via
-//      ITfInputProcessorProfileMgr::RegisterProfile. The MSI custom
-//      action does that at install time; running regsvr32 alone is
-//      enough to make CoCreateInstance work, but the IME won't appear
-//      in the language list until RegisterProfile is called.
+//   1. COM in-proc server registration.
+//      HKLM\Software\Classes\CLSID\{TIP-CLSID}\InprocServer32 default
+//      points at the DLL file and ThreadingModel = Apartment.
+//      CoCreateInstance(CLSID_TextService) won't work without it.
 //
-// regsvr32 runs us elevated, which is correct for per-machine HKLM
-// writes. For per-user dev installs the helper exe (planned, not yet
-// landed) will write to HKCU instead.
+//   2. TSF profile registration.
+//      ITfInputProcessorProfileMgr::RegisterProfile binds the TIP
+//      CLSID to a LANGID + profile GUID. Without this the TIP is
+//      addressable via CoCreateInstance but does NOT appear in
+//      Settings -> Time & language -> Language -> Options ->
+//      Keyboards, so users can't activate it.
+//
+//   3. TSF category registration.
+//      ITfCategoryMgr::RegisterCategory under GUID_TFCAT_TIP_KEYBOARD
+//      tells TSF that this CLSID is a keyboard-type TIP. Without
+//      it the profile registration succeeds but the OS doesn't
+//      surface us as a keyboard input method.
+//
+// All three need HKLM write access. The caller (regsvr32 or our
+// helper exe) must be elevated. COM must be initialised on the
+// calling thread for steps 2-3.
 
 #include <Windows.h>
 #include <olectl.h>     // SELFREG_E_CLASS
+#include <msctf.h>
 #include <string>
 
+#include "com_helpers.h"
 #include "guids.h"
 
 namespace burmese {
@@ -85,6 +98,73 @@ HRESULT unregister_inproc_server() noexcept {
     LSTATUS s = RegDeleteTreeW(HKEY_LOCAL_MACHINE, base.c_str());
     if (s != ERROR_SUCCESS && s != ERROR_FILE_NOT_FOUND) {
         return SELFREG_E_CLASS;
+    }
+    return S_OK;
+}
+
+HRESULT register_profile_and_category() noexcept {
+    const std::wstring dllPath = module_path();
+    if (dllPath.empty()) return E_FAIL;
+
+    HRESULT hr;
+
+    ComPtr<ITfInputProcessorProfileMgr> profileMgr;
+    hr = CoCreateInstance(CLSID_TF_InputProcessorProfiles, nullptr,
+                          CLSCTX_INPROC_SERVER,
+                          IID_PPV_ARGS(profileMgr.put()));
+    if (FAILED(hr)) return hr;
+
+    // Use the TIP DLL itself as the icon source — it has no resources
+    // today, so the icon will be a generic one until we ship an
+    // .ico resource. Index 0 = first icon in the file (none = OS
+    // fallback). Description: visible name in the language bar.
+    hr = profileMgr->RegisterProfile(
+        CLSID_TextService,
+        kLangIdBurmese,
+        GUID_Profile,
+        kTextServiceDescription,
+        static_cast<ULONG>(std::wcslen(kTextServiceDescription)),
+        dllPath.c_str(),
+        static_cast<ULONG>(dllPath.size()),
+        /*uIconIndex=*/0,
+        /*hklSubstitute=*/nullptr,
+        /*dwPreferredLayout=*/0,
+        /*bEnabledByDefault=*/TRUE,
+        /*dwFlags=*/0);
+    if (FAILED(hr)) return hr;
+
+    ComPtr<ITfCategoryMgr> categoryMgr;
+    hr = CoCreateInstance(CLSID_TF_CategoryMgr, nullptr,
+                          CLSCTX_INPROC_SERVER,
+                          IID_PPV_ARGS(categoryMgr.put()));
+    if (FAILED(hr)) return hr;
+
+    return categoryMgr->RegisterCategory(
+        CLSID_TextService,
+        GUID_TFCAT_TIP_KEYBOARD,
+        CLSID_TextService);
+}
+
+HRESULT unregister_profile_and_category() noexcept {
+    // Best-effort: missing entries are fine. Any failure we report
+    // from DllUnregisterServer would block the helper from cleaning
+    // up the COM in-proc registration too, which is worse.
+    ComPtr<ITfInputProcessorProfileMgr> profileMgr;
+    if (SUCCEEDED(CoCreateInstance(
+            CLSID_TF_InputProcessorProfiles, nullptr,
+            CLSCTX_INPROC_SERVER, IID_PPV_ARGS(profileMgr.put())))) {
+        profileMgr->UnregisterProfile(
+            CLSID_TextService, kLangIdBurmese, GUID_Profile, 0);
+    }
+
+    ComPtr<ITfCategoryMgr> categoryMgr;
+    if (SUCCEEDED(CoCreateInstance(
+            CLSID_TF_CategoryMgr, nullptr,
+            CLSCTX_INPROC_SERVER, IID_PPV_ARGS(categoryMgr.put())))) {
+        categoryMgr->UnregisterCategory(
+            CLSID_TextService,
+            GUID_TFCAT_TIP_KEYBOARD,
+            CLSID_TextService);
     }
     return S_OK;
 }
