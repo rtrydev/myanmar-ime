@@ -67,7 +67,18 @@ char TextService::shiftedAscii(WPARAM vk) const noexcept {
     return 0;
 }
 
-bool TextService::handleKeyDown(WPARAM vk, LPARAM /*lParam*/, bool test) noexcept {
+bool TextService::handleKeyDown(ITfContext* ctx, WPARAM vk, LPARAM /*lParam*/, bool test) noexcept {
+    // Prefer the ctx TSF handed us (always valid for this call);
+    // also stash it into currentContext_ so paths that don't get
+    // a ctx parameter (focus-loss commit, candidate-window
+    // positioning) have something recent to use. ComPtr::attach
+    // releases whatever was previously stored.
+    if (ctx) {
+        ctx->AddRef();
+        currentContext_.attach(ctx);
+    }
+    ctx = currentContext_.get();    // null only if we never had any ctx
+
     if (!worker_.running()) return false;
 
     const uint32_t mods = current_modifiers();
@@ -84,16 +95,16 @@ bool TextService::handleKeyDown(WPARAM vk, LPARAM /*lParam*/, bool test) noexcep
     if (!composeEnabled_) {
         if (km.action == KeymapAction::Typeable) {
             if (test) return true;
-            if (currentContext_) {
+            if (ctx) {
                 wchar_t wc[2] = {
                     static_cast<wchar_t>(static_cast<unsigned char>(shifted ? shifted : km.typed_char)),
                     L'\0'
                 };
-                ITfContext* ctx = currentContext_.get();
+                ITfContext* localCtx = ctx;
                 runEditSession(ctx, clientId_, TF_ES_SYNC | TF_ES_READWRITE,
-                    [ctx, wc](TfEditCookie ec) -> HRESULT {
+                    [localCtx, wc](TfEditCookie ec) -> HRESULT {
                         ComPtr<ITfInsertAtSelection> ias;
-                        if (FAILED(ctx->QueryInterface(IID_PPV_ARGS(ias.put())))
+                        if (FAILED(localCtx->QueryInterface(IID_PPV_ARGS(ias.put())))
                             || !ias) return E_FAIL;
                         ComPtr<ITfRange> dummy;
                         return ias->InsertTextAtSelection(
@@ -117,7 +128,7 @@ bool TextService::handleKeyDown(WPARAM vk, LPARAM /*lParam*/, bool test) noexcep
             // update so the user always sees their typing land
             // immediately, even if the engine is busy. This is the
             // synchronous-preedit invariant from CLAUDE.md.
-            renderPreedit(currentContext_.get());
+            renderPreedit(ctx);
             worker_.schedule_update(buffer_);
             return true;
         }
@@ -125,7 +136,7 @@ bool TextService::handleKeyDown(WPARAM vk, LPARAM /*lParam*/, bool test) noexcep
             if (buffer_.empty()) return false;
             if (test) return true;
             buffer_.pop_back();
-            renderPreedit(currentContext_.get());
+            renderPreedit(ctx);
             if (buffer_.empty()) {
                 // Whole composition gone. Drop pending work and
                 // reset the engine state immediately so the next
@@ -158,7 +169,7 @@ bool TextService::handleKeyDown(WPARAM vk, LPARAM /*lParam*/, bool test) noexcep
             if (!surface.empty()) {
                 worker_.record_selection_sync();
                 worker_.push_committed_context_sync(surface);
-                commitComposition(currentContext_.get(), surface);
+                commitComposition(ctx, surface);
             } else {
                 endCompositionQuietly();
             }
@@ -176,7 +187,7 @@ bool TextService::handleKeyDown(WPARAM vk, LPARAM /*lParam*/, bool test) noexcep
             worker_.drain_and_wait_idle();
             (void)worker_.cancel_sync();
             std::string raw = buffer_;
-            commitComposition(currentContext_.get(), raw);
+            commitComposition(ctx, raw);
             candidateWindow_.hide();
             buffer_.clear();
             return true;
@@ -224,15 +235,15 @@ HRESULT STDMETHODCALLTYPE TextService::OnSetFocus(BOOL gained) noexcept {
     return S_OK;
 }
 
-HRESULT STDMETHODCALLTYPE TextService::OnTestKeyDown(ITfContext*, WPARAM wParam, LPARAM lParam, BOOL* eaten) noexcept {
+HRESULT STDMETHODCALLTYPE TextService::OnTestKeyDown(ITfContext* ctx, WPARAM wParam, LPARAM lParam, BOOL* eaten) noexcept {
     if (!eaten) return E_POINTER;
-    *eaten = handleKeyDown(wParam, lParam, /*test=*/true) ? TRUE : FALSE;
+    *eaten = handleKeyDown(ctx, wParam, lParam, /*test=*/true) ? TRUE : FALSE;
     return S_OK;
 }
 
-HRESULT STDMETHODCALLTYPE TextService::OnKeyDown(ITfContext*, WPARAM wParam, LPARAM lParam, BOOL* eaten) noexcept {
+HRESULT STDMETHODCALLTYPE TextService::OnKeyDown(ITfContext* ctx, WPARAM wParam, LPARAM lParam, BOOL* eaten) noexcept {
     if (!eaten) return E_POINTER;
-    *eaten = handleKeyDown(wParam, lParam, /*test=*/false) ? TRUE : FALSE;
+    *eaten = handleKeyDown(ctx, wParam, lParam, /*test=*/false) ? TRUE : FALSE;
     return S_OK;
 }
 

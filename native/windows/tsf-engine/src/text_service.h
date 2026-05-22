@@ -145,10 +145,15 @@ private:
     void onEngineResult();
 
     // Shared key-handling helper used by OnTestKeyDown and OnKeyDown.
-    // Returns true when we want to eat the key; on the real-down
-    // pass (test=false) also mutates the composing buffer and
-    // schedules an engine update.
-    bool handleKeyDown(WPARAM wParam, LPARAM lParam, bool test) noexcept;
+    // `ctx` is the context TSF passes to the key-event sink — we
+    // must use IT for composition operations, not currentContext_,
+    // because currentContext_ is only populated when
+    // ThreadMgrEventSink::OnSetFocus fires (which doesn't happen in
+    // all hosts on every activation). Without using the passed-in
+    // ctx, renderPreedit / commitComposition would no-op silently
+    // and the user would see candidates appear but nothing land in
+    // the document.
+    bool handleKeyDown(ITfContext* ctx, WPARAM wParam, LPARAM lParam, bool test) noexcept;
 
     // Convert a (VK, shift) pair into the layout-produced ASCII
     // character via ToUnicodeEx. Returns 0 when the layout has no
