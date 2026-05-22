@@ -66,6 +66,7 @@ set(BurmeseIMETIP_SOURCES
     src/keymap.cpp
     src/engine_worker.cpp
     src/key_event_sink.cpp
+    src/composition.cpp
     src/text_service.cpp
     src/class_factory.cpp
     src/register.cpp

@@ -139,6 +139,13 @@ void EngineWorker::push_committed_context_sync(const std::string& utf8_surface) 
     ffi_->engine_push_committed_context(h, utf8_surface.c_str());
 }
 
+void EngineWorker::sync_update_buffer(const std::string& buffer) noexcept {
+    burmese_engine_t* h = handle_.load(std::memory_order_acquire);
+    if (!h || !ffi_) return;
+    char* raw = ffi_->engine_update(h, buffer.c_str());
+    if (raw) ffi_->engine_string_free(raw);
+}
+
 std::unique_ptr<EngineSnapshot> EngineWorker::take_pending_result() noexcept {
     AcquireSRWLockExclusive(&lock_);
     auto result = std::move(pending_result_);

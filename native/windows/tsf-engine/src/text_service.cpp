@@ -100,7 +100,8 @@ HRESULT STDMETHODCALLTYPE TextService::QueryInterface(REFIID riid, void** ppv) n
         || QueryOne<ITfTextInputProcessor>(riid, ppv, this)
         || QueryOne<ITfTextInputProcessorEx>(riid, ppv, this)
         || QueryOne<ITfThreadMgrEventSink>(riid, ppv, this)
-        || QueryOne<ITfKeyEventSink>(riid, ppv, this)) {
+        || QueryOne<ITfKeyEventSink>(riid, ppv, this)
+        || QueryOne<ITfCompositionSink>(riid, ppv, this)) {
         if (!*ppv) {
             *ppv = static_cast<ITfTextInputProcessorEx*>(this);
             AddRef();
@@ -160,9 +161,16 @@ HRESULT STDMETHODCALLTYPE TextService::ActivateEx(ITfThreadMgr* mgr, TfClientId 
 
 HRESULT STDMETHODCALLTYPE TextService::Deactivate() noexcept {
     dbg(L"Deactivate");
+    // End any live composition before tearing down the sinks — once
+    // currentContext_ is released TSF can't deliver an
+    // OnCompositionTerminated to us, but the host's view would still
+    // think there's a composition open. EndComposition needs a live
+    // edit session, so do it while currentContext_ is still valid.
+    endCompositionQuietly();
     removeSinks();
     worker_.stop();
     destroyMessageWindow();
+    currentContext_.reset();
     threadMgr_.reset();
     clientId_ = TF_CLIENTID_NULL;
     buffer_.clear();
@@ -324,14 +332,35 @@ HRESULT STDMETHODCALLTYPE TextService::OnUninitDocumentMgr(ITfDocumentMgr*) noex
 }
 HRESULT STDMETHODCALLTYPE TextService::OnSetFocus(ITfDocumentMgr* docMgr, ITfDocumentMgr*) noexcept {
     dbg(L"thread_mgr OnSetFocus docMgr=%p", static_cast<void*>(docMgr));
-    if (!docMgr && !buffer_.empty()) {
-        // Focus loss with an active buffer. Linux / macOS shells
-        // commit the half-typed buffer here; for now just drop it
-        // pending the commit-composition path landing alongside
-        // composition rendering.
+
+    // Focus is leaving the previous context. Commit whatever the user
+    // had typed, mirroring the macOS controller's
+    // commitComposition(_:) and the IBus engine's focus_out handler —
+    // a half-typed buffer must not vanish silently.
+    if (!buffer_.empty() && currentContext_) {
         worker_.drain_and_wait_idle();
-        (void)worker_.cancel_sync();
+        worker_.sync_update_buffer(buffer_);
+        std::string surface = worker_.commit_sync();
+        if (!surface.empty()) {
+            worker_.record_selection_sync();
+            worker_.push_committed_context_sync(surface);
+            commitComposition(currentContext_.get(), surface);
+        } else {
+            // Engine gave us nothing — drop composition without
+            // forcing text into the host.
+            endCompositionQuietly();
+        }
         buffer_.clear();
+    } else if (composition_) {
+        endCompositionQuietly();
+    }
+
+    currentContext_.reset();
+    if (docMgr) {
+        ComPtr<ITfContext> ctx;
+        if (SUCCEEDED(docMgr->GetTop(ctx.put())) && ctx) {
+            currentContext_ = std::move(ctx);
+        }
     }
     return S_OK;
 }

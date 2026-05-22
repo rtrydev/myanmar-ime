@@ -113,6 +113,15 @@ public:
     void        set_selected_sync(int idx) noexcept;
     void        push_committed_context_sync(const std::string& utf8_surface) noexcept;
 
+    // Synchronously bring the engine to the given buffer. Used by the
+    // commit path after drain_and_wait_idle() because drain only
+    // *cancels* pending work — it does not run it. Without this the
+    // engine could still be at a buffer one keystroke behind the
+    // user's latest typing when commit reads the selected surface.
+    // Mirrors engine.c's `if (!engine_caught_up) burmese_engine_update`
+    // branch in commit_selected().
+    void        sync_update_buffer(const std::string& buffer) noexcept;
+
     // True iff start() succeeded and stop() has not run.
     bool running() const noexcept { return handle_.load(std::memory_order_acquire) != nullptr; }
 

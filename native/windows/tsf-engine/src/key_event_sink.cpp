@@ -83,6 +83,11 @@ bool TextService::handleKeyDown(WPARAM vk, LPARAM /*lParam*/, bool test) noexcep
         case KeymapAction::Typeable: {
             if (test) return true;
             buffer_.push_back(km.typed_char);
+            // Render preedit BEFORE scheduling the async engine
+            // update so the user always sees their typing land
+            // immediately, even if the engine is busy. This is the
+            // synchronous-preedit invariant from CLAUDE.md.
+            renderPreedit(currentContext_.get());
             worker_.schedule_update(buffer_);
             return true;
         }
@@ -90,11 +95,14 @@ bool TextService::handleKeyDown(WPARAM vk, LPARAM /*lParam*/, bool test) noexcep
             if (buffer_.empty()) return false;
             if (test) return true;
             buffer_.pop_back();
+            renderPreedit(currentContext_.get());
             if (buffer_.empty()) {
-                // Whole composition gone. Drop pending work and reset
-                // the engine state immediately so the next keystroke
-                // starts clean. Same shape as engine.c's empty-buffer
-                // backspace branch.
+                // Whole composition gone. Drop pending work and
+                // reset the engine state immediately so the next
+                // keystroke starts clean. Same shape as engine.c's
+                // empty-buffer backspace branch. renderPreedit
+                // already ended the composition because the empty-
+                // buffer no-op short-circuit covers that case.
                 worker_.drain_and_wait_idle();
                 worker_.schedule_update(buffer_);
             } else {
@@ -105,18 +113,39 @@ bool TextService::handleKeyDown(WPARAM vk, LPARAM /*lParam*/, bool test) noexcep
         case KeymapAction::Commit: {
             if (buffer_.empty()) return false;
             if (test) return true;
+            // Bring the engine current (drain only cancels pending
+            // work; the engine may still be one keystroke behind the
+            // latest buffer_). Then read the committed surface and
+            // write it to the document via the composition.
             worker_.drain_and_wait_idle();
+            worker_.sync_update_buffer(buffer_);
             std::string surface = worker_.commit_sync();
-            worker_.record_selection_sync();
-            (void)surface;   // composition layer will insert this; logged via DbgView for now
+            if (!surface.empty()) {
+                worker_.record_selection_sync();
+                worker_.push_committed_context_sync(surface);
+                commitComposition(currentContext_.get(), surface);
+            } else {
+                // Engine had nothing to commit (shouldn't happen with
+                // a non-empty buffer, but guard so we don't leave a
+                // stray composition behind).
+                endCompositionQuietly();
+            }
             buffer_.clear();
             return true;
         }
         case KeymapAction::Cancel: {
             if (buffer_.empty()) return false;
             if (test) return true;
+            // Escape semantics from the macOS controller: commit the
+            // raw Latin buffer verbatim. cancel_sync resets engine
+            // composition state but doesn't insert anywhere; we
+            // bypass it and just write buffer_ via the composition
+            // since that's what the user typed and clearly wanted to
+            // keep.
             worker_.drain_and_wait_idle();
             (void)worker_.cancel_sync();
+            std::string raw = buffer_;
+            commitComposition(currentContext_.get(), raw);
             buffer_.clear();
             return true;
         }
@@ -136,14 +165,14 @@ bool TextService::handleKeyDown(WPARAM vk, LPARAM /*lParam*/, bool test) noexcep
 // ---- ITfKeyEventSink -----------------------------------------------
 
 HRESULT STDMETHODCALLTYPE TextService::OnSetFocus(BOOL gained) noexcept {
-    if (!gained && !buffer_.empty()) {
-        // Focus lost — Linux / macOS commit here. Defer commit until
-        // the composition path exists; for now cancel cleanly so the
-        // engine isn't left holding a stale buffer.
-        worker_.drain_and_wait_idle();
-        (void)worker_.cancel_sync();
-        buffer_.clear();
-    }
+    // The ThreadMgrEventSink's OnSetFocus is the authoritative
+    // focus-change hook for us — it gives us the new docMgr and is
+    // already where we run the commit-on-focus-loss sequence.
+    // The KeyEventSink's OnSetFocus is informational and fires on
+    // input-language enable/disable plus focus changes; mostly we
+    // just need to ignore it here. Logged in case it surfaces useful
+    // patterns during dev.
+    (void)gained;
     return S_OK;
 }
 

@@ -39,7 +39,8 @@ class TextService final
     : public UnknownBase
     , public ITfTextInputProcessorEx
     , public ITfThreadMgrEventSink
-    , public ITfKeyEventSink {
+    , public ITfKeyEventSink
+    , public ITfCompositionSink {
 public:
     TextService() noexcept;
     ~TextService() noexcept override;
@@ -70,6 +71,32 @@ public:
     HRESULT STDMETHODCALLTYPE OnTestKeyUp(ITfContext* ctx, WPARAM wParam, LPARAM lParam, BOOL* eaten) noexcept override;
     HRESULT STDMETHODCALLTYPE OnKeyUp(ITfContext* ctx, WPARAM wParam, LPARAM lParam, BOOL* eaten) noexcept override;
     HRESULT STDMETHODCALLTYPE OnPreservedKey(ITfContext* ctx, REFGUID guid, BOOL* eaten) noexcept override;
+
+    // ITfCompositionSink — TSF calls this when our composition is
+    // terminated by something other than us (focus loss, app
+    // dismissing it). When this fires, our `composition_` pointer is
+    // still valid but the composition itself is dead; clear it.
+    HRESULT STDMETHODCALLTYPE OnCompositionTerminated(TfEditCookie ec, ITfComposition* composition) noexcept override;
+
+    // ---- Composition lifecycle (defined in composition.cpp) ----
+
+    // Idempotent: starts a fresh composition if none exists, then
+    // sets its text to the current `buffer_` (the raw Latin preedit).
+    // Called from the keystroke path after every buffer mutation so
+    // the user sees their typing land immediately, independent of
+    // engine latency.
+    void renderPreedit(ITfContext* ctx) noexcept;
+
+    // Drop into an edit session, set the composition text to
+    // `final_text` (UTF-8), end the composition, advance the
+    // selection past the inserted text. Used by Commit (with the
+    // engine's surface) and Cancel (with the raw Latin buffer as a
+    // verbatim insert).
+    void commitComposition(ITfContext* ctx, const std::string& final_text_utf8) noexcept;
+
+    // End composition without touching the underlying text. Used on
+    // focus loss / Deactivate when we want to leave the host alone.
+    void endCompositionQuietly() noexcept;
 
     // Public so the message-only window class registration helper
     // (defined in an anonymous namespace in text_service.cpp) can
@@ -116,11 +143,17 @@ private:
     EngineWorker            worker_;
 
     // Composing buffer: lowercased ASCII the user has typed but not
-    // yet committed. Owned by the TIP thread. Once composition
-    // rendering lands, this drives setMarkedText() equivalent.
+    // yet committed. Owned by the TIP thread. Drives the preedit
+    // text on every keystroke.
     std::string             buffer_;
 
     HWND                    messageWindow_ = nullptr;
+
+    // The context whose composition we currently own. Captured from
+    // OnSetFocus(ThreadMgr); cleared when focus moves away. All
+    // composition operations target this context.
+    ComPtr<ITfContext>      currentContext_;
+    ComPtr<ITfComposition>  composition_;
 };
 
 } // namespace burmese
