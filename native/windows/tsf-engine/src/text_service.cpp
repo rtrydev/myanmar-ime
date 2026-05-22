@@ -115,6 +115,13 @@ HRESULT STDMETHODCALLTYPE TextService::QueryInterface(REFIID riid, void** ppv) n
         }
         return S_OK;
     }
+    // Log the IIDs TSF asks for but we don't support — useful for
+    // diagnosing "TSF won't keep the TIP active" symptoms, which
+    // sometimes mean TSF wanted an interface we're missing.
+    log_line(L"TextService::QI E_NOINTERFACE iid={%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
+             riid.Data1, riid.Data2, riid.Data3,
+             riid.Data4[0], riid.Data4[1], riid.Data4[2], riid.Data4[3],
+             riid.Data4[4], riid.Data4[5], riid.Data4[6], riid.Data4[7]);
     return E_NOINTERFACE;
 }
 
@@ -182,15 +189,18 @@ HRESULT STDMETHODCALLTYPE TextService::ActivateEx(ITfThreadMgr* mgr, TfClientId 
 
     if (!installSinks()) {
         dbg(L"installSinks failed");
-        // Best-effort: keep going. TSF can re-enter Activate after a
-        // failed sink install in some flows; cleaning up half-state
-        // here can cause hard-to-diagnose follow-on errors.
+    } else {
+        log_line(L"  installSinks ok (threadMgrCookie=%u keyEvent=%d)",
+                 threadMgrCookie_, keyEventInstalled_ ? 1 : 0);
     }
 
     if (!addLangBarItem()) {
         dbg(L"addLangBarItem failed");
+    } else {
+        log_line(L"  addLangBarItem ok");
     }
 
+    log_line(L"Activate returning S_OK");
     return S_OK;
 }
 
@@ -400,10 +410,12 @@ void TextService::resolveResourcePaths(std::string& lexicon,
 
 // ---- ITfThreadMgrEventSink -----------------------------------------
 
-HRESULT STDMETHODCALLTYPE TextService::OnInitDocumentMgr(ITfDocumentMgr*) noexcept {
+HRESULT STDMETHODCALLTYPE TextService::OnInitDocumentMgr(ITfDocumentMgr* docMgr) noexcept {
+    log_line(L"OnInitDocumentMgr docMgr=%p", static_cast<void*>(docMgr));
     return S_OK;
 }
-HRESULT STDMETHODCALLTYPE TextService::OnUninitDocumentMgr(ITfDocumentMgr*) noexcept {
+HRESULT STDMETHODCALLTYPE TextService::OnUninitDocumentMgr(ITfDocumentMgr* docMgr) noexcept {
+    log_line(L"OnUninitDocumentMgr docMgr=%p", static_cast<void*>(docMgr));
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE TextService::OnSetFocus(ITfDocumentMgr* docMgr, ITfDocumentMgr*) noexcept {
@@ -445,8 +457,14 @@ HRESULT STDMETHODCALLTYPE TextService::OnSetFocus(ITfDocumentMgr* docMgr, ITfDoc
     }
     return S_OK;
 }
-HRESULT STDMETHODCALLTYPE TextService::OnPushContext(ITfContext*) noexcept { return S_OK; }
-HRESULT STDMETHODCALLTYPE TextService::OnPopContext(ITfContext*) noexcept  { return S_OK; }
+HRESULT STDMETHODCALLTYPE TextService::OnPushContext(ITfContext* ctx) noexcept {
+    log_line(L"OnPushContext ctx=%p", static_cast<void*>(ctx));
+    return S_OK;
+}
+HRESULT STDMETHODCALLTYPE TextService::OnPopContext(ITfContext* ctx) noexcept {
+    log_line(L"OnPopContext ctx=%p", static_cast<void*>(ctx));
+    return S_OK;
+}
 
 // ---- Compose/Roman langbar item ----------------------------------
 

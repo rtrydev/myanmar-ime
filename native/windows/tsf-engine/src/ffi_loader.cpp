@@ -97,9 +97,21 @@ void FfiLibrary::unload() noexcept {
 }
 
 bool FfiLibrary::load(HMODULE selfModule) noexcept {
-    unload();
-    error_.clear();
+    // Idempotent. If the module is already loaded for this FfiLibrary
+    // instance (e.g. TSF re-uses the same TextService and calls
+    // Activate -> Deactivate -> Activate without destroying us),
+    // skip the FreeLibrary + reload dance. The Swift runtime that
+    // ships with BurmeseIMEFFI.dll deadlocks during its
+    // DLL_PROCESS_DETACH path when invoked from a process that's
+    // still using its threads — observed as a 100% CPU hang in
+    // Notepad on the second Activate. The simpler fix: never
+    // unload while we're alive.
+    if (module_) {
+        log_line(L"FfiLibrary::load already loaded — reusing");
+        return true;
+    }
 
+    error_.clear();
     constexpr wchar_t kBaseName[] = L"BurmeseIMEFFI.dll";
 
     log_line(L"FfiLibrary::load start");

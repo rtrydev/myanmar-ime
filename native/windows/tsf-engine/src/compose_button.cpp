@@ -1,6 +1,7 @@
 #include "compose_button.h"
 
 #include "guids.h"
+#include "log_file.h"
 
 #include <olectl.h>     // CONNECT_E_*
 #include <cwchar>
@@ -50,33 +51,31 @@ HRESULT STDMETHODCALLTYPE ComposeButton::QueryInterface(REFIID riid, void** ppv)
 // ---- ITfLangBarItem ----------------------------------------------
 
 HRESULT STDMETHODCALLTYPE ComposeButton::GetInfo(TF_LANGBARITEMINFO* info) noexcept {
+    log_line(L"ComposeButton::GetInfo");
     if (!info) return E_POINTER;
     info->clsidService = CLSID_TextService;
     info->guidItem     = GUID_LangBarItemCompose;
     info->dwStyle      = TF_LBI_STYLE_BTN_BUTTON;
     info->ulSort       = 0;
-    // szDescription is a fixed-size buffer in the struct (32 wchars).
     wcsncpy_s(info->szDescription, kButtonDescription,
               sizeof(info->szDescription) / sizeof(wchar_t));
     return S_OK;
 }
 
 HRESULT STDMETHODCALLTYPE ComposeButton::GetStatus(DWORD* status) noexcept {
+    log_line(L"ComposeButton::GetStatus composeEnabled=%d", composeEnabled_ ? 1 : 0);
     if (!status) return E_POINTER;
-    // When Compose is off (Roman passthrough), the button renders
-    // in the "toggled" / depressed state so the user can see at a
-    // glance that the engine is bypassed.
     *status = composeEnabled_ ? 0 : TF_LBI_STATUS_BTN_TOGGLED;
     return S_OK;
 }
 
-HRESULT STDMETHODCALLTYPE ComposeButton::Show(BOOL /*fShow*/) noexcept {
-    // No-op: the langbar UI manages visibility itself; we don't
-    // need to honour explicit show/hide requests for this button.
+HRESULT STDMETHODCALLTYPE ComposeButton::Show(BOOL fShow) noexcept {
+    log_line(L"ComposeButton::Show fShow=%d", fShow);
     return S_OK;
 }
 
 HRESULT STDMETHODCALLTYPE ComposeButton::GetTooltipString(BSTR* tip) noexcept {
+    log_line(L"ComposeButton::GetTooltipString");
     if (!tip) return E_POINTER;
     *tip = SysAllocString(composeEnabled_ ? kTooltipOn : kTooltipOff);
     return *tip ? S_OK : E_OUTOFMEMORY;
@@ -110,6 +109,7 @@ HRESULT STDMETHODCALLTYPE ComposeButton::GetIcon(HICON* icon) noexcept {
 }
 
 HRESULT STDMETHODCALLTYPE ComposeButton::GetText(BSTR* text) noexcept {
+    log_line(L"ComposeButton::GetText");
     if (!text) return E_POINTER;
     *text = SysAllocString(kButtonText);
     return *text ? S_OK : E_OUTOFMEMORY;
@@ -118,6 +118,7 @@ HRESULT STDMETHODCALLTYPE ComposeButton::GetText(BSTR* text) noexcept {
 // ---- ITfSource ----------------------------------------------------
 
 HRESULT STDMETHODCALLTYPE ComposeButton::AdviseSink(REFIID riid, IUnknown* punk, DWORD* cookie) noexcept {
+    log_line(L"ComposeButton::AdviseSink");
     if (!cookie || !punk) return E_POINTER;
     if (riid != IID_ITfLangBarItemSink) return CONNECT_E_CANNOTCONNECT;
     if (sink_) return CONNECT_E_ADVISELIMIT;
@@ -132,6 +133,7 @@ HRESULT STDMETHODCALLTYPE ComposeButton::AdviseSink(REFIID riid, IUnknown* punk,
 }
 
 HRESULT STDMETHODCALLTYPE ComposeButton::UnadviseSink(DWORD cookie) noexcept {
+    log_line(L"ComposeButton::UnadviseSink");
     if (cookie != kSinkCookie || !sink_) return CONNECT_E_NOCONNECTION;
     sink_.reset();
     return S_OK;

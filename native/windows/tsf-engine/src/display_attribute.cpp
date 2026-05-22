@@ -1,4 +1,5 @@
 #include "display_attribute.h"
+#include "log_file.h"
 #include "text_service.h"
 
 namespace burmese {
@@ -112,6 +113,7 @@ HRESULT STDMETHODCALLTYPE DisplayAttributeInfoEnum::Skip(ULONG count) noexcept {
 // ---- TextService bridges -----------------------------------------
 
 HRESULT STDMETHODCALLTYPE TextService::EnumDisplayAttributeInfo(IEnumTfDisplayAttributeInfo** out) noexcept {
+    log_line(L"EnumDisplayAttributeInfo");
     if (!out) return E_POINTER;
     auto* en = new (std::nothrow) DisplayAttributeInfoEnum();
     if (!en) return E_OUTOFMEMORY;
@@ -120,6 +122,8 @@ HRESULT STDMETHODCALLTYPE TextService::EnumDisplayAttributeInfo(IEnumTfDisplayAt
 }
 
 HRESULT STDMETHODCALLTYPE TextService::GetDisplayAttributeInfo(REFGUID guid, ITfDisplayAttributeInfo** out) noexcept {
+    log_line(L"GetDisplayAttributeInfo guid={%08X-%04X-%04X-...}",
+             guid.Data1, guid.Data2, guid.Data3);
     if (!out) return E_POINTER;
     *out = nullptr;
     if (guid != GUID_DisplayAttributeInput) return E_INVALIDARG;

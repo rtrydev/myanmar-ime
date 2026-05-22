@@ -114,18 +114,20 @@ HRESULT register_profile_and_category() noexcept {
                           IID_PPV_ARGS(profileMgr.put()));
     if (FAILED(hr)) return hr;
 
-    // Use the TIP DLL itself as the icon source — it has no resources
-    // today, so the icon will be a generic one until we ship an
-    // .ico resource. Index 0 = first icon in the file (none = OS
-    // fallback). Description: visible name in the language bar.
+    // Pass no icon. We tried passing the TIP DLL path with index 0,
+    // but the DLL has no icon resources — Windows then can't load a
+    // valid icon for the profile and some shell paths behave oddly
+    // (suspected contributor to the "Activate then auto-deactivate"
+    // bounce-back). Null icon -> OS default. A future commit can
+    // ship a real .ico resource and reference it here.
     hr = profileMgr->RegisterProfile(
         CLSID_TextService,
         kLangIdBurmese,
         GUID_Profile,
         kTextServiceDescription,
         static_cast<ULONG>(std::wcslen(kTextServiceDescription)),
-        dllPath.c_str(),
-        static_cast<ULONG>(dllPath.size()),
+        /*pchIconFile=*/nullptr,
+        /*cchFile=*/0,
         /*uIconIndex=*/0,
         /*hklSubstitute=*/nullptr,
         /*dwPreferredLayout=*/0,
