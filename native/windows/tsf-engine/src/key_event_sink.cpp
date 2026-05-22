@@ -100,11 +100,10 @@ bool TextService::handleKeyDown(WPARAM vk, LPARAM /*lParam*/, bool test) noexcep
                 // Whole composition gone. Drop pending work and
                 // reset the engine state immediately so the next
                 // keystroke starts clean. Same shape as engine.c's
-                // empty-buffer backspace branch. renderPreedit
-                // already ended the composition because the empty-
-                // buffer no-op short-circuit covers that case.
+                // empty-buffer backspace branch.
                 worker_.drain_and_wait_idle();
                 worker_.schedule_update(buffer_);
+                candidateWindow_.hide();
             } else {
                 worker_.schedule_update(buffer_);
             }
@@ -115,21 +114,25 @@ bool TextService::handleKeyDown(WPARAM vk, LPARAM /*lParam*/, bool test) noexcep
             if (test) return true;
             // Bring the engine current (drain only cancels pending
             // work; the engine may still be one keystroke behind the
-            // latest buffer_). Then read the committed surface and
-            // write it to the document via the composition.
+            // latest buffer_). Push the user's panel selection into
+            // the engine before reading the commit surface so the
+            // chosen candidate (not just rank 0) is what gets
+            // committed and recorded as history.
             worker_.drain_and_wait_idle();
             worker_.sync_update_buffer(buffer_);
+            if (candidateWindow_.isVisible()
+                && candidateWindow_.candidateCount() > 0) {
+                worker_.set_selected_sync(candidateWindow_.selectedIndex());
+            }
             std::string surface = worker_.commit_sync();
             if (!surface.empty()) {
                 worker_.record_selection_sync();
                 worker_.push_committed_context_sync(surface);
                 commitComposition(currentContext_.get(), surface);
             } else {
-                // Engine had nothing to commit (shouldn't happen with
-                // a non-empty buffer, but guard so we don't leave a
-                // stray composition behind).
                 endCompositionQuietly();
             }
+            candidateWindow_.hide();
             buffer_.clear();
             return true;
         }
@@ -139,24 +142,39 @@ bool TextService::handleKeyDown(WPARAM vk, LPARAM /*lParam*/, bool test) noexcep
             // Escape semantics from the macOS controller: commit the
             // raw Latin buffer verbatim. cancel_sync resets engine
             // composition state but doesn't insert anywhere; we
-            // bypass it and just write buffer_ via the composition
-            // since that's what the user typed and clearly wanted to
-            // keep.
+            // bypass it and write buffer_ via the composition.
             worker_.drain_and_wait_idle();
             (void)worker_.cancel_sync();
             std::string raw = buffer_;
             commitComposition(currentContext_.get(), raw);
+            candidateWindow_.hide();
             buffer_.clear();
             return true;
         }
         case KeymapAction::NavUp:
+            if (!candidateWindow_.isVisible()) return false;
+            if (test) return true;
+            candidateWindow_.moveUp();
+            return true;
         case KeymapAction::NavDown:
+            if (!candidateWindow_.isVisible()) return false;
+            if (test) return true;
+            candidateWindow_.moveDown();
+            return true;
         case KeymapAction::NavPageUp:
+            if (!candidateWindow_.isVisible()) return false;
+            if (test) return true;
+            candidateWindow_.pageUp();
+            return true;
         case KeymapAction::NavPageDown:
+            if (!candidateWindow_.isVisible()) return false;
+            if (test) return true;
+            candidateWindow_.pageDown();
+            return true;
         case KeymapAction::NavHome:
         case KeymapAction::NavEnd:
-            // Defer: navigation drives the candidate window cursor,
-            // which doesn't exist yet. Pass through to host.
+            // Not part of the macOS / Linux keymap surface. Pass
+            // through so the host's caret-navigation semantics work.
             return false;
     }
     return false;

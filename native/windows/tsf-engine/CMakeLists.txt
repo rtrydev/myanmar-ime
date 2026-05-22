@@ -67,6 +67,8 @@ set(BurmeseIMETIP_SOURCES
     src/engine_worker.cpp
     src/key_event_sink.cpp
     src/composition.cpp
+    src/snapshot.cpp
+    src/candidate_window.cpp
     src/text_service.cpp
     src/class_factory.cpp
     src/register.cpp
@@ -91,12 +93,16 @@ target_link_libraries(BurmeseIMETIP PRIVATE
     # InitGuid.h). The dll msctf.dll is loaded by the COM host, not us.
     # ole32 / oleaut32: COM core. advapi32: registry. user32: windows
     # + message loop. shell32: SHGetKnownFolderPath for the history
-    # path under %LOCALAPPDATA%.
+    # path under %LOCALAPPDATA%. d2d1 / dwrite: candidate window
+    # rendering (Direct2D HwndRenderTarget + DirectWrite text layout
+    # using the Myanmar Text font shipped with Windows 8+).
     ole32
     oleaut32
     advapi32
     user32
     shell32
+    d2d1
+    dwrite
 )
 
 set_target_properties(BurmeseIMETIP PROPERTIES

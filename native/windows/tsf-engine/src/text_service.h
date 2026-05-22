@@ -29,9 +29,11 @@
 #include <memory>
 #include <string>
 
+#include "candidate_window.h"
 #include "com_helpers.h"
 #include "engine_worker.h"
 #include "ffi_loader.h"
+#include "snapshot.h"
 
 namespace burmese {
 
@@ -98,6 +100,13 @@ public:
     // focus loss / Deactivate when we want to leave the host alone.
     void endCompositionQuietly() noexcept;
 
+    // Reposition the candidate window next to the active
+    // composition. Opens a read-only edit session to call
+    // ITfContextView::GetTextExt for the screen rectangle of the
+    // composition range, then asks the window to anchor below it.
+    // Safe to call when there's no composition (no-op).
+    void updateCandidatePosition() noexcept;
+
     // Public so the message-only window class registration helper
     // (defined in an anonymous namespace in text_service.cpp) can
     // take the address. The function itself doesn't touch private
@@ -154,6 +163,12 @@ private:
     // composition operations target this context.
     ComPtr<ITfContext>      currentContext_;
     ComPtr<ITfComposition>  composition_;
+
+    CandidateWindow         candidateWindow_;
+    // Most recent parsed snapshot. selectedIndex_ on the candidate
+    // window is the source of truth for what gets committed; this
+    // field exists mostly for diagnostic / future-history use.
+    ParsedSnapshot          lastSnapshot_;
 };
 
 } // namespace burmese

@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <string>
 
+#include "edit_session.h"
 #include "guids.h"
 
 namespace burmese {
@@ -137,6 +138,10 @@ HRESULT STDMETHODCALLTYPE TextService::ActivateEx(ITfThreadMgr* mgr, TfClientId 
         dbg(L"createMessageWindow failed (GetLastError=%u)", GetLastError());
     }
 
+    if (!candidateWindow_.create(g_module)) {
+        dbg(L"candidateWindow.create failed (GetLastError=%u)", GetLastError());
+    }
+
     if (ffi_.ready() && messageWindow_) {
         std::string lex, lm, hist;
         resolveResourcePaths(lex, lm, hist);
@@ -167,6 +172,7 @@ HRESULT STDMETHODCALLTYPE TextService::Deactivate() noexcept {
     // think there's a composition open. EndComposition needs a live
     // edit session, so do it while currentContext_ is still valid.
     endCompositionQuietly();
+    candidateWindow_.destroy();
     removeSinks();
     worker_.stop();
     destroyMessageWindow();
@@ -271,11 +277,46 @@ void TextService::onEngineResult() {
     if (snap->buffer != buffer_) {
         return;
     }
-    dbg(L"engine result for '%s' (%zu bytes JSON)",
-        widen(snap->buffer).c_str(), snap->json.size());
-    // Composition rendering / candidate UI lands in subsequent
-    // commits. For this milestone we just log so the user can
-    // verify the plumbing end-to-end via DbgView.
+
+    ParsedSnapshot parsed;
+    if (!parseSnapshot(snap->json, parsed)) {
+        dbg(L"snapshot parse failed (%zu bytes JSON)", snap->json.size());
+        return;
+    }
+    lastSnapshot_ = std::move(parsed);
+    candidateWindow_.setCandidates(lastSnapshot_);
+    if (candidateWindow_.isVisible()) {
+        updateCandidatePosition();
+    }
+}
+
+void TextService::updateCandidatePosition() noexcept {
+    if (!candidateWindow_.isVisible()) return;
+    if (!currentContext_ || !composition_) return;
+
+    ITfContext* ctxRaw = currentContext_.get();
+    runEditSession(ctxRaw, clientId_, TF_ES_SYNC | TF_ES_READ,
+        [this, ctxRaw](TfEditCookie ec) -> HRESULT {
+            ComPtr<ITfContextView> view;
+            HRESULT hr = ctxRaw->GetActiveView(view.put());
+            if (FAILED(hr) || !view) return hr;
+
+            ComPtr<ITfRange> range;
+            if (FAILED(composition_->GetRange(range.put())) || !range) {
+                return E_FAIL;
+            }
+            RECT rc{};
+            BOOL clipped = FALSE;
+            hr = view->GetTextExt(ec, range.get(), &rc, &clipped);
+            if (FAILED(hr)) {
+                // Some hosts (rich web editors, some Office views)
+                // return TF_E_NOLAYOUT during a layout pass. Skip
+                // silently — the next engine result will retry.
+                return S_OK;
+            }
+            candidateWindow_.setPositionBelow(rc);
+            return S_OK;
+        });
 }
 
 // ---- Engine resource paths -----------------------------------------
@@ -340,6 +381,10 @@ HRESULT STDMETHODCALLTYPE TextService::OnSetFocus(ITfDocumentMgr* docMgr, ITfDoc
     if (!buffer_.empty() && currentContext_) {
         worker_.drain_and_wait_idle();
         worker_.sync_update_buffer(buffer_);
+        if (candidateWindow_.isVisible()
+            && candidateWindow_.candidateCount() > 0) {
+            worker_.set_selected_sync(candidateWindow_.selectedIndex());
+        }
         std::string surface = worker_.commit_sync();
         if (!surface.empty()) {
             worker_.record_selection_sync();
@@ -354,6 +399,7 @@ HRESULT STDMETHODCALLTYPE TextService::OnSetFocus(ITfDocumentMgr* docMgr, ITfDoc
     } else if (composition_) {
         endCompositionQuietly();
     }
+    candidateWindow_.hide();
 
     currentContext_.reset();
     if (docMgr) {
