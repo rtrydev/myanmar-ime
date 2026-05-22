@@ -1,0 +1,188 @@
+<Window x:Class="Myangler.Preferences.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Myangler Burmese IME"
+        Width="720" Height="540"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="CanResize"
+        MinWidth="600" MinHeight="420">
+    <Window.Resources>
+        <Style TargetType="TabItem">
+            <Setter Property="Padding" Value="14,6"/>
+            <Setter Property="FontSize" Value="13"/>
+        </Style>
+        <Style x:Key="SectionHeader" TargetType="TextBlock">
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Margin" Value="0,12,0,4"/>
+        </Style>
+        <Style x:Key="Hint" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#666"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="Margin" Value="0,2,0,8"/>
+        </Style>
+    </Window.Resources>
+
+    <TabControl Margin="8" SelectedIndex="1">
+
+        <!-- ====================== Setup ====================== -->
+        <TabItem Header="Setup">
+            <ScrollViewer Padding="16">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource SectionHeader}"
+                               Text="Activate the Burmese keyboard"/>
+                    <TextBlock Style="{StaticResource Hint}">
+                        Add the Myangler Burmese input method in Windows Settings, then switch to it via Win+Space when you want to type Burmese.
+                    </TextBlock>
+                    <Button Name="OpenLanguageSettingsButton"
+                            Click="OnOpenLanguageSettings"
+                            Padding="12,6"
+                            HorizontalAlignment="Left"
+                            Margin="0,4,0,16"
+                            Content="Open Windows language settings…"/>
+
+                    <TextBlock Style="{StaticResource SectionHeader}"
+                               Text="If the IME isn't visible"/>
+                    <TextBlock Style="{StaticResource Hint}">
+                        The MSI installer should have registered the text service. If it doesn't appear in the keyboards list under Burmese, open an elevated PowerShell and re-run register_profile.exe install from the install directory.
+                    </TextBlock>
+
+                    <TextBlock Style="{StaticResource SectionHeader}"
+                               Text="What you can do here"/>
+                    <TextBlock Style="{StaticResource Hint}">
+                        Preferences — adjust the eight engine settings; changes propagate to the running IME within a second.
+                        History — view the words you've picked, clear individual rows or all of them.
+                        Convert — paste any Myanmar string to see its romanized reading.
+                        Diagnostics — runtime paths and file sizes, useful for bug reports.
+                    </TextBlock>
+                </StackPanel>
+            </ScrollViewer>
+        </TabItem>
+
+        <!-- ==================== Preferences =================== -->
+        <TabItem Header="Preferences">
+            <ScrollViewer Padding="16">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource SectionHeader}"
+                               Text="Composition"/>
+                    <CheckBox Name="CommitOnSpaceCheck" Content="Insert a space after committing (Space twice = space)"
+                              Margin="0,2,0,8" Checked="OnSettingsChanged" Unchecked="OnSettingsChanged"/>
+                    <CheckBox Name="ClusterAliasesCheck" Content="Cluster shortcuts (j, ch, gy, sh, gypan…)"
+                              Margin="0,2,0,8" Checked="OnSettingsChanged" Unchecked="OnSettingsChanged"/>
+                    <CheckBox Name="BurmesePunctCheck" Content="Auto-map ASCII punctuation to Myanmar after Burmese context"
+                              Margin="0,2,0,8" Checked="OnSettingsChanged" Unchecked="OnSettingsChanged"/>
+                    <CheckBox Name="NumberMeasureCheck" Content="Suggest measure words for typed numbers"
+                              Margin="0,2,0,8" Checked="OnSettingsChanged" Unchecked="OnSettingsChanged"/>
+                    <CheckBox Name="LearningCheck" Content="Learn from commits (per-user history)"
+                              Margin="0,2,0,12" Checked="OnSettingsChanged" Unchecked="OnSettingsChanged"/>
+
+                    <TextBlock Style="{StaticResource SectionHeader}"
+                               Text="Candidate panel"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,2,0,8" VerticalAlignment="Center">
+                        <TextBlock Text="Page size:" Width="120" VerticalAlignment="Center"/>
+                        <TextBox Name="PageSizeBox" Width="60" VerticalAlignment="Center"
+                                 TextAlignment="Right" LostFocus="OnSettingsChanged"/>
+                        <TextBlock Style="{StaticResource Hint}" Margin="8,0,0,0"
+                                   VerticalAlignment="Center"
+                                   Text="Candidates shown per page (1–24, default 9)"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,2,0,8" VerticalAlignment="Center">
+                        <TextBlock Text="Anchor threshold:" Width="120" VerticalAlignment="Center"/>
+                        <TextBox Name="AnchorThresholdBox" Width="60" VerticalAlignment="Center"
+                                 TextAlignment="Right" LostFocus="OnSettingsChanged"/>
+                        <TextBlock Style="{StaticResource Hint}" Margin="8,0,0,0"
+                                   VerticalAlignment="Center"
+                                   Text="Syllables before frozen-prefix windowing kicks in (default 8)"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,2,0,12" VerticalAlignment="Center">
+                        <TextBlock Text="LM prune margin:" Width="120" VerticalAlignment="Center"/>
+                        <TextBox Name="LMPruneBox" Width="60" VerticalAlignment="Center"
+                                 TextAlignment="Right" LostFocus="OnSettingsChanged"/>
+                        <TextBlock Style="{StaticResource Hint}" Margin="8,0,0,0"
+                                   VerticalAlignment="Center"
+                                   Text="Trigram-LM beam width (default 8.0)"/>
+                    </StackPanel>
+
+                    <TextBlock Name="PreferencesStatus" Style="{StaticResource Hint}"
+                               Margin="0,12,0,0"/>
+                </StackPanel>
+            </ScrollViewer>
+        </TabItem>
+
+        <!-- ====================== History ===================== -->
+        <TabItem Header="History">
+            <DockPanel Margin="12">
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
+                    <Button Name="HistoryRefreshButton" Click="OnHistoryRefresh"
+                            Content="Refresh" Padding="10,4" Margin="0,0,8,0"/>
+                    <Button Name="HistoryClearAllButton" Click="OnHistoryClearAll"
+                            Content="Clear all" Padding="10,4"
+                            Foreground="#A33" />
+                    <TextBlock Name="HistoryStatus" Style="{StaticResource Hint}"
+                               VerticalAlignment="Center" Margin="12,0,0,0"/>
+                </StackPanel>
+                <DataGrid Name="HistoryGrid"
+                          AutoGenerateColumns="False"
+                          CanUserAddRows="False"
+                          CanUserDeleteRows="False"
+                          IsReadOnly="True"
+                          GridLinesVisibility="Horizontal"
+                          HeadersVisibility="Column"
+                          FontFamily="Segoe UI">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Reading"  Binding="{Binding Reading}"  Width="160"/>
+                        <DataGridTextColumn Header="Surface"  Binding="{Binding Surface}"  Width="160"
+                                            FontFamily="Myanmar Text" FontSize="14"/>
+                        <DataGridTextColumn Header="Count"    Binding="{Binding Count}"    Width="80"/>
+                        <DataGridTextColumn Header="Last picked" Binding="{Binding LastPicked}" Width="*"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </DockPanel>
+        </TabItem>
+
+        <!-- ====================== Convert ===================== -->
+        <TabItem Header="Convert">
+            <StackPanel Margin="16">
+                <TextBlock Style="{StaticResource SectionHeader}"
+                           Text="Myanmar → reading"/>
+                <TextBlock Style="{StaticResource Hint}">
+                    Type or paste a Myanmar string; the reverse-romanizer will return its romanized reading.
+                </TextBlock>
+                <TextBox Name="ConvertInput" Height="80"
+                         AcceptsReturn="True" TextWrapping="Wrap"
+                         VerticalScrollBarVisibility="Auto"
+                         FontFamily="Myanmar Text" FontSize="16"
+                         Margin="0,4,0,8"/>
+                <Button Name="ConvertButton" Click="OnConvertClick"
+                        Content="Reverse-romanize"
+                        Padding="12,6" HorizontalAlignment="Left" Margin="0,0,0,8"/>
+                <TextBlock Style="{StaticResource SectionHeader}"
+                           Text="Reading"/>
+                <TextBox Name="ConvertOutput" Height="80"
+                         IsReadOnly="True" AcceptsReturn="True"
+                         TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                         FontFamily="Consolas" FontSize="14"/>
+            </StackPanel>
+        </TabItem>
+
+        <!-- =================== Diagnostics ==================== -->
+        <TabItem Header="Diagnostics">
+            <DockPanel Margin="16">
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
+                    <Button Name="DiagRefreshButton" Click="OnDiagnosticsRefresh"
+                            Content="Refresh" Padding="10,4"/>
+                    <TextBlock Style="{StaticResource Hint}" VerticalAlignment="Center"
+                               Margin="12,0,0,0"
+                               Text="Asks the engine for its diagnostics JSON (paths, sizes, version)."/>
+                </StackPanel>
+                <TextBox Name="DiagnosticsOutput"
+                         IsReadOnly="True" AcceptsReturn="True"
+                         TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto"
+                         HorizontalScrollBarVisibility="Auto"
+                         FontFamily="Consolas" FontSize="13"/>
+            </DockPanel>
+        </TabItem>
+
+    </TabControl>
+</Window>

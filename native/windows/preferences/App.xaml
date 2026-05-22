@@ -1,0 +1,13 @@
+<Application x:Class="Myangler.Preferences.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             StartupUri="MainWindow.xaml">
+    <Application.Resources>
+        <!--
+            Single global brush palette so the app responds to the
+            system's light theme cleanly. Dark-mode follow-up is
+            deferred; WPF on .NET 9 doesn't auto-theme the way
+            WinUI 3 does, so dark mode needs explicit handling.
+        -->
+    </Application.Resources>
+</Application>

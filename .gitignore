@@ -35,3 +35,7 @@ pipeline-run.log
 
 # vcpkg manifest-mode install root (Windows native shell deps).
 vcpkg_installed/
+
+# .NET build outputs for the Windows Preferences app (WPF / .NET 9).
+**/bin/
+**/obj/

@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    BurmeseIMEPreferences — WPF settings + diagnostics app for the
+    Myangler Burmese IME, matching the macOS SwiftUI and Linux GTK4
+    apps tab-for-tab.
+
+    Targets net9.0-windows so we can use WPF on the modern .NET
+    runtime. UseWPF brings in the WPF assemblies and XAML compile
+    pipeline.
+
+    For shipping via the MSI we publish as a self-contained,
+    single-file exe (the user doesn't need a separately-installed
+    .NET runtime). Use `dotnet publish -c Release -r win-x64
+    /p:SelfContained=true /p:PublishSingleFile=true`.
+
+    Output: bin\Release\net9.0-windows\win-x64\publish\
+            BurmeseIMEPreferences.exe (around 80 MB self-contained)
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Myangler.Preferences</RootNamespace>
+    <AssemblyName>BurmeseIMEPreferences</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Microsoft.Data.Sqlite for the History tab. Reads
+      %LOCALAPPDATA%\Myangler\UserHistory.sqlite, which the TIP
+      maintains via the Swift core's SQLiteUserHistoryStore.
+    -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.0" />
+  </ItemGroup>
+
+</Project>

@@ -42,6 +42,7 @@ if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
 New-Item -ItemType Directory -Path $staging              | Out-Null
 New-Item -ItemType Directory -Path "$staging\Data"       | Out-Null
 New-Item -ItemType Directory -Path "$staging\runtime"    | Out-Null
+New-Item -ItemType Directory -Path "$staging\preferences" | Out-Null
 
 # --- Build the Swift shim ----------------------------------------
 Write-Host '==> swift build BurmeseIMEFFI (release)'
@@ -70,6 +71,19 @@ try {
 
 $tipDll      = Join-Path $repo 'native\windows\tsf-engine\build\BurmeseIMETIP.dll'
 $registerExe = Join-Path $repo 'native\windows\tsf-engine\build\register_profile.exe'
+
+# --- Build the Preferences app (WPF + .NET 9) --------------------
+Write-Host '==> dotnet publish BurmeseIMEPreferences (self-contained)'
+Push-Location (Join-Path $repo 'native\windows\preferences')
+try {
+    Invoke-Native {
+        dotnet publish -c Release -r win-x64 `
+            /p:SelfContained=true `
+            /p:PublishSingleFile=true
+    } 'dotnet publish'
+} finally { Pop-Location }
+$prefsPublishDir = Join-Path $repo 'native\windows\preferences\bin\Release\net9.0-windows\win-x64\publish'
+if (-not (Test-Path $prefsPublishDir)) { throw "Missing $prefsPublishDir" }
 
 # --- Stage shipping payload --------------------------------------
 Write-Host "==> staging payload at $staging"
@@ -103,6 +117,13 @@ if (-not $swiftRuntimes) {
 $swiftBin = Join-Path ($swiftRuntimes | Sort-Object Name -Descending | Select-Object -First 1).FullName 'usr\bin'
 Write-Host "==> bundling Swift runtime from $swiftBin"
 Copy-Item -Path (Join-Path $swiftBin '*.dll') -Destination "$staging\runtime"
+
+# Preferences app: copy the entire publish dir. WPF self-contained
+# leaves several native sidecar DLLs (D3DCompiler, wpfgfx,
+# PresentationNative, e_sqlite3, ...) alongside the single-file
+# exe; the MSI needs to ship every one of them.
+Write-Host "==> bundling preferences app from $prefsPublishDir"
+Copy-Item -Path (Join-Path $prefsPublishDir '*') -Destination "$staging\preferences" -Recurse
 
 # --- Build the MSI ------------------------------------------------
 Write-Host '==> wix build'

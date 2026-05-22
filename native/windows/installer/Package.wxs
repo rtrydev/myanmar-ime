@@ -56,13 +56,18 @@
     <MediaTemplate EmbedCab="yes" />
 
     <!--
-      Standard install dir: %ProgramFiles64%\Myangler\
+      Standard install dirs:
+        %ProgramFiles64%\Myangler\        — TIP + shim + data
+        %ProgramMenu%\Myangler\           — Start Menu shortcut
     -->
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="Myangler">
         <Directory Id="DATAFOLDER" Name="Data" />
         <Directory Id="RUNTIMESFOLDER" Name="Runtimes" />
       </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="STARTMENUFOLDER" Name="Myangler" />
     </StandardDirectory>
 
     <!--
@@ -105,8 +110,42 @@
       <Files Include="build\staging\Data\BurmeseLM.bin" />
     </ComponentGroup>
 
+    <!--
+      Preferences app. .NET 9 self-contained + PublishSingleFile
+      embeds every managed assembly AND every native sidecar
+      (D3DCompiler, wpfgfx, PresentationNative, e_sqlite3, ...) into
+      the single exe, so we only ship that one file plus the .pdb
+      gets dropped on the floor. The exe needs an explicit File Id
+      so the Start Menu shortcut below can reference it.
+    -->
+    <Component Id="PreferencesExe" Directory="INSTALLFOLDER">
+      <File Id="BurmeseIMEPreferences.exe"
+            Source="build\staging\preferences\BurmeseIMEPreferences.exe"
+            KeyPath="yes" />
+    </Component>
+
+    <!--
+      Start Menu shortcut. KeyPath via the RegistryValue means
+      Windows tracks the shortcut's "exists" state for repair
+      semantics; without one the validator complains.
+    -->
+    <Component Id="StartMenuShortcut" Directory="STARTMENUFOLDER" Guid="*">
+      <Shortcut Id="StartMenuPrefsShortcut"
+                Name="Myangler Burmese Preferences"
+                Description="Configure the Myangler Burmese input method."
+                Target="[#BurmeseIMEPreferences.exe]"
+                WorkingDirectory="INSTALLFOLDER" />
+      <RemoveFolder Id="RemoveStartMenuFolder" On="uninstall" />
+      <RegistryValue Root="HKCU"
+                     Key="Software\Myangler\BurmeseIME"
+                     Name="InstalledShortcut"
+                     Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
     <Feature Id="Main" Title="Myangler Burmese IME" Level="1">
       <ComponentRef Id="RegisterProfileExe" />
+      <ComponentRef Id="PreferencesExe" />
+      <ComponentRef Id="StartMenuShortcut" />
       <ComponentGroupRef Id="RootFiles" />
       <ComponentGroupRef Id="DataFiles" />
     </Feature>
