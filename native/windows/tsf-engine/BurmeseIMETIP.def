@@ -1,0 +1,13 @@
+; BurmeseIMETIP.dll exports.
+;
+; The four entry points an in-process COM server must export. SwiftPM
+; needed this file to lift @_cdecl symbols on the swift-shim side; on
+; this C++ side the alternative would have been __declspec(dllexport)
+; on each function, but a .def file keeps the symbol list visible in
+; one place and matches the convention of every published TSF sample.
+
+EXPORTS
+    DllGetClassObject       PRIVATE
+    DllCanUnloadNow         PRIVATE
+    DllRegisterServer       PRIVATE
+    DllUnregisterServer     PRIVATE
