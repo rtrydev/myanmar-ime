@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  WiX 7 source for the Myangler Burmese IME MSI.
+
+  Packages all Windows-side runtime artefacts into a single
+  per-machine install at %ProgramFiles%\Myangler\:
+
+    BurmeseIMETIP.dll        the TSF text service
+    BurmeseIMEFFI.dll        Swift core wrapper
+    sqlite3.dll              SQLite (vcpkg build)
+    register_profile.exe     install/uninstall helper
+    Data\BurmeseLexicon.sqlite
+    Data\BurmeseLM.bin
+    Runtimes\swiftCore.dll
+    Runtimes\Foundation.dll
+    Runtimes\... (~30 DLLs, ~60 MB Swift runtime + VC redist)
+
+  Two scheduled custom actions wrap the existing
+  register_profile.exe binary so install/uninstall do exactly what
+  the dev helper does today — DllRegisterServer (which writes the
+  HKLM COM CLSID + the TSF profile + the display-attribute category
+  + the keyboard category) on install, DllUnregisterServer on
+  uninstall. No bespoke MSI registration tables for COM / TSF; one
+  helper exe owns that surface so the dev story and the installer
+  story stay identical.
+
+  Build (from native/windows/installer/, VS Developer PowerShell):
+    .\build.ps1
+
+  build.ps1 stages everything under build/staging/ first, then
+  invokes `wix build`; staging keeps the .wxs source declarative
+  (no source-tree path lookups) and lets the file harvester read
+  from one root.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="Myangler Burmese IME"
+    Manufacturer="Myangler"
+    Version="0.1.0"
+    UpgradeCode="B8754B45-25C4-4C47-904B-5C80897E9446"
+    Scope="perMachine"
+    Compressed="yes">
+
+    <!--
+      MajorUpgrade: any newer build cleanly replaces the old install.
+      Pre-defined in WiX; the Schedule="afterInstallExecute" default
+      means files are copied first, then the old install is removed.
+    -->
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Myangler Burmese IME is already installed. Uninstall it first to install this older build." />
+
+    <!--
+      Media: a single embedded CAB. Compressed=yes on the Package
+      makes WiX bundle everything into the .msi rather than emitting
+      loose files alongside it.
+    -->
+    <MediaTemplate EmbedCab="yes" />
+
+    <!--
+      Standard install dir: %ProgramFiles64%\Myangler\
+    -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Myangler">
+        <Directory Id="DATAFOLDER" Name="Data" />
+        <Directory Id="RUNTIMESFOLDER" Name="Runtimes" />
+      </Directory>
+    </StandardDirectory>
+
+    <!--
+      File harvesting. `Files` in WiX 7 takes a directory + glob and
+      synthesises one Component per file with auto-generated GUIDs.
+      Each subgroup targets a different install destination so the
+      runtime DLLs don't dump alongside the TIP DLL (they will, since
+      the loader needs them on PATH; but Runtimes\ is conventional).
+
+      The staging tree is laid out so a single Files element per
+      directory gets us everything in the right place.
+    -->
+    <!--
+      register_profile.exe needs an explicit File Id so the
+      CustomAction FileRef below can resolve to it. Everything else
+      uses Files-globs with auto-generated IDs.
+    -->
+    <Component Id="RegisterProfileExe" Directory="INSTALLFOLDER">
+      <File Id="register_profile.exe"
+            Source="build\staging\register_profile.exe"
+            KeyPath="yes" />
+    </Component>
+
+    <ComponentGroup Id="RootFiles" Directory="INSTALLFOLDER">
+      <Files Include="build\staging\BurmeseIMETIP.dll" />
+      <Files Include="build\staging\BurmeseIMEFFI.dll" />
+      <Files Include="build\staging\sqlite3.dll" />
+      <!--
+        Swift runtime DLLs land alongside the TIP DLL rather than in
+        a Runtimes\ subdir so the Windows DLL loader finds them on
+        the default search path (same directory as the loading
+        binary). Conventional separation into Runtimes\ would force
+        us to also touch PATH or use SetDllDirectory at TIP startup.
+      -->
+      <Files Include="build\staging\runtime\*.dll" />
+    </ComponentGroup>
+
+    <ComponentGroup Id="DataFiles" Directory="DATAFOLDER">
+      <Files Include="build\staging\Data\BurmeseLexicon.sqlite" />
+      <Files Include="build\staging\Data\BurmeseLM.bin" />
+    </ComponentGroup>
+
+    <Feature Id="Main" Title="Myangler Burmese IME" Level="1">
+      <ComponentRef Id="RegisterProfileExe" />
+      <ComponentGroupRef Id="RootFiles" />
+      <ComponentGroupRef Id="DataFiles" />
+    </Feature>
+
+    <!--
+      Custom actions: invoke the existing register_profile.exe so the
+      install / uninstall paths exercise the same code as the dev
+      helper. `Execute="deferred" Impersonate="no"` runs the action
+      in the elevated msiexec service context, which is what
+      DllRegisterServer needs for HKLM writes.
+    -->
+    <CustomAction
+      Id="RegisterTip"
+      FileRef="register_profile.exe"
+      ExeCommand="install"
+      Execute="deferred"
+      Impersonate="no"
+      Return="ignore" />
+
+    <CustomAction
+      Id="UnregisterTip"
+      FileRef="register_profile.exe"
+      ExeCommand="uninstall"
+      Execute="deferred"
+      Impersonate="no"
+      Return="ignore" />
+
+    <InstallExecuteSequence>
+      <!--
+        Schedule registration AFTER files land so the .exe + DLLs the
+        helper resolves are on disk by the time it runs. Schedule
+        unregister BEFORE files are removed so it can still call into
+        the TIP DLL to clean up registry entries.
+      -->
+      <Custom Action="RegisterTip"   After="InstallFiles" Condition="NOT Installed" />
+      <Custom Action="UnregisterTip" Before="RemoveFiles" Condition="Installed AND (REMOVE=&quot;ALL&quot;)" />
+    </InstallExecuteSequence>
+
+  </Package>
+</Wix>
