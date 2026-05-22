@@ -1,0 +1,42 @@
+; BurmeseIMEFFI.dll exports — flat C ABI declared in
+; native/linux/ibus-engine/src/ffi.h. Keep this list in sync with that
+; header; the C compiler / TIP DLL build catches drift via link errors.
+;
+; Why this file exists on Windows but not on Linux/macOS:
+;   - Linux ELF and macOS Mach-O export every global symbol of a
+;     dynamic library by default, so @_cdecl emits a plain C-named
+;     symbol that is automatically importable from C.
+;   - Windows PE only exports symbols listed in a .def file or marked
+;     __declspec(dllexport). SwiftPM's Windows linker auto-exports the
+;     Swift-mangled names of dynamic library products, but it does NOT
+;     promote the plain C-named @_cdecl symbols into the DLL export
+;     table. Without this .def file, BurmeseIMEFFI.dll would still
+;     contain the symbols (visible via `dumpbin /symbols` on the .obj)
+;     but a C caller could not LoadLibrary + GetProcAddress them.
+;
+; The DLL name is intentionally omitted from the LIBRARY directive so
+; the linker uses the output binary name SwiftPM picks.
+
+EXPORTS
+    burmese_engine_new
+    burmese_engine_free
+    burmese_engine_update
+    burmese_engine_commit
+    burmese_engine_record_selection
+    burmese_engine_set_selected
+    burmese_engine_cancel
+    burmese_engine_push_committed_context
+    burmese_engine_clear_committed_context
+    burmese_engine_set_candidate_page_size
+    burmese_engine_set_commit_on_space
+    burmese_engine_set_cluster_aliases_enabled
+    burmese_engine_set_lm_prune_margin
+    burmese_engine_set_anchor_commit_threshold
+    burmese_engine_set_burmese_punctuation_enabled
+    burmese_engine_set_number_measure_words_enabled
+    burmese_engine_set_learning_enabled
+    burmese_engine_reconcile_settings
+    burmese_engine_map_empty_buffer_punctuation
+    burmese_engine_diagnostics
+    burmese_engine_reverse_romanize
+    burmese_engine_string_free
