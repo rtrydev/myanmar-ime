@@ -31,6 +31,7 @@
 
 #include "candidate_window.h"
 #include "com_helpers.h"
+#include "compose_button.h"
 #include "engine_worker.h"
 #include "ffi_loader.h"
 #include "settings.h"
@@ -189,6 +190,22 @@ private:
     // skips the SetValue call rather than painting an undecorated
     // preedit-without-fall-through.
     TfGuidAtom              inputAttributeAtom_ = TF_INVALID_GUIDATOM;
+
+    // Compose/Roman toggle.
+    //   composeEnabled_ == true  -> engine path active (the default).
+    //   composeEnabled_ == false -> Roman passthrough: every typeable
+    //                               key inserts its ASCII char into
+    //                               the host directly, the engine is
+    //                               fully bypassed, no candidate
+    //                               window opens.
+    ComPtr<ComposeButton>   composeButton_;
+    bool                    composeEnabled_ = true;
+    bool                    langBarAdded_   = false;
+
+    void onComposeToggled(bool composeEnabled) noexcept;
+
+    bool addLangBarItem() noexcept;
+    void removeLangBarItem() noexcept;
 };
 
 } // namespace burmese

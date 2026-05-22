@@ -71,6 +71,7 @@ set(BurmeseIMETIP_SOURCES
     src/candidate_window.cpp
     src/display_attribute.cpp
     src/settings.cpp
+    src/compose_button.cpp
     src/text_service.cpp
     src/class_factory.cpp
     src/register.cpp

@@ -24,6 +24,7 @@
 #include "text_service.h"
 
 #include <Windows.h>
+#include "edit_session.h"
 #include "keymap.h"
 
 namespace burmese {
@@ -74,6 +75,35 @@ bool TextService::handleKeyDown(WPARAM vk, LPARAM /*lParam*/, bool test) noexcep
 
     const KeymapResult km = keymap_map(
         static_cast<uint32_t>(vk), mods, shifted);
+
+    // Compose/Roman bypass: when the langbar toggle is off, every
+    // typeable key inserts its raw ASCII immediately and the engine
+    // is fully untouched — matching the IBus `myangler.compose`
+    // property and the macOS Compose menu item. Non-typeable keys
+    // pass through so backspace/arrows/etc still target the host.
+    if (!composeEnabled_) {
+        if (km.action == KeymapAction::Typeable) {
+            if (test) return true;
+            if (currentContext_) {
+                wchar_t wc[2] = {
+                    static_cast<wchar_t>(static_cast<unsigned char>(shifted ? shifted : km.typed_char)),
+                    L'\0'
+                };
+                ITfContext* ctx = currentContext_.get();
+                runEditSession(ctx, clientId_, TF_ES_SYNC | TF_ES_READWRITE,
+                    [ctx, wc](TfEditCookie ec) -> HRESULT {
+                        ComPtr<ITfInsertAtSelection> ias;
+                        if (FAILED(ctx->QueryInterface(IID_PPV_ARGS(ias.put())))
+                            || !ias) return E_FAIL;
+                        ComPtr<ITfRange> dummy;
+                        return ias->InsertTextAtSelection(
+                            ec, 0, wc, 1, dummy.put());
+                    });
+            }
+            return true;
+        }
+        return false;
+    }
 
     switch (km.action) {
         case KeymapAction::Ignore:

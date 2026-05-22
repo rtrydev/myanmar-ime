@@ -182,6 +182,10 @@ HRESULT STDMETHODCALLTYPE TextService::ActivateEx(ITfThreadMgr* mgr, TfClientId 
         // here can cause hard-to-diagnose follow-on errors.
     }
 
+    if (!addLangBarItem()) {
+        dbg(L"addLangBarItem failed");
+    }
+
     return S_OK;
 }
 
@@ -194,6 +198,7 @@ HRESULT STDMETHODCALLTYPE TextService::Deactivate() noexcept {
     // edit session, so do it while currentContext_ is still valid.
     endCompositionQuietly();
     candidateWindow_.destroy();
+    removeLangBarItem();
     removeSinks();
     // Stop settings BEFORE the engine worker so the watcher thread
     // cannot push setting changes through a half-torn-down handle.
@@ -437,5 +442,72 @@ HRESULT STDMETHODCALLTYPE TextService::OnSetFocus(ITfDocumentMgr* docMgr, ITfDoc
 }
 HRESULT STDMETHODCALLTYPE TextService::OnPushContext(ITfContext*) noexcept { return S_OK; }
 HRESULT STDMETHODCALLTYPE TextService::OnPopContext(ITfContext*) noexcept  { return S_OK; }
+
+// ---- Compose/Roman langbar item ----------------------------------
+
+bool TextService::addLangBarItem() noexcept {
+    if (!threadMgr_ || langBarAdded_) return langBarAdded_;
+
+    ComPtr<ITfLangBarItemMgr> mgr;
+    if (FAILED(threadMgr_->QueryInterface(IID_PPV_ARGS(mgr.put()))) || !mgr) {
+        return false;
+    }
+
+    auto* btn = new (std::nothrow) ComposeButton(
+        [this](bool composeEnabled) { onComposeToggled(composeEnabled); });
+    if (!btn) return false;
+    composeButton_.attach(btn);
+
+    HRESULT hr = mgr->AddItem(composeButton_.get());
+    if (FAILED(hr)) {
+        composeButton_.reset();
+        return false;
+    }
+    langBarAdded_ = true;
+    return true;
+}
+
+void TextService::removeLangBarItem() noexcept {
+    if (!langBarAdded_ || !threadMgr_) {
+        composeButton_.reset();
+        langBarAdded_ = false;
+        return;
+    }
+    ComPtr<ITfLangBarItemMgr> mgr;
+    if (SUCCEEDED(threadMgr_->QueryInterface(IID_PPV_ARGS(mgr.put()))) && mgr
+        && composeButton_) {
+        mgr->RemoveItem(composeButton_.get());
+    }
+    composeButton_.reset();
+    langBarAdded_ = false;
+}
+
+void TextService::onComposeToggled(bool composeEnabled) noexcept {
+    composeEnabled_ = composeEnabled;
+    if (!composeEnabled_) {
+        // Switching to Roman mode while composing — commit whatever
+        // the user has typed so the half-typed buffer doesn't sit
+        // around invisibly waiting for a Space press that the user
+        // won't make (Space is now a passthrough).
+        if (!buffer_.empty() && currentContext_) {
+            worker_.drain_and_wait_idle();
+            worker_.sync_update_buffer(buffer_);
+            if (candidateWindow_.isVisible()
+                && candidateWindow_.candidateCount() > 0) {
+                worker_.set_selected_sync(candidateWindow_.selectedIndex());
+            }
+            std::string surface = worker_.commit_sync();
+            if (!surface.empty()) {
+                worker_.record_selection_sync();
+                worker_.push_committed_context_sync(surface);
+                commitComposition(currentContext_.get(), surface);
+            } else {
+                endCompositionQuietly();
+            }
+            buffer_.clear();
+        }
+        candidateWindow_.hide();
+    }
+}
 
 } // namespace burmese
