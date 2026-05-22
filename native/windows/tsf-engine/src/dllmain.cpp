@@ -30,6 +30,33 @@ extern "C" BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
     case DLL_PROCESS_ATTACH:
         burmese::g_module = module;
         DisableThreadLibraryCalls(module);  // we don't care about per-thread notifications
+
+        // Augment the per-process DLL search path so subsequent
+        // LoadLibraryEx calls find this DLL's siblings — without
+        // this, BurmeseIMEFFI.dll (which has static imports on
+        // Foundation.dll, swiftCore.dll, ...) cannot resolve its
+        // own deps when we load it dynamically, because the
+        // standard search path doesn't include the TIP's
+        // %ProgramFiles%\Myangler\ directory.
+        //
+        // SetDefaultDllDirectories restricts implicit searches to
+        // the safer set (System32 + user-added dirs). AddDllDirectory
+        // adds our install directory to that set, so any
+        // LoadLibraryExW that passes LOAD_LIBRARY_SEARCH_USER_DIRS
+        // (or LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, which includes
+        // USER_DIRS) finds DLLs in our dir.
+        {
+            wchar_t buf[MAX_PATH] = {0};
+            DWORD n = GetModuleFileNameW(module, buf, MAX_PATH);
+            if (n > 0 && n < MAX_PATH) {
+                wchar_t* slash = wcsrchr(buf, L'\\');
+                if (slash) {
+                    *slash = L'\0';
+                    SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+                    AddDllDirectory(buf);
+                }
+            }
+        }
         break;
     case DLL_PROCESS_DETACH:
         // Don't try to clean up here. By the time DLL_PROCESS_DETACH

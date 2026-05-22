@@ -24,11 +24,27 @@ bool resolve(HMODULE module, const char* name, Fn*& out, std::wstring& err) {
     return true;
 }
 
-// Try LoadLibraryW with each of the candidate paths in order. Stops
-// at the first success.
+// Try LoadLibraryEx with LOAD_WITH_ALTERED_SEARCH_PATH so Windows
+// resolves the loaded DLL's transitive dependencies (Foundation.dll,
+// swiftCore.dll, vcruntime140.dll, ...) from the SAME directory the
+// DLL itself lives in.
+//
+// Without this flag, Windows uses the standard search path for
+// dependency resolution — host-exe-dir + System32 + cwd + PATH,
+// NOT the directory of the DLL being loaded. For a TIP loaded into
+// e.g. Notepad's process, host-exe-dir is System32 and the Swift
+// runtime DLLs are nowhere on the standard path; the load would
+// succeed for BurmeseIMEFFI.dll itself but fail when it tries to
+// pull in its Swift runtime siblings, and the TIP would silently
+// go inert with a "missing exports" error.
+//
+// (LOAD_LIBRARY_SEARCH_* flags cannot be combined with
+// LOAD_WITH_ALTERED_SEARCH_PATH per MSDN — combining them makes
+// the call fail. AddDllDirectory in DllMain is the parallel
+// safety net for code paths that don't go through this helper.)
 HMODULE try_load(const std::wstring& path) noexcept {
     if (path.empty()) return nullptr;
-    return LoadLibraryW(path.c_str());
+    return LoadLibraryExW(path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
 }
 
 std::wstring module_directory(HMODULE self) {
