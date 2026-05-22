@@ -58,11 +58,16 @@ std::wstring widen_utf8(const std::string& s) {
 
 // Set the composition's text to `text` and advance the selection so
 // the caret sits at the end of the inserted run. Caller is inside an
-// edit session and `composition` is non-null.
+// edit session and `composition` is non-null. When `attrAtom` is
+// valid (the TextService resolved GUID_DisplayAttributeInput at
+// activation), the freshly set range is tagged with our input
+// display attribute so the host renders it with the dotted-
+// underline preedit decoration.
 HRESULT setCompositionTextAndCaret(TfEditCookie ec,
                                    ITfContext*      ctx,
                                    ITfComposition*  composition,
-                                   const std::wstring& text) {
+                                   const std::wstring& text,
+                                   TfGuidAtom       attrAtom) {
     ComPtr<ITfRange> range;
     HRESULT hr = composition->GetRange(range.put());
     if (FAILED(hr) || !range) return hr;
@@ -73,6 +78,22 @@ HRESULT setCompositionTextAndCaret(TfEditCookie ec,
         text.empty() ? L"" : text.c_str(),
         static_cast<LONG>(text.size()));
     if (FAILED(hr)) return hr;
+
+    // Apply the input display attribute to the composition range.
+    // GUID_PROP_ATTRIBUTE is TSF's standard property channel for
+    // display attributes; the value is a VT_I4 carrying the atom
+    // ITfCategoryMgr::RegisterGUID handed back at Activate.
+    if (attrAtom != TF_INVALID_GUIDATOM && !text.empty()) {
+        ComPtr<ITfProperty> prop;
+        if (SUCCEEDED(ctx->GetProperty(GUID_PROP_ATTRIBUTE, prop.put())) && prop) {
+            VARIANT var;
+            VariantInit(&var);
+            var.vt   = VT_I4;
+            var.lVal = static_cast<LONG>(attrAtom);
+            prop->SetValue(ec, range.get(), &var);
+            VariantClear(&var);
+        }
+    }
 
     // Move the caret to the end of the composition so what the user
     // typed appears with the insertion point just past it.
@@ -133,7 +154,8 @@ void TextService::renderPreedit(ITfContext* ctx) noexcept {
                 composition_.attach(raw);
             }
 
-            return setCompositionTextAndCaret(ec, ctx, composition_.get(), preedit);
+            return setCompositionTextAndCaret(
+                ec, ctx, composition_.get(), preedit, inputAttributeAtom());
         });
 }
 
@@ -161,8 +183,11 @@ void TextService::commitComposition(ITfContext* ctx, const std::string& final_ut
                     dummy.put());
             }
 
+            // Commit path passes TF_INVALID_GUIDATOM so the final
+            // text lands as plain (committed) text without the
+            // preedit decoration.
             HRESULT hr = setCompositionTextAndCaret(
-                ec, ctx, composition_.get(), final_text);
+                ec, ctx, composition_.get(), final_text, TF_INVALID_GUIDATOM);
             // End composition even if SetText failed — keeping a
             // dangling composition open is worse than dropping a
             // failed replacement.

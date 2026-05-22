@@ -42,7 +42,8 @@ class TextService final
     , public ITfTextInputProcessorEx
     , public ITfThreadMgrEventSink
     , public ITfKeyEventSink
-    , public ITfCompositionSink {
+    , public ITfCompositionSink
+    , public ITfDisplayAttributeProvider {
 public:
     TextService() noexcept;
     ~TextService() noexcept override;
@@ -79,6 +80,16 @@ public:
     // dismissing it). When this fires, our `composition_` pointer is
     // still valid but the composition itself is dead; clear it.
     HRESULT STDMETHODCALLTYPE OnCompositionTerminated(TfEditCookie ec, ITfComposition* composition) noexcept override;
+
+    // ITfDisplayAttributeProvider — see display_attribute.cpp.
+    HRESULT STDMETHODCALLTYPE EnumDisplayAttributeInfo(IEnumTfDisplayAttributeInfo** out) noexcept override;
+    HRESULT STDMETHODCALLTYPE GetDisplayAttributeInfo(REFGUID guid, ITfDisplayAttributeInfo** out) noexcept override;
+
+    // The TfGuidAtom that ITfCategoryMgr::RegisterGUID hands back for
+    // GUID_DisplayAttributeInput. Resolved once during Activate, then
+    // referenced by composition.cpp on every SetText so the preedit
+    // run gets the dotted-underline decoration.
+    TfGuidAtom inputAttributeAtom() const noexcept { return inputAttributeAtom_; }
 
     // ---- Composition lifecycle (defined in composition.cpp) ----
 
@@ -169,6 +180,13 @@ private:
     // window is the source of truth for what gets committed; this
     // field exists mostly for diagnostic / future-history use.
     ParsedSnapshot          lastSnapshot_;
+
+    // Atom for GUID_DisplayAttributeInput, registered with the TSF
+    // category manager during Activate. TF_INVALID_GUIDATOM means
+    // resolution failed or hasn't run — composition.cpp checks and
+    // skips the SetValue call rather than painting an undecorated
+    // preedit-without-fall-through.
+    TfGuidAtom              inputAttributeAtom_ = TF_INVALID_GUIDATOM;
 };
 
 } // namespace burmese

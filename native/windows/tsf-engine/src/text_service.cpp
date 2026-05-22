@@ -102,7 +102,8 @@ HRESULT STDMETHODCALLTYPE TextService::QueryInterface(REFIID riid, void** ppv) n
         || QueryOne<ITfTextInputProcessorEx>(riid, ppv, this)
         || QueryOne<ITfThreadMgrEventSink>(riid, ppv, this)
         || QueryOne<ITfKeyEventSink>(riid, ppv, this)
-        || QueryOne<ITfCompositionSink>(riid, ppv, this)) {
+        || QueryOne<ITfCompositionSink>(riid, ppv, this)
+        || QueryOne<ITfDisplayAttributeProvider>(riid, ppv, this)) {
         if (!*ppv) {
             *ppv = static_cast<ITfTextInputProcessorEx*>(this);
             AddRef();
@@ -142,6 +143,24 @@ HRESULT STDMETHODCALLTYPE TextService::ActivateEx(ITfThreadMgr* mgr, TfClientId 
         dbg(L"candidateWindow.create failed (GetLastError=%u)", GetLastError());
     }
 
+    // Resolve the GUID atom for our display attribute once. Used by
+    // composition.cpp on every SetText to decorate the preedit run
+    // with the dotted underline registered by display_attribute.cpp.
+    {
+        ComPtr<ITfCategoryMgr> catMgr;
+        if (SUCCEEDED(CoCreateInstance(
+                CLSID_TF_CategoryMgr, nullptr,
+                CLSCTX_INPROC_SERVER, IID_PPV_ARGS(catMgr.put())))) {
+            TfGuidAtom atom = TF_INVALID_GUIDATOM;
+            if (SUCCEEDED(catMgr->RegisterGUID(GUID_DisplayAttributeInput, &atom))) {
+                inputAttributeAtom_ = atom;
+            }
+        }
+        if (inputAttributeAtom_ == TF_INVALID_GUIDATOM) {
+            dbg(L"display-attribute atom resolution failed; preedit will render undecorated");
+        }
+    }
+
     if (ffi_.ready() && messageWindow_) {
         std::string lex, lm, hist;
         resolveResourcePaths(lex, lm, hist);
@@ -179,6 +198,7 @@ HRESULT STDMETHODCALLTYPE TextService::Deactivate() noexcept {
     currentContext_.reset();
     threadMgr_.reset();
     clientId_ = TF_CLIENTID_NULL;
+    inputAttributeAtom_ = TF_INVALID_GUIDATOM;
     buffer_.clear();
     return S_OK;
 }

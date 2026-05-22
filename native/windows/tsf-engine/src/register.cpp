@@ -139,9 +139,18 @@ HRESULT register_profile_and_category() noexcept {
                           IID_PPV_ARGS(categoryMgr.put()));
     if (FAILED(hr)) return hr;
 
-    return categoryMgr->RegisterCategory(
+    hr = categoryMgr->RegisterCategory(
         CLSID_TextService,
         GUID_TFCAT_TIP_KEYBOARD,
+        CLSID_TextService);
+    if (FAILED(hr)) return hr;
+
+    // Display-attribute provider category. Without this TSF won't
+    // call our ITfDisplayAttributeProvider::EnumDisplayAttributeInfo
+    // and the preedit underline will render as plain text.
+    return categoryMgr->RegisterCategory(
+        CLSID_TextService,
+        GUID_TFCAT_DISPLAYATTRIBUTEPROVIDER,
         CLSID_TextService);
 }
 
@@ -164,6 +173,10 @@ HRESULT unregister_profile_and_category() noexcept {
         categoryMgr->UnregisterCategory(
             CLSID_TextService,
             GUID_TFCAT_TIP_KEYBOARD,
+            CLSID_TextService);
+        categoryMgr->UnregisterCategory(
+            CLSID_TextService,
+            GUID_TFCAT_DISPLAYATTRIBUTEPROVIDER,
             CLSID_TextService);
     }
     return S_OK;
