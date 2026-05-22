@@ -11,12 +11,13 @@ per-user history.
 macOS ships an InputMethodKit bundle plus a SwiftUI Preferences app and
 unsigned `.pkg` installer. Linux ships an IBus engine plus a GTK4 /
 libadwaita Preferences app packaged as `ibus-myangler.deb`; see
-[`native/linux/README.md`](native/linux/README.md). Windows currently
-builds and tests the core engine only — no native TSF text service,
-Preferences app, or installer yet. On this checkout, `swift run
-TestRunner` passes the full shared suite on every supported platform
-(1636 cases on macOS/Linux; 1647 on Windows — Windows recognises one
-extra platform branch in the bench-baseline parity checks).
+[`native/linux/README.md`](native/linux/README.md). Windows ships a
+TSF text service DLL plus a WPF Preferences app, packaged as an
+unsigned MSI built via WiX; see
+[`native/windows/README.md`](native/windows/README.md). On this checkout, `swift run TestRunner`
+passes the full shared suite on every supported platform (1636 cases
+on macOS/Linux; 1647 on Windows — Windows recognises one extra
+platform branch in the bench-baseline parity checks).
 
 ---
 
@@ -53,14 +54,32 @@ the input source in **System Settings -> Keyboard -> Text Input**.
 
 ### Windows
 
-The Windows port currently ships **the core engine only**; there is no
-native text service or installer yet. To build and test the engine, open
-a **Visual Studio Developer PowerShell** (so `cl.exe`, `link.exe`, and
-the Windows SDK are on `PATH`/`INCLUDE`/`LIB`), then point the build at
-the vcpkg-installed SQLite:
+Build everything (engine, TSF text service DLL, Swift FFI shim, WPF
+Preferences app, MSI installer) in one shot from a **Visual Studio
+Developer PowerShell**:
 
 ```powershell
-# One-time prerequisites — see "Requirements" below for install commands.
+# One-time prerequisites — see "Requirements" below.
+cd native\windows\installer
+.\build.ps1
+# -> build\Myangler-Burmese-IME.msi (~91 MB)
+```
+
+Install on the same machine (or any other Windows 10/11 host) from
+an elevated shell:
+
+```powershell
+msiexec /i .\build\Myangler-Burmese-IME.msi
+# Then: Win+I -> Time & language -> Language -> Burmese ->
+# Options -> Keyboards -> "Myangler Burmese" should appear.
+# Switch to it via Win+Space and type "minga" in Notepad.
+# Uninstall via Settings -> Apps, or:  msiexec /x ...
+```
+
+To build / iterate on just the shared engine without going through
+the MSI pipeline:
+
+```powershell
 Import-Module 'C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\Microsoft.VisualStudio.DevShell.dll'
 Enter-VsDevShell -VsInstallPath 'C:\Program Files\Microsoft Visual Studio\2022\Community' `
                  -SkipAutomaticLocation -DevCmdArguments '-arch=x64'
@@ -68,20 +87,16 @@ Enter-VsDevShell -VsInstallPath 'C:\Program Files\Microsoft Visual Studio\2022\C
 $vcpkg = "$PWD\vcpkg_installed\x64-windows"
 $env:INCLUDE = "$vcpkg\include;$env:INCLUDE"
 $env:LIB     = "$vcpkg\lib;$env:LIB"
-$env:PATH    = "$vcpkg\bin;$env:PATH"   # so sqlite3.dll is findable at runtime
+$env:PATH    = "$vcpkg\bin;$env:PATH"
 
 cd Packages\BurmeseIMECore
 swift build
 swift run TestRunner
 ```
 
-The native TSF text service, candidate window, Preferences app, and
-WiX installer are not built yet. The shared engine plus its test
-suite work on Windows today; everything user-facing remains a port-in-
-progress. See [`CLAUDE.md`](CLAUDE.md)'s "Native Shells → Windows"
-section for the planned architecture (Swift shim DLL + TSF text-
-service DLL reusing the same `ffi.h` contract as the Linux IBus
-engine) and the operational invariants the shell must preserve.
+See [`CLAUDE.md`](CLAUDE.md)'s "Native Shells → Windows" section for
+the per-subdirectory architecture (TSF interface map, Win32 ↔ Linux
+primitive correspondence, settings schema, frozen CLSIDs).
 
 ### Linux
 
@@ -362,9 +377,19 @@ Linux mirrors settings through GSettings schema
   This produces `vcpkg_installed\x64-windows\{include,lib,bin}\sqlite3.*`
   (already in `.gitignore`). The Windows Quick Start above shows how to
   export those paths so `swift build` finds them. The installer pipeline
-  additionally needs WiX as a .NET global tool
-  (`dotnet tool install --global wix`); not required for `swift build`
-  or `swift run TestRunner`.
+  additionally needs:
+
+  - .NET 9 SDK (`dotnet --list-sdks` should show 9.x) — used by the
+    WPF Preferences app and by WiX itself.
+  - WiX 7 as a .NET global tool plus the OSMF EULA accepted:
+
+    ```powershell
+    dotnet tool install --global wix
+    wix eula accept wix7
+    ```
+
+  None of those are needed for `swift build` or `swift run TestRunner`
+  against the core; they're only required by `native\windows\installer\build.ps1`.
 
 ### Tests
 
