@@ -7,13 +7,16 @@ buffer, filters illegal orthography, and ranks candidates with parser
 scores, a bundled SQLite lexicon, a trigram language model, and learned
 per-user history.
 
-**Current status.** The core package is shared by both native shells.
+**Current status.** The core package is shared by all native shells.
 macOS ships an InputMethodKit bundle plus a SwiftUI Preferences app and
 unsigned `.pkg` installer. Linux ships an IBus engine plus a GTK4 /
 libadwaita Preferences app packaged as `ibus-myangler.deb`; see
-[`native/linux/README.md`](native/linux/README.md). On this checkout,
-`swift run TestRunner` passes **1636/1636 cases** and **8959/8959
-assertions**.
+[`native/linux/README.md`](native/linux/README.md). Windows currently
+builds and tests the core engine only — no native TSF text service,
+Preferences app, or installer yet. On this checkout, `swift run
+TestRunner` passes the full shared suite on every supported platform
+(1636 cases on macOS/Linux; 1647 on Windows — Windows recognises one
+extra platform branch in the bench-baseline parity checks).
 
 ---
 
@@ -47,6 +50,38 @@ Schemes:
 
 Install the package by right-clicking it and choosing **Open**. Then add
 the input source in **System Settings -> Keyboard -> Text Input**.
+
+### Windows
+
+The Windows port currently ships **the core engine only**; there is no
+native text service or installer yet. To build and test the engine, open
+a **Visual Studio Developer PowerShell** (so `cl.exe`, `link.exe`, and
+the Windows SDK are on `PATH`/`INCLUDE`/`LIB`), then point the build at
+the vcpkg-installed SQLite:
+
+```powershell
+# One-time prerequisites — see "Requirements" below for install commands.
+Import-Module 'C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\Microsoft.VisualStudio.DevShell.dll'
+Enter-VsDevShell -VsInstallPath 'C:\Program Files\Microsoft Visual Studio\2022\Community' `
+                 -SkipAutomaticLocation -DevCmdArguments '-arch=x64'
+
+$vcpkg = "$PWD\vcpkg_installed\x64-windows"
+$env:INCLUDE = "$vcpkg\include;$env:INCLUDE"
+$env:LIB     = "$vcpkg\lib;$env:LIB"
+$env:PATH    = "$vcpkg\bin;$env:PATH"   # so sqlite3.dll is findable at runtime
+
+cd Packages\BurmeseIMECore
+swift build
+swift run TestRunner
+```
+
+The native TSF text service, candidate window, Preferences app, and
+WiX installer are not built yet. The shared engine plus its test
+suite work on Windows today; everything user-facing remains a port-in-
+progress. See [`CLAUDE.md`](CLAUDE.md)'s "Native Shells → Windows"
+section for the planned architecture (Swift shim DLL + TSF text-
+service DLL reusing the same `ffi.h` contract as the Linux IBus
+engine) and the operational invariants the shell must preserve.
 
 ### Linux
 
@@ -302,12 +337,34 @@ Linux mirrors settings through GSettings schema
 
 ### Requirements
 
-- Swift 6.0+.
+- Swift 6.0+ (Swift 6.3 is the tested floor on Windows).
 - SQLite development headers. macOS gets SQLite from the SDK; Linux needs
-  `libsqlite3-dev`.
+  `libsqlite3-dev`. Windows is wired through a `CSQLite` system-library
+  shim that links the vcpkg-built `sqlite3.lib`.
 - Linux native shell builds additionally need IBus, GLib, json-glib,
   meson, ninja, GTK4, libadwaita, PyGObject, and Debian packaging tools;
   see [`native/linux/README.md`](native/linux/README.md).
+- Windows needs Visual Studio 2022 (with the "Desktop development with
+  C++" workload — `cl.exe`, `link.exe`, ATL, ASAN), the Windows 11 SDK,
+  and SQLite installed through vcpkg. The repo ships a `vcpkg.json`
+  manifest, so the one-time install is:
+
+  ```powershell
+  # Run in an elevated PowerShell — the VS-bundled vcpkg writes its
+  # build/download caches under Program Files. A user-owned vcpkg
+  # clone in your profile avoids the elevation entirely; either
+  # works as long as the same `vcpkg install` succeeds.
+  cd C:\Users\<you>\repos\myanmar-ime
+  & "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\vcpkg\vcpkg.exe" `
+      install --triplet x64-windows
+  ```
+
+  This produces `vcpkg_installed\x64-windows\{include,lib,bin}\sqlite3.*`
+  (already in `.gitignore`). The Windows Quick Start above shows how to
+  export those paths so `swift build` finds them. The installer pipeline
+  additionally needs WiX as a .NET global tool
+  (`dotnet tool install --global wix`); not required for `swift build`
+  or `swift run TestRunner`.
 
 ### Tests
 
@@ -322,7 +379,7 @@ swift run TestRunner
 ```
 
 The runner emits `.` for passes and `F` for failures. A clean run ends
-with:
+with a summary like:
 
 ```text
 === Summary ===
@@ -330,6 +387,12 @@ with:
   Assertions: 8959/8959 passed
 ALL 8959 TESTS PASSED
 ```
+
+The exact totals are platform-dependent: Windows recognises an extra
+`os(Windows)` branch in the platform-key suite and an extra entry in the
+bench-baseline scenario-parity check, so a clean Windows run reports
+1647/1647 cases and 8998/8998 assertions. The shape is the same — every
+case in `BurmeseTestSuites.all` must pass on every supported platform.
 
 Use the right engine layer for a test:
 

@@ -102,17 +102,21 @@ public final class NumberMeasureWords: @unchecked Sendable {
         guard let url = bundle.url(forResource: name, withExtension: ext),
               let content = try? String(contentsOf: url, encoding: .utf8)
         else { return [] }
+        // `enumerateLines` handles CR, LF, CRLF, and U+2028 correctly.
+        // `components(separatedBy: "\n")` would NOT split on CRLF because
+        // CRLF is a single Unicode grapheme cluster — so on Windows
+        // (where git autocrlf checks out CRLF) the whole TSV would arrive
+        // as a single "line" and every entry would silently disappear.
         var out: [Entry] = []
-        for rawLine in content.components(separatedBy: "\n") {
-            let line = rawLine.trimmingCharacters(in: .whitespaces)
-            guard !line.isEmpty, !line.hasPrefix("#") else { continue }
+        content.enumerateLines { line, _ in
+            guard !line.isEmpty, !line.hasPrefix("#") else { return }
             let parts = line.components(separatedBy: "\t")
                 .map { $0.trimmingCharacters(in: .whitespaces) }
                 .filter { !$0.isEmpty }
             guard parts.count >= 3,
                   let score = Int(parts[1]),
                   let pattern = Pattern(rawValue: parts[2])
-            else { continue }
+            else { return }
             out.append(Entry(measureWord: parts[0], score: score, pattern: pattern))
         }
         return out

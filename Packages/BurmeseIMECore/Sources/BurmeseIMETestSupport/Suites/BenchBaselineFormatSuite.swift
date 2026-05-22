@@ -106,7 +106,7 @@ public enum BenchBaselineFormatSuite {
         TestCase("currentPlatformKey_recognised") { ctx in
             let key = BenchBaselineFormat.currentPlatformKey
             ctx.assertTrue(
-                key == "linux" || key == "macos" || key == "unknown",
+                key == "linux" || key == "macos" || key == "windows" || key == "unknown",
                 "platform_key_recognised",
                 detail: "got '\(key)'"
             )
@@ -114,6 +114,8 @@ public enum BenchBaselineFormatSuite {
             ctx.assertEqual(key, "linux", "linux_host_returns_linux")
             #elseif os(macOS)
             ctx.assertEqual(key, "macos", "macos_host_returns_macos")
+            #elseif os(Windows)
+            ctx.assertEqual(key, "windows", "windows_host_returns_windows")
             #endif
         },
 

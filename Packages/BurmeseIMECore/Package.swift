@@ -22,7 +22,7 @@ let package = Package(
         .target(
             name: "BurmeseIMECore",
             dependencies: [
-                .target(name: "CSQLite", condition: .when(platforms: [.linux]))
+                .target(name: "CSQLite", condition: .when(platforms: [.linux, .windows]))
             ],
             exclude: ["LanguageModel/FORMAT.md"],
             resources: [.process("Data/NumberMeasureWords.tsv")]
@@ -31,14 +31,14 @@ let package = Package(
             name: "BurmeseIMETestSupport",
             dependencies: [
                 "BurmeseIMECore",
-                .target(name: "CSQLite", condition: .when(platforms: [.linux]))
+                .target(name: "CSQLite", condition: .when(platforms: [.linux, .windows]))
             ]
         ),
         .executableTarget(
             name: "LexiconBuilder",
             dependencies: [
                 "BurmeseIMECore",
-                .target(name: "CSQLite", condition: .when(platforms: [.linux]))
+                .target(name: "CSQLite", condition: .when(platforms: [.linux, .windows]))
             ]
         ),
         .executableTarget(

@@ -1,425 +1,674 @@
 {
   "platforms": {
     "linux": {
-  "meta" : {
-    "commit" : "46e037f",
-    "date" : "2026-05-04T07:21:44Z"
-  },
-  "scenarios" : [
-    {
-      "allocations" : 0,
-      "iterations" : 1000,
-      "max_us" : 515.08000000000004,
-      "p50_us" : 249.09999999999999,
-      "p95_us" : 255.97,
-      "p99_us" : 265.31999999999999,
-      "scenario" : "short"
-    },
-    {
-      "allocations" : 0,
-      "iterations" : 1000,
-      "max_us" : 1384.6099999999999,
-      "p50_us" : 405.48000000000002,
-      "p95_us" : 434.25,
-      "p99_us" : 440.18000000000001,
-      "scenario" : "medium"
-    },
-    {
-      "allocations" : 0,
-      "iterations" : 500,
-      "max_us" : 6942.96,
-      "p50_us" : 703.07000000000005,
-      "p95_us" : 710.78999999999996,
-      "p99_us" : 719.04999999999995,
-      "scenario" : "long"
-    },
-    {
-      "allocations" : 0,
-      "iterations" : 481,
-      "max_us" : 5239.3100000000004,
-      "p50_us" : 2016.6300000000001,
-      "p95_us" : 4888.6099999999997,
-      "p99_us" : 5105.9300000000003,
-      "scenario" : "incremental"
-    },
-    {
-      "allocations" : 0,
-      "iterations" : 200,
-      "max_us" : 917.51999999999998,
-      "p50_us" : 804.86000000000001,
-      "p95_us" : 814.54999999999995,
-      "p99_us" : 911.29999999999995,
-      "scenario" : "garbage"
-    },
-    {
-      "allocations" : 0,
-      "iterations" : 496,
-      "max_us" : 843.75999999999999,
-      "p50_us" : 585.88,
-      "p95_us" : 790.73000000000002,
-      "p99_us" : 810.28999999999996,
-      "scenario" : "garbage_incremental"
-    },
-    {
-      "allocations" : 0,
-      "iterations" : 200,
-      "max_us" : 2831.9299999999998,
-      "p50_us" : 1522.47,
-      "p95_us" : 1549.21,
-      "p99_us" : 1611.2,
-      "scenario" : "repetition_t16"
-    },
-    {
-      "allocations" : 0,
-      "iterations" : 200,
-      "max_us" : 691.36000000000001,
-      "p50_us" : 667.63,
-      "p95_us" : 677.24000000000001,
-      "p99_us" : 683.38,
-      "scenario" : "plus_chain_30"
-    },
-    {
-      "allocations" : 0,
-      "iterations" : 200,
-      "max_us" : 3644.8000000000002,
-      "p50_us" : 1863.6800000000001,
-      "p95_us" : 1891.22,
-      "p99_us" : 2021.8099999999999,
-      "scenario" : "cluster_alias_j16"
-    },
-    {
-      "allocations" : 0,
-      "iterations" : 200,
-      "max_us" : 51636.18,
-      "p50_us" : 2968.4000000000001,
-      "p95_us" : 3082.1500000000001,
-      "p99_us" : 3359.23,
-      "scenario" : "repetition_tha30"
-    },
-    {
-      "allocations" : 0,
-      "iterations" : 200,
-      "max_us" : 35241.75,
-      "p50_us" : 1637.8299999999999,
-      "p95_us" : 1691.9200000000001,
-      "p99_us" : 1821.48,
-      "scenario" : "vowel_rule_chain_aing_8"
-    },
-    {
-      "allocations" : 0,
-      "iterations" : 200,
-      "max_us" : 4450.5900000000001,
-      "p50_us" : 1450.6300000000001,
-      "p95_us" : 1537.0699999999999,
-      "p99_us" : 1591.03,
-      "scenario" : "vowel_rule_chain_aing_4"
-    },
-    {
-      "allocations" : 0,
-      "iterations" : 200,
-      "max_us" : 543.82000000000005,
-      "p50_us" : 269.04000000000002,
-      "p95_us" : 278.69,
-      "p99_us" : 282.18000000000001,
-      "scenario" : "vowel_rule_chain_aing_2"
-    },
-    {
-      "allocations" : 0,
-      "iterations" : 200,
-      "max_us" : 9622.3400000000001,
-      "p50_us" : 873.32000000000005,
-      "p95_us" : 879.14999999999998,
-      "p99_us" : 900.44000000000005,
-      "scenario" : "vowel_rule_chain_aung_8"
-    },
-    {
-      "allocations" : 0,
-      "iterations" : 200,
-      "max_us" : 29653.439999999999,
-      "p50_us" : 4511.5500000000002,
-      "p95_us" : 5001.9200000000001,
-      "p99_us" : 5054.2399999999998,
-      "scenario" : "vowel_rule_chain_in_10"
-    },
-    {
-      "p95_us" : 0,
-      "p99_us" : 0,
-      "placeholder" : true,
-      "scenario" : "short_prod"
-    },
-    {
-      "p95_us" : 0,
-      "p99_us" : 0,
-      "placeholder" : true,
-      "scenario" : "medium_prod"
-    },
-    {
-      "p95_us" : 0,
-      "p99_us" : 0,
-      "placeholder" : true,
-      "scenario" : "long_prod"
-    },
-    {
-      "p95_us" : 0,
-      "p99_us" : 0,
-      "placeholder" : true,
-      "scenario" : "incremental_prod"
-    },
-    {
-      "p95_us" : 0,
-      "p99_us" : 0,
-      "placeholder" : true,
-      "scenario" : "garbage_incremental_prod"
-    },
-    {
-      "p95_us" : 0,
-      "p99_us" : 0,
-      "placeholder" : true,
-      "scenario" : "vowel_rule_chain_in_10_prod"
-    },
-    {
-      "p95_us" : 0,
-      "p99_us" : 0,
-      "placeholder" : true,
-      "scenario" : "ain_colon_chain_incremental_prod"
-    },
-    {
-      "p95_us" : 0,
-      "p99_us" : 0,
-      "placeholder" : true,
-      "scenario" : "ain_colon_chain_backspace_prod"
-    },
-    {
-      "p95_us" : 0,
-      "p99_us" : 0,
-      "placeholder" : true,
-      "scenario" : "long_backspace_prod"
-    }
-  ]
-},
-    "macos": {
-        "scenarios": [
+      "meta": {
+        "commit": "46e037f",
+        "date": "2026-05-04T07:21:44Z"
+      },
+      "scenarios": [
         {
-    "scenario": "short",
-    "iterations": 1000,
-    "p50_us": 110.83,
-    "p95_us": 120.17,
-    "p99_us": 130.54,
-    "max_us": 233.75,
-    "allocations": 0
-  },
-          {
-    "scenario": "medium",
-    "iterations": 1000,
-    "p50_us": 181.00,
-    "p95_us": 190.17,
-    "p99_us": 207.29,
-    "max_us": 494.29,
-    "allocations": 0
-  },
-          {
-    "scenario": "long",
-    "iterations": 500,
-    "p50_us": 332.17,
-    "p95_us": 347.46,
-    "p99_us": 383.83,
-    "max_us": 2543.50,
-    "allocations": 0
-  },
-          {
-    "scenario": "incremental",
-    "iterations": 481,
-    "p50_us": 884.71,
-    "p95_us": 2174.42,
-    "p99_us": 2269.25,
-    "max_us": 2361.29,
-    "allocations": 0
-  },
-          {
-    "scenario": "garbage",
-    "iterations": 200,
-    "p50_us": 395.12,
-    "p95_us": 429.62,
-    "p99_us": 445.75,
-    "max_us": 452.83,
-    "allocations": 0
-  },
-          {
-    "scenario": "garbage_incremental",
-    "iterations": 496,
-    "p50_us": 299.42,
-    "p95_us": 398.38,
-    "p99_us": 411.62,
-    "max_us": 449.21,
-    "allocations": 0
-  },
-          {
-    "scenario": "repetition_t16",
-    "iterations": 200,
-    "p50_us": 661.04,
-    "p95_us": 698.88,
-    "p99_us": 728.46,
-    "max_us": 1219.25,
-    "allocations": 0
-  },
-          {
-    "scenario": "plus_chain_30",
-    "iterations": 200,
-    "p50_us": 242.46,
-    "p95_us": 252.88,
-    "p99_us": 276.04,
-    "max_us": 6108.96,
-    "allocations": 0
-  },
-          {
-    "scenario": "cluster_alias_j16",
-    "iterations": 200,
-    "p50_us": 916.62,
-    "p95_us": 951.50,
-    "p99_us": 1004.54,
-    "max_us": 1685.00,
-    "allocations": 0
-  },
-          {
-    "scenario": "repetition_tha30",
-    "iterations": 200,
-    "p50_us": 1156.21,
-    "p95_us": 1201.88,
-    "p99_us": 1232.33,
-    "max_us": 20201.12,
-    "allocations": 0
-  },
-          {
-    "scenario": "vowel_rule_chain_aing_8",
-    "iterations": 200,
-    "p50_us": 864.17,
-    "p95_us": 909.79,
-    "p99_us": 952.25,
-    "max_us": 5614.54,
-    "allocations": 0
-  },
-          {
-    "scenario": "vowel_rule_chain_aing_4",
-    "iterations": 200,
-    "p50_us": 606.21,
-    "p95_us": 644.29,
-    "p99_us": 679.00,
-    "max_us": 2021.08,
-    "allocations": 0
-  },
-          {
-    "scenario": "vowel_rule_chain_aing_2",
-    "iterations": 200,
-    "p50_us": 122.71,
-    "p95_us": 126.83,
-    "p99_us": 140.46,
-    "max_us": 295.00,
-    "allocations": 0
-  },
-          {
-    "scenario": "vowel_rule_chain_aung_8",
-    "iterations": 200,
-    "p50_us": 367.58,
-    "p95_us": 387.96,
-    "p99_us": 420.71,
-    "max_us": 1842.08,
-    "allocations": 0
-  },
-          {
-    "scenario": "vowel_rule_chain_in_10",
-    "iterations": 200,
-    "p50_us": 2264.04,
-    "p95_us": 2331.62,
-    "p99_us": 2371.92,
-    "max_us": 14038.58,
-    "allocations": 0
-  },
-          {
-    "scenario": "short_prod",
-    "iterations": 1000,
-    "p50_us": 244.08,
-    "p95_us": 259.46,
-    "p99_us": 281.79,
-    "max_us": 773.17,
-    "allocations": 0
-  },
-          {
-    "scenario": "medium_prod",
-    "iterations": 1000,
-    "p50_us": 204.04,
-    "p95_us": 215.17,
-    "p99_us": 233.33,
-    "max_us": 691.00,
-    "allocations": 0
-  },
-          {
-    "scenario": "long_prod",
-    "iterations": 500,
-    "p50_us": 862.38,
-    "p95_us": 907.25,
-    "p99_us": 942.92,
-    "max_us": 9257.96,
-    "allocations": 0
-  },
-          {
-    "scenario": "incremental_prod",
-    "iterations": 481,
-    "p50_us": 1218.83,
-    "p95_us": 2815.04,
-    "p99_us": 15892.58,
-    "max_us": 17105.79,
-    "allocations": 0
-  },
-          {
-    "scenario": "garbage_incremental_prod",
-    "iterations": 496,
-    "p50_us": 369.33,
-    "p95_us": 466.79,
-    "p99_us": 489.83,
-    "max_us": 510.42,
-    "allocations": 0
-  },
-          {
-    "scenario": "vowel_rule_chain_in_10_prod",
-    "iterations": 200,
-    "p50_us": 3399.79,
-    "p95_us": 3489.67,
-    "p99_us": 3575.46,
-    "max_us": 16430.54,
-    "allocations": 0
-  },
-          {
-    "scenario": "ain_colon_chain_incremental_prod",
-    "iterations": 192,
-    "p50_us": 262.33,
-    "p95_us": 2060.12,
-    "p99_us": 61704.54,
-    "max_us": 62087.67,
-    "allocations": 0
-  },
-          {
-    "scenario": "ain_colon_chain_backspace_prod",
-    "iterations": 184,
-    "p50_us": 223.42,
-    "p95_us": 2090.88,
-    "p99_us": 60862.71,
-    "max_us": 62664.38,
-    "allocations": 0
-  },
-          {
-    "scenario": "long_backspace_prod",
-    "iterations": 493,
-    "p50_us": 947.21,
-    "p95_us": 2713.12,
-    "p99_us": 15606.46,
-    "max_us": 15905.17,
-    "allocations": 0
-  }
-    ],
-    "meta": {
-      "commit": "d74c893",
-      "date": "2026-05-12T16:46:21Z"
+          "allocations": 0,
+          "iterations": 1000,
+          "max_us": 515.08,
+          "p50_us": 249.1,
+          "p95_us": 255.97,
+          "p99_us": 265.32,
+          "scenario": "short"
+        },
+        {
+          "allocations": 0,
+          "iterations": 1000,
+          "max_us": 1384.61,
+          "p50_us": 405.48,
+          "p95_us": 434.25,
+          "p99_us": 440.18,
+          "scenario": "medium"
+        },
+        {
+          "allocations": 0,
+          "iterations": 500,
+          "max_us": 6942.96,
+          "p50_us": 703.07,
+          "p95_us": 710.79,
+          "p99_us": 719.05,
+          "scenario": "long"
+        },
+        {
+          "allocations": 0,
+          "iterations": 481,
+          "max_us": 5239.31,
+          "p50_us": 2016.63,
+          "p95_us": 4888.61,
+          "p99_us": 5105.93,
+          "scenario": "incremental"
+        },
+        {
+          "allocations": 0,
+          "iterations": 200,
+          "max_us": 917.52,
+          "p50_us": 804.86,
+          "p95_us": 814.55,
+          "p99_us": 911.3,
+          "scenario": "garbage"
+        },
+        {
+          "allocations": 0,
+          "iterations": 496,
+          "max_us": 843.76,
+          "p50_us": 585.88,
+          "p95_us": 790.73,
+          "p99_us": 810.29,
+          "scenario": "garbage_incremental"
+        },
+        {
+          "allocations": 0,
+          "iterations": 200,
+          "max_us": 2831.93,
+          "p50_us": 1522.47,
+          "p95_us": 1549.21,
+          "p99_us": 1611.2,
+          "scenario": "repetition_t16"
+        },
+        {
+          "allocations": 0,
+          "iterations": 200,
+          "max_us": 691.36,
+          "p50_us": 667.63,
+          "p95_us": 677.24,
+          "p99_us": 683.38,
+          "scenario": "plus_chain_30"
+        },
+        {
+          "allocations": 0,
+          "iterations": 200,
+          "max_us": 3644.8,
+          "p50_us": 1863.68,
+          "p95_us": 1891.22,
+          "p99_us": 2021.81,
+          "scenario": "cluster_alias_j16"
+        },
+        {
+          "allocations": 0,
+          "iterations": 200,
+          "max_us": 51636.18,
+          "p50_us": 2968.4,
+          "p95_us": 3082.15,
+          "p99_us": 3359.23,
+          "scenario": "repetition_tha30"
+        },
+        {
+          "allocations": 0,
+          "iterations": 200,
+          "max_us": 35241.75,
+          "p50_us": 1637.83,
+          "p95_us": 1691.92,
+          "p99_us": 1821.48,
+          "scenario": "vowel_rule_chain_aing_8"
+        },
+        {
+          "allocations": 0,
+          "iterations": 200,
+          "max_us": 4450.59,
+          "p50_us": 1450.63,
+          "p95_us": 1537.07,
+          "p99_us": 1591.03,
+          "scenario": "vowel_rule_chain_aing_4"
+        },
+        {
+          "allocations": 0,
+          "iterations": 200,
+          "max_us": 543.82,
+          "p50_us": 269.04,
+          "p95_us": 278.69,
+          "p99_us": 282.18,
+          "scenario": "vowel_rule_chain_aing_2"
+        },
+        {
+          "allocations": 0,
+          "iterations": 200,
+          "max_us": 9622.34,
+          "p50_us": 873.32,
+          "p95_us": 879.15,
+          "p99_us": 900.44,
+          "scenario": "vowel_rule_chain_aung_8"
+        },
+        {
+          "allocations": 0,
+          "iterations": 200,
+          "max_us": 29653.44,
+          "p50_us": 4511.55,
+          "p95_us": 5001.92,
+          "p99_us": 5054.24,
+          "scenario": "vowel_rule_chain_in_10"
+        },
+        {
+          "p95_us": 0,
+          "p99_us": 0,
+          "placeholder": true,
+          "scenario": "short_prod"
+        },
+        {
+          "p95_us": 0,
+          "p99_us": 0,
+          "placeholder": true,
+          "scenario": "medium_prod"
+        },
+        {
+          "p95_us": 0,
+          "p99_us": 0,
+          "placeholder": true,
+          "scenario": "long_prod"
+        },
+        {
+          "p95_us": 0,
+          "p99_us": 0,
+          "placeholder": true,
+          "scenario": "incremental_prod"
+        },
+        {
+          "p95_us": 0,
+          "p99_us": 0,
+          "placeholder": true,
+          "scenario": "garbage_incremental_prod"
+        },
+        {
+          "p95_us": 0,
+          "p99_us": 0,
+          "placeholder": true,
+          "scenario": "vowel_rule_chain_in_10_prod"
+        },
+        {
+          "p95_us": 0,
+          "p99_us": 0,
+          "placeholder": true,
+          "scenario": "ain_colon_chain_incremental_prod"
+        },
+        {
+          "p95_us": 0,
+          "p99_us": 0,
+          "placeholder": true,
+          "scenario": "ain_colon_chain_backspace_prod"
+        },
+        {
+          "p95_us": 0,
+          "p99_us": 0,
+          "placeholder": true,
+          "scenario": "long_backspace_prod"
+        }
+      ]
+    },
+    "macos": {
+      "scenarios": [
+        {
+          "scenario": "short",
+          "iterations": 1000,
+          "p50_us": 110.83,
+          "p95_us": 120.17,
+          "p99_us": 130.54,
+          "max_us": 233.75,
+          "allocations": 0
+        },
+        {
+          "scenario": "medium",
+          "iterations": 1000,
+          "p50_us": 181.0,
+          "p95_us": 190.17,
+          "p99_us": 207.29,
+          "max_us": 494.29,
+          "allocations": 0
+        },
+        {
+          "scenario": "long",
+          "iterations": 500,
+          "p50_us": 332.17,
+          "p95_us": 347.46,
+          "p99_us": 383.83,
+          "max_us": 2543.5,
+          "allocations": 0
+        },
+        {
+          "scenario": "incremental",
+          "iterations": 481,
+          "p50_us": 884.71,
+          "p95_us": 2174.42,
+          "p99_us": 2269.25,
+          "max_us": 2361.29,
+          "allocations": 0
+        },
+        {
+          "scenario": "garbage",
+          "iterations": 200,
+          "p50_us": 395.12,
+          "p95_us": 429.62,
+          "p99_us": 445.75,
+          "max_us": 452.83,
+          "allocations": 0
+        },
+        {
+          "scenario": "garbage_incremental",
+          "iterations": 496,
+          "p50_us": 299.42,
+          "p95_us": 398.38,
+          "p99_us": 411.62,
+          "max_us": 449.21,
+          "allocations": 0
+        },
+        {
+          "scenario": "repetition_t16",
+          "iterations": 200,
+          "p50_us": 661.04,
+          "p95_us": 698.88,
+          "p99_us": 728.46,
+          "max_us": 1219.25,
+          "allocations": 0
+        },
+        {
+          "scenario": "plus_chain_30",
+          "iterations": 200,
+          "p50_us": 242.46,
+          "p95_us": 252.88,
+          "p99_us": 276.04,
+          "max_us": 6108.96,
+          "allocations": 0
+        },
+        {
+          "scenario": "cluster_alias_j16",
+          "iterations": 200,
+          "p50_us": 916.62,
+          "p95_us": 951.5,
+          "p99_us": 1004.54,
+          "max_us": 1685.0,
+          "allocations": 0
+        },
+        {
+          "scenario": "repetition_tha30",
+          "iterations": 200,
+          "p50_us": 1156.21,
+          "p95_us": 1201.88,
+          "p99_us": 1232.33,
+          "max_us": 20201.12,
+          "allocations": 0
+        },
+        {
+          "scenario": "vowel_rule_chain_aing_8",
+          "iterations": 200,
+          "p50_us": 864.17,
+          "p95_us": 909.79,
+          "p99_us": 952.25,
+          "max_us": 5614.54,
+          "allocations": 0
+        },
+        {
+          "scenario": "vowel_rule_chain_aing_4",
+          "iterations": 200,
+          "p50_us": 606.21,
+          "p95_us": 644.29,
+          "p99_us": 679.0,
+          "max_us": 2021.08,
+          "allocations": 0
+        },
+        {
+          "scenario": "vowel_rule_chain_aing_2",
+          "iterations": 200,
+          "p50_us": 122.71,
+          "p95_us": 126.83,
+          "p99_us": 140.46,
+          "max_us": 295.0,
+          "allocations": 0
+        },
+        {
+          "scenario": "vowel_rule_chain_aung_8",
+          "iterations": 200,
+          "p50_us": 367.58,
+          "p95_us": 387.96,
+          "p99_us": 420.71,
+          "max_us": 1842.08,
+          "allocations": 0
+        },
+        {
+          "scenario": "vowel_rule_chain_in_10",
+          "iterations": 200,
+          "p50_us": 2264.04,
+          "p95_us": 2331.62,
+          "p99_us": 2371.92,
+          "max_us": 14038.58,
+          "allocations": 0
+        },
+        {
+          "scenario": "short_prod",
+          "iterations": 1000,
+          "p50_us": 244.08,
+          "p95_us": 259.46,
+          "p99_us": 281.79,
+          "max_us": 773.17,
+          "allocations": 0
+        },
+        {
+          "scenario": "medium_prod",
+          "iterations": 1000,
+          "p50_us": 204.04,
+          "p95_us": 215.17,
+          "p99_us": 233.33,
+          "max_us": 691.0,
+          "allocations": 0
+        },
+        {
+          "scenario": "long_prod",
+          "iterations": 500,
+          "p50_us": 862.38,
+          "p95_us": 907.25,
+          "p99_us": 942.92,
+          "max_us": 9257.96,
+          "allocations": 0
+        },
+        {
+          "scenario": "incremental_prod",
+          "iterations": 481,
+          "p50_us": 1218.83,
+          "p95_us": 2815.04,
+          "p99_us": 15892.58,
+          "max_us": 17105.79,
+          "allocations": 0
+        },
+        {
+          "scenario": "garbage_incremental_prod",
+          "iterations": 496,
+          "p50_us": 369.33,
+          "p95_us": 466.79,
+          "p99_us": 489.83,
+          "max_us": 510.42,
+          "allocations": 0
+        },
+        {
+          "scenario": "vowel_rule_chain_in_10_prod",
+          "iterations": 200,
+          "p50_us": 3399.79,
+          "p95_us": 3489.67,
+          "p99_us": 3575.46,
+          "max_us": 16430.54,
+          "allocations": 0
+        },
+        {
+          "scenario": "ain_colon_chain_incremental_prod",
+          "iterations": 192,
+          "p50_us": 262.33,
+          "p95_us": 2060.12,
+          "p99_us": 61704.54,
+          "max_us": 62087.67,
+          "allocations": 0
+        },
+        {
+          "scenario": "ain_colon_chain_backspace_prod",
+          "iterations": 184,
+          "p50_us": 223.42,
+          "p95_us": 2090.88,
+          "p99_us": 60862.71,
+          "max_us": 62664.38,
+          "allocations": 0
+        },
+        {
+          "scenario": "long_backspace_prod",
+          "iterations": 493,
+          "p50_us": 947.21,
+          "p95_us": 2713.12,
+          "p99_us": 15606.46,
+          "max_us": 15905.17,
+          "allocations": 0
+        }
+      ],
+      "meta": {
+        "commit": "d74c893",
+        "date": "2026-05-12T16:46:21Z"
+      }
+    },
+    "windows": {
+      "meta": {
+        "commit": "windows-port-init",
+        "date": "2026-05-22T00:00:00Z",
+        "note": "Placeholder. Capture real numbers via `BurmeseBench --update` once the Windows shell is testable."
+      },
+      "scenarios": [
+        {
+          "scenario": "short",
+          "iterations": 0,
+          "p50_us": 0,
+          "p95_us": 0,
+          "p99_us": 0,
+          "max_us": 0,
+          "allocations": 0,
+          "placeholder": true
+        },
+        {
+          "scenario": "medium",
+          "iterations": 0,
+          "p50_us": 0,
+          "p95_us": 0,
+          "p99_us": 0,
+          "max_us": 0,
+          "allocations": 0,
+          "placeholder": true
+        },
+        {
+          "scenario": "long",
+          "iterations": 0,
+          "p50_us": 0,
+          "p95_us": 0,
+          "p99_us": 0,
+          "max_us": 0,
+          "allocations": 0,
+          "placeholder": true
+        },
+        {
+          "scenario": "incremental",
+          "iterations": 0,
+          "p50_us": 0,
+          "p95_us": 0,
+          "p99_us": 0,
+          "max_us": 0,
+          "allocations": 0,
+          "placeholder": true
+        },
+        {
+          "scenario": "garbage",
+          "iterations": 0,
+          "p50_us": 0,
+          "p95_us": 0,
+          "p99_us": 0,
+          "max_us": 0,
+          "allocations": 0,
+          "placeholder": true
+        },
+        {
+          "scenario": "garbage_incremental",
+          "iterations": 0,
+          "p50_us": 0,
+          "p95_us": 0,
+          "p99_us": 0,
+          "max_us": 0,
+          "allocations": 0,
+          "placeholder": true
+        },
+        {
+          "scenario": "repetition_t16",
+          "iterations": 0,
+          "p50_us": 0,
+          "p95_us": 0,
+          "p99_us": 0,
+          "max_us": 0,
+          "allocations": 0,
+          "placeholder": true
+        },
+        {
+          "scenario": "plus_chain_30",
+          "iterations": 0,
+          "p50_us": 0,
+          "p95_us": 0,
+          "p99_us": 0,
+          "max_us": 0,
+          "allocations": 0,
+          "placeholder": true
+        },
+        {
+          "scenario": "cluster_alias_j16",
+          "iterations": 0,
+          "p50_us": 0,
+          "p95_us": 0,
+          "p99_us": 0,
+          "max_us": 0,
+          "allocations": 0,
+          "placeholder": true
+        },
+        {
+          "scenario": "repetition_tha30",
+          "iterations": 0,
+          "p50_us": 0,
+          "p95_us": 0,
+          "p99_us": 0,
+          "max_us": 0,
+          "allocations": 0,
+          "placeholder": true
+        },
+        {
+          "scenario": "vowel_rule_chain_aing_8",
+          "iterations": 0,
+          "p50_us": 0,
+          "p95_us": 0,
+          "p99_us": 0,
+          "max_us": 0,
+          "allocations": 0,
+          "placeholder": true
+        },
+        {
+          "scenario": "vowel_rule_chain_aing_4",
+          "iterations": 0,
+          "p50_us": 0,
+          "p95_us": 0,
+          "p99_us": 0,
+          "max_us": 0,
+          "allocations": 0,
+          "placeholder": true
+        },
+        {
+          "scenario": "vowel_rule_chain_aing_2",
+          "iterations": 0,
+          "p50_us": 0,
+          "p95_us": 0,
+          "p99_us": 0,
+          "max_us": 0,
+          "allocations": 0,
+          "placeholder": true
+        },
+        {
+          "scenario": "vowel_rule_chain_aung_8",
+          "iterations": 0,
+          "p50_us": 0,
+          "p95_us": 0,
+          "p99_us": 0,
+          "max_us": 0,
+          "allocations": 0,
+          "placeholder": true
+        },
+        {
+          "scenario": "vowel_rule_chain_in_10",
+          "iterations": 0,
+          "p50_us": 0,
+          "p95_us": 0,
+          "p99_us": 0,
+          "max_us": 0,
+          "allocations": 0,
+          "placeholder": true
+        },
+        {
+          "scenario": "short_prod",
+          "iterations": 0,
+          "p50_us": 0,
+          "p95_us": 0,
+          "p99_us": 0,
+          "max_us": 0,
+          "allocations": 0,
+          "placeholder": true
+        },
+        {
+          "scenario": "medium_prod",
+          "iterations": 0,
+          "p50_us": 0,
+          "p95_us": 0,
+          "p99_us": 0,
+          "max_us": 0,
+          "allocations": 0,
+          "placeholder": true
+        },
+        {
+          "scenario": "long_prod",
+          "iterations": 0,
+          "p50_us": 0,
+          "p95_us": 0,
+          "p99_us": 0,
+          "max_us": 0,
+          "allocations": 0,
+          "placeholder": true
+        },
+        {
+          "scenario": "incremental_prod",
+          "iterations": 0,
+          "p50_us": 0,
+          "p95_us": 0,
+          "p99_us": 0,
+          "max_us": 0,
+          "allocations": 0,
+          "placeholder": true
+        },
+        {
+          "scenario": "garbage_incremental_prod",
+          "iterations": 0,
+          "p50_us": 0,
+          "p95_us": 0,
+          "p99_us": 0,
+          "max_us": 0,
+          "allocations": 0,
+          "placeholder": true
+        },
+        {
+          "scenario": "vowel_rule_chain_in_10_prod",
+          "iterations": 0,
+          "p50_us": 0,
+          "p95_us": 0,
+          "p99_us": 0,
+          "max_us": 0,
+          "allocations": 0,
+          "placeholder": true
+        },
+        {
+          "scenario": "ain_colon_chain_incremental_prod",
+          "iterations": 0,
+          "p50_us": 0,
+          "p95_us": 0,
+          "p99_us": 0,
+          "max_us": 0,
+          "allocations": 0,
+          "placeholder": true
+        },
+        {
+          "scenario": "ain_colon_chain_backspace_prod",
+          "iterations": 0,
+          "p50_us": 0,
+          "p95_us": 0,
+          "p99_us": 0,
+          "max_us": 0,
+          "allocations": 0,
+          "placeholder": true
+        },
+        {
+          "scenario": "long_backspace_prod",
+          "iterations": 0,
+          "p50_us": 0,
+          "p95_us": 0,
+          "p99_us": 0,
+          "max_us": 0,
+          "allocations": 0,
+          "placeholder": true
+        }
+      ]
     }
-  }
   }
 }

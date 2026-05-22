@@ -41,14 +41,16 @@ public enum BenchBaselineFormat {
     }
 
     /// Recognised platform key for the running host. Returns `"linux"`,
-    /// `"macos"`, or `"unknown"`. The `unknown` value is intentionally
-    /// not a fatal error — `--check` surfaces it as a missing-baseline
-    /// diagnostic rather than crashing the gate.
+    /// `"macos"`, `"windows"`, or `"unknown"`. The `unknown` value is
+    /// intentionally not a fatal error — `--check` surfaces it as a
+    /// missing-baseline diagnostic rather than crashing the gate.
     public static var currentPlatformKey: String {
         #if os(Linux)
         return "linux"
         #elseif os(macOS)
         return "macos"
+        #elseif os(Windows)
+        return "windows"
         #else
         return "unknown"
         #endif

@@ -258,9 +258,11 @@ let benchHistoryTempDir: URL = {
     let dir = FileManager.default.temporaryDirectory
         .appendingPathComponent("BurmeseBench-\(UUID().uuidString)", isDirectory: true)
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    #if canImport(Darwin) || canImport(Glibc)
     atexit_b {
         try? FileManager.default.removeItem(at: dir)
     }
+    #endif
     return dir
 }()
 

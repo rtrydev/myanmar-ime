@@ -11,8 +11,8 @@ wrong turns.
 missing, stop and ask the user to install the system package. Do not
 install build tools with `pip --user`, unpack `-dev` packages into
 `/tmp`, vendor headers, symlink runtime libraries, or shadow system
-tools. This applies on Linux and macOS. Give the exact install command
-and retry after the user runs it.
+tools. This applies on Linux, macOS, and Windows. Give the exact
+install command and retry after the user runs it.
 
 Examples:
 
@@ -20,6 +20,19 @@ Examples:
 sudo apt install libsqlite3-dev pkg-config
 sudo apt install libibus-1.0-dev libglib2.0-dev libjson-glib-dev meson ninja-build
 swiftly install 6.3.1
+```
+
+Windows equivalents (PowerShell):
+
+```powershell
+# Visual Studio 2022 with the "Desktop development with C++" workload
+# (cl, link, ATL, Windows 11 SDK 26100). Use the VS Installer GUI.
+# Then install Swift 6.3+ from https://www.swift.org/install/windows/.
+# SQLite via vcpkg manifest (repo ships vcpkg.json):
+& "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\vcpkg\vcpkg.exe" `
+    install --triplet x64-windows
+# Installer tooling (optional, only for the planned WiX MSI):
+dotnet tool install --global wix
 ```
 
 **Generated data is not edited by hand.** The TSV lexicon, SQLite
@@ -35,7 +48,9 @@ swift build
 swift run TestRunner
 ```
 
-Current local status: 1636/1636 cases and 8959/8959 assertions pass.
+Current local status: 1636/1636 cases and 8959/8959 assertions pass on
+macOS/Linux; Windows reports 1647/1647 and 8998/8998 (extra cases from
+the `os(Windows)` recognition branches added during the Phase 1 port).
 `swift test` is secondary; plain SPM toolchains may not provide XCTest.
 
 ## Layout
@@ -273,6 +288,54 @@ and isolated temp paths.
 `FUZZ_BUDGET_MS` controls the fuzz suite wall-clock budget, default
 1000 ms.
 
+#### Windows core build
+
+`swift build` on Windows requires the Visual Studio Developer
+environment plus vcpkg's `sqlite3` paths. Always run from a shell that
+loads them — agents that skip this step waste a round trip when the
+manifest compile fails to find `msvcrt.lib`:
+
+```powershell
+Import-Module 'C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\Microsoft.VisualStudio.DevShell.dll'
+Enter-VsDevShell -VsInstallPath 'C:\Program Files\Microsoft Visual Studio\2022\Community' `
+                 -SkipAutomaticLocation -DevCmdArguments '-arch=x64'
+
+$vcpkg = "$env:USERPROFILE\repos\myanmar-ime\vcpkg_installed\x64-windows"
+$env:INCLUDE = "$vcpkg\include;$env:INCLUDE"
+$env:LIB     = "$vcpkg\lib;$env:LIB"
+$env:PATH    = "$vcpkg\bin;$env:PATH"   # sqlite3.dll for runtime
+
+cd Packages\BurmeseIMECore
+swift build
+swift run TestRunner
+```
+
+Windows SQLite is wired in via `Sources/CSQLite/{module.modulemap,
+shim.h}` and a `.target(name: "CSQLite", condition: .when(platforms:
+[.linux, .windows]))` dep in `Package.swift`. New SQLite-using targets
+must keep the dual import guard
+(`#if canImport(SQLite3) // #elseif canImport(CSQLite)`) and the
+windowed condition; the systemLibrary itself has no pkg-config on
+Windows, so the `INCLUDE` / `LIB` env vars are how clang and lld-link
+find `sqlite3.h` and `sqlite3.lib`.
+
+Two Windows-specific quirks to know before debugging:
+
+- **SwiftPM incremental rebuild misses some edits.** On Windows, editing
+  a `.swift` file occasionally doesn't bump the mtime SwiftPM's
+  invalidation cache reads, so `swift build` reports "no work to do"
+  even after a real source change. If a fix appears not to take, force
+  it with `(Get-Item path\to\file.swift).LastWriteTime = Get-Date`
+  before the next build.
+- **`String.components(separatedBy: "\n")` does not split CRLF.** Swift
+  treats CRLF as a single grapheme cluster, so on Windows checkouts
+  (git autocrlf default) splitting on `"\n"` returns the whole file as
+  one element and silently drops every TSV/text-format entry. Use
+  `content.enumerateLines { line, _ in ... }` for any line-oriented
+  parsing — it handles CR / LF / CRLF / U+2028 uniformly. The
+  `NumberMeasureWords.tsv` loader was caught by this during the Phase
+  1 port; any new line-oriented loader should follow the same pattern.
+
 ### Benchmarks
 
 ```bash
@@ -432,6 +495,136 @@ Linux settings mirror `IMESettings.Key` through GSettings schema
 `com.myangler.inputmethod.burmese`. `cluster-aliases-enabled` rebuilds
 the Swift engine because `SyllableParser` bakes that flag at init time.
 
+### Windows
+
+There is no Windows native shell yet. Only the shared engine builds
+and tests cleanly under `swift build` / `swift run TestRunner` (see
+the "Windows core build" subsection above for the required Developer-
+Shell + vcpkg setup). What follows is the planned architecture for the
+text service, candidate window, Preferences app, and installer — a
+contributor picking this up should follow the Linux template closely.
+
+**Two-DLL layout, mirrors Linux.** Under a future `native/windows/`:
+
+- `swift-shim/` — a Swift dynamic library that re-exports `BurmeseIMECore`
+  through the same C ABI declared in `native/linux/ibus-engine/src/ffi.h`.
+  The `@_cdecl` source in `native/linux/swift-shim/Sources/BurmeseIMEFFI/`
+  is platform-agnostic Foundation code and ports verbatim. Output is
+  `BurmeseIMEFFI.dll` + `BurmeseIMEFFI.lib`. Swift on Windows does not
+  support `-static-stdlib` for distribution the way Linux does, so the
+  installer must redistribute the Swift runtime DLLs from
+  `%LOCALAPPDATA%\Programs\Swift\Runtimes\<version>\` next to the TIP.
+- `tsf-engine/` — a non-Swift COM DLL (CMake + Ninja + MSVC C++)
+  implementing the text service. Loads `BurmeseIMEFFI.dll` via
+  `LoadLibraryW` + `GetProcAddress` (or the import lib) and calls the
+  same FFI entry points the IBus engine uses. Reusing `ffi.h` across
+  Linux and Windows is intentional — the JSON snapshot contract is the
+  integration boundary.
+
+**Use TSF, not IMM32.** New IMEs since Windows XP/Vista must be Text
+Services Framework text services. IMM32 only matters for legacy app
+compatibility (TSF can opt in to a shim). A TSF text service is an
+**in-process COM DLL** loaded into every text-receiving process,
+including browsers, Office, UWP apps, the lock screen, and protected
+processes. Treat it like any other widely-loaded DLL: no process-
+globals, no elevated I/O, COM apartment is STA, async work must live
+on a thread the TIP creates inside each host.
+
+**Interface map — TSF to existing concepts.** Implement these
+primaries; mappings to what already exists on Linux/macOS:
+
+| TSF interface | Maps to |
+|---|---|
+| `ITfTextInputProcessor[Ex]::Activate` / `Deactivate` | IMK `activateServer` / `deactivateServer`; IBus `enable` / `disable` |
+| `ITfThreadMgrEventSink::OnSetFocus`, `OnInitDocumentMgr` | IBus `focus_in` / `focus_out` |
+| `ITfKeyEventSink::OnTestKeyDown` / `OnKeyDown` | IMK `handle(_:client:)`; IBus `process_key_event` |
+| `ITfComposition` + `ITfRange` | IMK `setMarkedText` + `insertText`; IBus `update_preedit_text` + `commit_text` |
+| `ITfDisplayAttributeProvider` | Inline preedit underline / highlight |
+| `ITfInputProcessorProfiles::Register*` | macOS `TISRegisterInputSource`; IBus component XML |
+| `ITfLangBarItemButton` (optional) | macOS menubar Compose/Roman toggle; IBus `IBusProperty` |
+
+**Worker-thread primitives — Linux to Win32.** The async-engine
+coordination shape is identical (see `engine.c` for the source of
+truth); only the primitives change:
+
+| Linux (`engine.c`) | Win32 equivalent |
+|---|---|
+| `g_mutex_lock` | `SRWLOCK` (or `CRITICAL_SECTION`) |
+| `g_cond_wait` / `_signal` / `_broadcast` | `SleepConditionVariableSRW` / `WakeConditionVariable[All]` |
+| `g_thread_new` | `CreateThread` (or `std::jthread`) |
+| `g_main_context_invoke` | `PostMessageW` to a hidden window owned by the TIP, processed in its message pump |
+| `g_object_ref` / `_unref` for ref-resurrection guard | `IUnknown::AddRef` / `Release` |
+| `drain_and_wait_idle` | Identical algorithm — cv on `in_flight` |
+
+**Invariants are not negotiable — they are the same as IBus and IMK.**
+Every rule already documented for the macOS controller and IBus engine
+above applies verbatim to the TIP: synchronous raw preedit on the
+key-event thread, coalesced async `burmese_engine_update`, stale-
+buffer guard on result delivery, drain-before-commit, null-handle-on-
+disable under the worker mutex, cluster-aliases reconcile rebuilds
+the engine, last-3-or-4 committed-context ring for the punctuation
+mapper / LM, Compose/Roman toggle bypasses the engine entirely.
+Re-implementing them on top of Win32 primitives is the work — the
+*shape* is fixed by what the engine assumes about its callers.
+
+**Candidate window.** TSF does not provide one. The TIP owns a
+borderless `WS_POPUP` top-level window, layered for transparency,
+positioned via `ITfContextView::GetTextExt` (returns the screen
+rectangle of the composition range — equivalent to the cursor rect
+IMK hands `IMKCandidates`). Render with Direct2D + DirectWrite; the
+shipped `Myanmar Text` font (Windows 8+) handles shaping. Keyboard
+navigation (Down/Up/PageUp/PageDown/Tab/Shift-Tab) is handled inside
+`OnKeyDown` — mirror the macOS keymap.
+
+**Settings.** Store in `HKCU\Software\Myangler\BurmeseIME`. Watch with
+`RegNotifyChangeKeyValue` on a worker thread; reapply via the same
+per-key FFI setters Linux drives from GSettings change handlers. Same
+schema and defaults as Linux/macOS (candidate page size, commit on
+space, cluster aliases, LM prune margin, anchor commit threshold,
+Burmese punctuation, number measure words, learning). The cluster-
+aliases flip must trigger a `burmese_engine_reconcile_settings` —
+`SyllableParser` bakes that flag at init time.
+
+**Paths and data layout.**
+
+| File | Location |
+|---|---|
+| `BurmeseLexicon.sqlite` | `%ProgramFiles%\Myangler\Data\BurmeseLexicon.sqlite` |
+| `BurmeseLM.bin` | `%ProgramFiles%\Myangler\Data\BurmeseLM.bin` |
+| `BurmeseIMEFFI.dll` + Swift runtime DLLs | `%ProgramFiles%\Myangler\` |
+| `UserHistory.sqlite` | `%LOCALAPPDATA%\Myangler\UserHistory.sqlite` |
+
+The TIP discovers `Data\` relative to its own module path via
+`GetModuleFileNameW(hSelf)`. `UserHistory.sqlite` lives under
+`SHGetKnownFolderPath(FOLDERID_LocalAppData)` so the TIP can write it
+under Low-Integrity / AppContainer hosts (UWP, sandboxed Office).
+
+**Preferences app.** Recommended stack is WinUI 3 (Windows App SDK) +
+C# for the modern look and MSIX-friendliness. WPF is a viable fallback
+if WinUI 3 friction is felt. Tabs mirror the macOS/Linux split: Setup
+· Preferences · History · Convert · Diagnostics. The History tab calls
+into `BurmeseIMEFFI.dll` via P/Invoke for reverse-romanize and reads
+`UserHistory.sqlite` via `Microsoft.Data.Sqlite`.
+
+**Installer.** WiX (`dotnet tool install --global wix`) builds a
+per-machine MSI that:
+
+1. Installs `MyanglerTip.dll`, `BurmeseIMEFFI.dll`, and the Swift
+   runtime redistributable DLLs under `%ProgramFiles%\Myangler\`.
+2. Registers the COM CLSID + ProgID via the WiX `RegistryKey` table.
+3. Calls a small custom-action helper that invokes
+   `ITfInputProcessorProfileMgr::RegisterProfile` (on uninstall,
+   `UnregisterProfile`).
+4. Drops `BurmeseLexicon.sqlite` + `BurmeseLM.bin` under
+   `%ProgramFiles%\Myangler\Data\`.
+5. Leaves `%LOCALAPPDATA%\Myangler\UserHistory.sqlite` intact on
+   uninstall by design (matches Linux `apt purge` behaviour).
+
+Unsigned MSI is fine for solo dev — SmartScreen warns once on
+"Run anyway". A real EV cert or Microsoft Store MSIX is the path to
+warning-free public distribution; not required for `swift build`,
+`swift run TestRunner`, or a local dev install.
+
 ## Working Patterns
 
 - Core parser or engine change: edit under
@@ -448,6 +641,13 @@ the Swift engine because `SyllableParser` bakes that flag at init time.
 - Native Linux keystroke change: edit `native/linux/ibus-engine/src/`,
   run meson tests where relevant, dev-install, restart IBus, and type in
   a real client such as `gedit`.
+- Windows core change: load the VS Developer Shell, export the vcpkg
+  `INCLUDE`/`LIB`/`PATH` paths, then `swift build` /
+  `swift run TestRunner` from `Packages/BurmeseIMECore/`. New
+  line-oriented text loaders must use `String.enumerateLines` rather
+  than splitting on `"\n"` so CRLF-checkout users aren't silently
+  broken. Native-shell work (TSF DLL, candidate window, MSI) follows
+  the architecture in the "Native Shells → Windows" section below.
 - Preferences change: macOS uses `IMESettingsViewModel` +
   `UserDefaults(suiteName:)`; Linux uses GSettings bindings in
   `native/linux/preferences/` and FFI setters.

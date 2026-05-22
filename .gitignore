@@ -32,3 +32,6 @@ venv
 
 tasks
 pipeline-run.log
+
+# vcpkg manifest-mode install root (Windows native shell deps).
+vcpkg_installed/
