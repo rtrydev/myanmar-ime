@@ -139,19 +139,44 @@ HRESULT register_profile_and_category() noexcept {
                           IID_PPV_ARGS(categoryMgr.put()));
     if (FAILED(hr)) return hr;
 
-    hr = categoryMgr->RegisterCategory(
-        CLSID_TextService,
-        GUID_TFCAT_TIP_KEYBOARD,
-        CLSID_TextService);
-    if (FAILED(hr)) return hr;
-
-    // Display-attribute provider category. Without this TSF won't
-    // call our ITfDisplayAttributeProvider::EnumDisplayAttributeInfo
-    // and the preedit underline will render as plain text.
-    return categoryMgr->RegisterCategory(
-        CLSID_TextService,
-        GUID_TFCAT_DISPLAYATTRIBUTEPROVIDER,
-        CLSID_TextService);
+    // Every category the TIP belongs to. Order doesn't matter; any
+    // failure aborts (we'd rather show the user a clean error than
+    // a half-registered TIP).
+    //
+    // Why each one:
+    //   TIP_KEYBOARD                  base "this CLSID is a TIP"
+    //   DISPLAYATTRIBUTEPROVIDER      so TSF asks us for the preedit
+    //                                 underline attribute
+    //   TIPCAP_IMMERSIVESUPPORT       *required* for modern Windows:
+    //                                 without this declaration TSF
+    //                                 activates the TIP briefly then
+    //                                 auto-deactivates it in favour
+    //                                 of an immersive-capable one,
+    //                                 because Win10+ assumes a TIP
+    //                                 that hasn't opted in cannot
+    //                                 host inside UWP / immersive
+    //                                 contexts safely.
+    //   TIPCAP_SYSTRAYSUPPORT         we have a langbar item
+    //                                 (Compose/Roman toggle) that
+    //                                 surfaces in the system tray
+    //                                 IME indicator menu.
+    //   TIPCAP_UIELEMENTENABLED       we own a custom UI element
+    //                                 (the candidate window) the OS
+    //                                 should be aware of for
+    //                                 windowing / accessibility.
+    const GUID* const categories[] = {
+        &GUID_TFCAT_TIP_KEYBOARD,
+        &GUID_TFCAT_DISPLAYATTRIBUTEPROVIDER,
+        &GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT,
+        &GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT,
+        &GUID_TFCAT_TIPCAP_UIELEMENTENABLED,
+    };
+    for (const GUID* cat : categories) {
+        hr = categoryMgr->RegisterCategory(
+            CLSID_TextService, *cat, CLSID_TextService);
+        if (FAILED(hr)) return hr;
+    }
+    return S_OK;
 }
 
 HRESULT unregister_profile_and_category() noexcept {
@@ -170,14 +195,17 @@ HRESULT unregister_profile_and_category() noexcept {
     if (SUCCEEDED(CoCreateInstance(
             CLSID_TF_CategoryMgr, nullptr,
             CLSCTX_INPROC_SERVER, IID_PPV_ARGS(categoryMgr.put())))) {
-        categoryMgr->UnregisterCategory(
-            CLSID_TextService,
-            GUID_TFCAT_TIP_KEYBOARD,
-            CLSID_TextService);
-        categoryMgr->UnregisterCategory(
-            CLSID_TextService,
-            GUID_TFCAT_DISPLAYATTRIBUTEPROVIDER,
-            CLSID_TextService);
+        const GUID* const categories[] = {
+            &GUID_TFCAT_TIP_KEYBOARD,
+            &GUID_TFCAT_DISPLAYATTRIBUTEPROVIDER,
+            &GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT,
+            &GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT,
+            &GUID_TFCAT_TIPCAP_UIELEMENTENABLED,
+        };
+        for (const GUID* cat : categories) {
+            categoryMgr->UnregisterCategory(
+                CLSID_TextService, *cat, CLSID_TextService);
+        }
     }
     return S_OK;
 }
