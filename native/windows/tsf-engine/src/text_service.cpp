@@ -170,6 +170,8 @@ HRESULT STDMETHODCALLTYPE TextService::ActivateEx(ITfThreadMgr* mgr, TfClientId 
         if (!worker_.start(&ffi_.table(), lex, lm, hist,
                            messageWindow_, /*delivery_user=*/0)) {
             dbg(L"engine_worker.start failed");
+        } else if (!settings_.start(&worker_)) {
+            dbg(L"settings.start failed; running with defaults");
         }
     }
 
@@ -193,6 +195,9 @@ HRESULT STDMETHODCALLTYPE TextService::Deactivate() noexcept {
     endCompositionQuietly();
     candidateWindow_.destroy();
     removeSinks();
+    // Stop settings BEFORE the engine worker so the watcher thread
+    // cannot push setting changes through a half-torn-down handle.
+    settings_.stop();
     worker_.stop();
     destroyMessageWindow();
     currentContext_.reset();

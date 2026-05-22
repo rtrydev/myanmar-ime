@@ -1,5 +1,7 @@
 #include "engine_worker.h"
 
+#include "settings.h"
+
 #include <cstring>
 #include <utility>
 
@@ -144,6 +146,19 @@ void EngineWorker::sync_update_buffer(const std::string& buffer) noexcept {
     if (!h || !ffi_) return;
     char* raw = ffi_->engine_update(h, buffer.c_str());
     if (raw) ffi_->engine_string_free(raw);
+}
+
+void EngineWorker::apply_settings(const SettingsValues& v) noexcept {
+    burmese_engine_t* h = handle_.load(std::memory_order_acquire);
+    if (!h || !ffi_) return;
+    ffi_->engine_set_candidate_page_size       (h, v.candidate_page_size);
+    ffi_->engine_set_commit_on_space           (h, v.commit_on_space ? 1 : 0);
+    ffi_->engine_set_cluster_aliases_enabled   (h, v.cluster_aliases_enabled ? 1 : 0);
+    ffi_->engine_set_lm_prune_margin           (h, v.lm_prune_margin);
+    ffi_->engine_set_anchor_commit_threshold   (h, v.anchor_commit_threshold);
+    ffi_->engine_set_burmese_punctuation_enabled(h, v.burmese_punctuation ? 1 : 0);
+    ffi_->engine_set_number_measure_words_enabled(h, v.number_measure_words ? 1 : 0);
+    ffi_->engine_set_learning_enabled          (h, v.learning_enabled ? 1 : 0);
 }
 
 std::unique_ptr<EngineSnapshot> EngineWorker::take_pending_result() noexcept {

@@ -33,6 +33,7 @@
 #include "com_helpers.h"
 #include "engine_worker.h"
 #include "ffi_loader.h"
+#include "settings.h"
 #include "snapshot.h"
 
 namespace burmese {
@@ -161,6 +162,7 @@ private:
 
     FfiLibrary              ffi_;
     EngineWorker            worker_;
+    Settings                settings_;
 
     // Composing buffer: lowercased ASCII the user has typed but not
     // yet committed. Owned by the TIP thread. Drives the preedit

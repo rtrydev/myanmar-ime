@@ -49,6 +49,8 @@
 
 namespace burmese {
 
+struct SettingsValues;
+
 // Snapshot delivered back to the TIP thread for a finished update.
 // `json` is the raw JSON string the FFI produced (already malloc-
 // duplicated locally, so the FFI's string buffer is freed inside the
@@ -121,6 +123,13 @@ public:
     // Mirrors engine.c's `if (!engine_caught_up) burmese_engine_update`
     // branch in commit_selected().
     void        sync_update_buffer(const std::string& buffer) noexcept;
+
+    // Apply every per-key setting in `v` to the engine via the FFI
+    // setters. Safe to call from any thread; the FFI is internally
+    // locked. The cluster-aliases setter in the Swift shim rebuilds
+    // the parser when the flag changes, so callers don't need to
+    // issue a separate reconcile.
+    void        apply_settings(const SettingsValues& v) noexcept;
 
     // True iff start() succeeded and stop() has not run.
     bool running() const noexcept { return handle_.load(std::memory_order_acquire) != nullptr; }
