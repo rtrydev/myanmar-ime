@@ -1,5 +1,7 @@
 #include "ffi_loader.h"
 
+#include "log_file.h"
+
 #include <string>
 
 namespace burmese {
@@ -100,29 +102,48 @@ bool FfiLibrary::load(HMODULE selfModule) noexcept {
 
     constexpr wchar_t kBaseName[] = L"BurmeseIMEFFI.dll";
 
+    log_line(L"FfiLibrary::load start");
+
     // 1) explicit override via env var (dev convenience).
     std::wstring envPath = env(L"MYANGLER_FFI_DLL");
+    if (!envPath.empty()) log_line(L"  env path candidate: %s", envPath.c_str());
     HMODULE mod = try_load(envPath);
+    if (envPath.size() && !mod) {
+        log_line(L"  env path load failed gle=%u", GetLastError());
+    }
 
     // 2) sibling of the TIP DLL (production install layout).
     if (!mod) {
         std::wstring dir = module_directory(selfModule);
         if (!dir.empty()) {
-            mod = try_load(dir + kBaseName);
+            std::wstring sibling = dir + kBaseName;
+            log_line(L"  sibling candidate: %s", sibling.c_str());
+            mod = try_load(sibling);
+            if (!mod) {
+                log_line(L"  sibling load failed gle=%u", GetLastError());
+            }
+        } else {
+            log_line(L"  module_directory returned empty");
         }
     }
 
     // 3) standard search path.
     if (!mod) {
-        mod = LoadLibraryW(kBaseName);
+        log_line(L"  trying default search path: %s", kBaseName);
+        mod = LoadLibraryExW(kBaseName, nullptr, 0);
+        if (!mod) {
+            log_line(L"  default search load failed gle=%u", GetLastError());
+        }
     }
 
     if (!mod) {
         error_ = L"LoadLibraryW(BurmeseIMEFFI.dll) failed (GetLastError=";
         error_ += std::to_wstring(GetLastError());
         error_ += L")";
+        log_line(L"FfiLibrary::load FAILED: %s", error_.c_str());
         return false;
     }
+    log_line(L"  module loaded ok at %p", mod);
 
     module_ = mod;
 
@@ -154,9 +175,11 @@ bool FfiLibrary::load(HMODULE selfModule) noexcept {
     ok &= resolve(mod, "burmese_engine_string_free",                    table_.engine_string_free,                    error_);
 
     if (!ok) {
+        log_line(L"FfiLibrary::load symbol resolution failed: %s", error_.c_str());
         unload();
         return false;
     }
+    log_line(L"FfiLibrary::load ok — all 22 symbols resolved");
     return true;
 }
 

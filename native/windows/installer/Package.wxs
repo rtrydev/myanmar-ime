@@ -36,7 +36,7 @@
   <Package
     Name="Myangler Burmese IME"
     Manufacturer="Myangler"
-    Version="0.1.1"
+    Version="0.1.2"
     UpgradeCode="B8754B45-25C4-4C47-904B-5C80897E9446"
     Scope="perMachine"
     Compressed="yes">
@@ -111,18 +111,39 @@
     </ComponentGroup>
 
     <!--
-      Preferences app. .NET 9 self-contained + PublishSingleFile
-      embeds every managed assembly AND every native sidecar
-      (D3DCompiler, wpfgfx, PresentationNative, e_sqlite3, ...) into
-      the single exe, so we only ship that one file plus the .pdb
-      gets dropped on the floor. The exe needs an explicit File Id
-      so the Start Menu shortcut below can reference it.
+      Preferences app. .NET 9 self-contained (multi-file) leaves
+      the exe small (~150 KB), the managed assemblies as loose
+      .dll files, the .NET 9 runtime DLLs as loose files, and the
+      WPF native sidecars (wpfgfx_cor3, PresentationNative_cor3,
+      PenImc_cor3, vcruntime140_cor3, D3DCompiler_47_cor3,
+      e_sqlite3) also as loose files. Total ~140-ish files.
+      We ship the whole tree.
+
+      Why not single-file? See the comment in build.ps1 — WPF on
+      .NET 9 doesn't reliably extract the native sidecars on
+      first launch and crashes during window-subsystem init
+      before our OnStartup-time logger runs.
+
+      The exe needs an explicit File Id so the Start Menu shortcut
+      below can reference it. Everything else is harvested by the
+      Files glob and gets auto-generated IDs.
     -->
     <Component Id="PreferencesExe" Directory="INSTALLFOLDER">
       <File Id="BurmeseIMEPreferences.exe"
             Source="build\staging\preferences\BurmeseIMEPreferences.exe"
             KeyPath="yes" />
     </Component>
+    <ComponentGroup Id="PreferencesPayload" Directory="INSTALLFOLDER">
+      <!--
+        Recursive glob: every file under staging\preferences\,
+        skipping .pdb (debug symbols, not needed at runtime) and
+        the exe itself (already declared above as PreferencesExe).
+      -->
+      <Files Include="build\staging\preferences\**">
+        <Exclude Files="build\staging\preferences\BurmeseIMEPreferences.exe" />
+        <Exclude Files="build\staging\preferences\*.pdb" />
+      </Files>
+    </ComponentGroup>
 
     <!--
       Start Menu shortcut. KeyPath via the RegistryValue means
@@ -145,6 +166,7 @@
     <Feature Id="Main" Title="Myangler Burmese IME" Level="1">
       <ComponentRef Id="RegisterProfileExe" />
       <ComponentRef Id="PreferencesExe" />
+      <ComponentGroupRef Id="PreferencesPayload" />
       <ComponentRef Id="StartMenuShortcut" />
       <ComponentGroupRef Id="RootFiles" />
       <ComponentGroupRef Id="DataFiles" />

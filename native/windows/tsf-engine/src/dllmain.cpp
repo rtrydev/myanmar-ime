@@ -9,6 +9,7 @@
 
 #include "class_factory.h"
 #include "guids.h"
+#include "log_file.h"
 
 namespace burmese {
 
@@ -49,12 +50,19 @@ extern "C" BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
             wchar_t buf[MAX_PATH] = {0};
             DWORD n = GetModuleFileNameW(module, buf, MAX_PATH);
             if (n > 0 && n < MAX_PATH) {
+                burmese::log_line(L"DLL_PROCESS_ATTACH module=%s pid=%u", buf, GetCurrentProcessId());
                 wchar_t* slash = wcsrchr(buf, L'\\');
                 if (slash) {
                     *slash = L'\0';
                     SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
-                    AddDllDirectory(buf);
+                    if (!AddDllDirectory(buf)) {
+                        burmese::log_line(L"  AddDllDirectory(%s) failed gle=%u",
+                                          buf, GetLastError());
+                    }
                 }
+            } else {
+                burmese::log_line(L"DLL_PROCESS_ATTACH GetModuleFileNameW failed gle=%u",
+                                  GetLastError());
             }
         }
         break;
@@ -70,15 +78,20 @@ extern "C" BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
 }
 
 extern "C" HRESULT __stdcall DllGetClassObject(REFCLSID clsid, REFIID iid, void** ppv) {
+    burmese::log_line(L"DllGetClassObject pid=%u", GetCurrentProcessId());
     if (!ppv) return E_POINTER;
     *ppv = nullptr;
-    if (clsid != burmese::CLSID_TextService) return CLASS_E_CLASSNOTAVAILABLE;
+    if (clsid != burmese::CLSID_TextService) {
+        burmese::log_line(L"  CLSID mismatch");
+        return CLASS_E_CLASSNOTAVAILABLE;
+    }
 
     auto* factory = new (std::nothrow) burmese::TextServiceFactory();
     if (!factory) return E_OUTOFMEMORY;
 
     const HRESULT hr = factory->QueryInterface(iid, ppv);
     factory->Release();
+    burmese::log_line(L"  QueryInterface hr=0x%08X", static_cast<unsigned>(hr));
     return hr;
 }
 
@@ -87,28 +100,25 @@ extern "C" HRESULT __stdcall DllCanUnloadNow() {
 }
 
 extern "C" HRESULT __stdcall DllRegisterServer() {
-    // Order matters: COM in-proc must succeed before the TSF profile
-    // calls below — RegisterProfile / RegisterCategory CoCreate the
-    // profile-mgr and category-mgr COM objects, which expect a
-    // resolvable CLSID for any class they're about to register.
+    burmese::log_line(L"DllRegisterServer pid=%u", GetCurrentProcessId());
     HRESULT hr = burmese::register_inproc_server();
-    if (FAILED(hr)) return hr;
+    if (FAILED(hr)) {
+        burmese::log_line(L"  register_inproc_server failed 0x%08X", static_cast<unsigned>(hr));
+        return hr;
+    }
     hr = burmese::register_profile_and_category();
     if (FAILED(hr)) {
-        // Roll back the in-proc reg so we don't leave a half-
-        // registered CLSID that COM can resolve to our DLL but TSF
-        // doesn't know about. Best-effort; the user can re-run.
+        burmese::log_line(L"  register_profile_and_category failed 0x%08X — rolling back inproc",
+                          static_cast<unsigned>(hr));
         burmese::unregister_inproc_server();
         return hr;
     }
+    burmese::log_line(L"  ok");
     return S_OK;
 }
 
 extern "C" HRESULT __stdcall DllUnregisterServer() {
-    // Unregister in reverse order. Both calls are best-effort; we
-    // return the first hard failure but always attempt both passes
-    // so a partial state from a failed registration can still be
-    // cleaned up by re-running with the uninstall verb.
+    burmese::log_line(L"DllUnregisterServer pid=%u", GetCurrentProcessId());
     burmese::unregister_profile_and_category();
     return burmese::unregister_inproc_server();
 }

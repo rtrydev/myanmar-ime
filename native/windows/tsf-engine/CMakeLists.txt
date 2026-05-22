@@ -61,6 +61,7 @@ add_compile_options(
 )
 
 set(BurmeseIMETIP_SOURCES
+    src/log_file.cpp
     src/guids.cpp
     src/ffi_loader.cpp
     src/keymap.cpp

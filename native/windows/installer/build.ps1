@@ -76,10 +76,20 @@ $registerExe = Join-Path $repo 'native\windows\tsf-engine\build\register_profile
 Write-Host '==> dotnet publish BurmeseIMEPreferences (self-contained)'
 Push-Location (Join-Path $repo 'native\windows\preferences')
 try {
+    # NOTE: do NOT use /p:PublishSingleFile=true here. Single-file
+    # publish for WPF on .NET 9 doesn't reliably extract the WPF
+    # native sidecars (wpfgfx_cor3, PresentationNative_cor3,
+    # PenImc_cor3, vcruntime140_cor3, D3DCompiler_47_cor3,
+    # e_sqlite3) on first launch — the app crashes deep inside
+    # HwndSubclass with a DllNotFoundException before our
+    # OnStartup-time logger can record anything. Multi-file
+    # publish drops every sidecar as a loose file next to the exe,
+    # which the OS DLL loader picks up via the normal search path
+    # and avoids the runtime-extraction failure mode entirely.
+    # The MSI ships the whole publish directory.
     Invoke-Native {
         dotnet publish -c Release -r win-x64 `
-            /p:SelfContained=true `
-            /p:PublishSingleFile=true
+            /p:SelfContained=true
     } 'dotnet publish'
 } finally { Pop-Location }
 $prefsPublishDir = Join-Path $repo 'native\windows\preferences\bin\Release\net9.0-windows\win-x64\publish'
@@ -130,7 +140,15 @@ Write-Host '==> wix build'
 $msi = Join-Path $out 'Myangler-Burmese-IME.msi'
 Push-Location $here
 try {
-    Invoke-Native { wix build Package.wxs -out $msi } 'wix build'
+    # -arch x64 marks the MSI itself as 64-bit so msiexec runs the
+    # install in the 64-bit context. Without it, the MSI is 32-bit
+    # by default, msiexec runs under WoW64, and even paths declared
+    # under ProgramFiles64Folder get silently redirected to
+    # C:\Program Files (x86)\Myangler\. Files install correctly to
+    # that path but the install layout is unconventional and some
+    # COM / TSF surfaces don't expect a 64-bit TIP DLL to live
+    # under the (x86) tree.
+    Invoke-Native { wix build -arch x64 Package.wxs -out $msi } 'wix build'
 } finally { Pop-Location }
 
 if (Test-Path $msi) {

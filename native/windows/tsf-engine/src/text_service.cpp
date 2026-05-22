@@ -9,6 +9,7 @@
 
 #include "edit_session.h"
 #include "guids.h"
+#include "log_file.h"
 
 namespace burmese {
 
@@ -35,11 +36,15 @@ void ensureMessageWindowClass(HMODULE module) noexcept {
 }
 
 void dbg(const wchar_t* fmt, ...) noexcept {
+    // Route every dbg() in this TU through the file logger so a
+    // user reporting "doesn't work" produces a trace we can read
+    // without DbgView attached.
     wchar_t buf[1024];
     va_list args;
     va_start(args, fmt);
     _vsnwprintf_s(buf, _TRUNCATE, fmt, args);
     va_end(args);
+    log_line(L"%s", buf);
     OutputDebugStringW(L"[BurmeseIMETIP] ");
     OutputDebugStringW(buf);
     OutputDebugStringW(L"\n");

@@ -36,12 +36,14 @@
 #include <msctf.h>
 
 #include "edit_session.h"
+#include "log_file.h"
 
 namespace burmese {
 
 namespace {
 
 void dbg_composition(const wchar_t* what) noexcept {
+    log_line(L"composition: %s", what);
     OutputDebugStringW(L"[BurmeseIMETIP composition] ");
     OutputDebugStringW(what);
     OutputDebugStringW(L"\n");
