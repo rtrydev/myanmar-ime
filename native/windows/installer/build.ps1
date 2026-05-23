@@ -155,7 +155,15 @@ try {
     # that path but the install layout is unconventional and some
     # COM / TSF surfaces don't expect a 64-bit TIP DLL to live
     # under the (x86) tree.
-    Invoke-Native { wix build -arch x64 Package.wxs -out $msi } 'wix build'
+    # -ext WixToolset.UI.wixext brings in the predefined dialog sets
+    # (WixUI_Minimal etc.) referenced by Package.wxs via the
+    # xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui" namespace.
+    # Without this, wix errors with "ui:WixUI unrecognised element".
+    Invoke-Native {
+        wix build -arch x64 `
+            -ext WixToolset.UI.wixext `
+            Package.wxs -out $msi
+    } 'wix build'
 } finally { Pop-Location }
 
 if (Test-Path $msi) {

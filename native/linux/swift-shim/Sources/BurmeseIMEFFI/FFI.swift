@@ -364,7 +364,11 @@ public func burmese_engine_string_free(_ ptr: UnsafeMutablePointer<CChar>?) {
 
 // MARK: - Helpers
 
-private let BurmeseIMEFFIVersion = "0.1.0"
+// Tracks the MSI / package version (see native/windows/installer/
+// Package.wxs and native/linux/debian/changelog). The Preferences
+// app's Diagnostics tab surfaces this string verbatim, so a release
+// build should bump it in lockstep with the installer version.
+private let BurmeseIMEFFIVersion = "0.1.29"
 
 private func jsonString(_ s: String) -> String {
     do {

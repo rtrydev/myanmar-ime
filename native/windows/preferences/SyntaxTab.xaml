@@ -1,0 +1,140 @@
+<UserControl x:Class="Myangler.Preferences.SyntaxTab"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="24,16">
+        <StackPanel>
+            <TextBlock Style="{StaticResource Theme.PageTitle}" Text="Writing rules"/>
+            <TextBlock Style="{StaticResource Theme.Hint}" Margin="0,0,0,16">
+                Hybrid Burmese romanization — what to type to produce each Myanmar shape.
+                Stays in sync with the engine's romanization tables.
+            </TextBlock>
+
+            <!-- Intro -->
+            <Border Style="{StaticResource Theme.Card}" Margin="0,0,0,16">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Theme.SectionHeader}" Text="How input works"/>
+                    <TextBlock Style="{StaticResource Theme.Body}" Margin="0,4,0,4">
+                        Type a rough Latin spelling and the IME shows Myanmar candidates in a popup
+                        near the cursor. Pick one with the arrow keys or a number row and press
+                        space or return to commit.
+                    </TextBlock>
+                    <TextBlock Style="{StaticResource Theme.Hint}">
+                        Some keys map to more than one Myanmar character — typing ta, for example,
+                        can produce either တ or ဋ. The IME ranks candidates by context, and you
+                        pick the intended one from the candidate window.
+                    </TextBlock>
+                </StackPanel>
+            </Border>
+
+            <!-- Consonants -->
+            <Border Style="{StaticResource Theme.Card}" Margin="0,0,0,16">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Theme.SectionHeader}" Text="Consonants"/>
+                    <TextBlock Style="{StaticResource Theme.Hint}" Margin="0,2,0,8">
+                        Type the key plus a vowel; the trailing 'a' is the inherent vowel and is
+                        implicit when no vowel follows.
+                    </TextBlock>
+                    <ItemsControl Name="ConsonantsGrid">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel Orientation="Horizontal"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                    </ItemsControl>
+                    <TextBlock Style="{StaticResource Theme.Hint}" Margin="0,8,0,0">
+                        ဈ, ဋ, ဌ, ဍ, ဎ, ဏ, and ဠ are Pali/Sanskrit-loanword consonants. They only
+                        combine with a narrow vowel set; diphthong finals like -own, -ote, -ain on
+                        these onsets are down-ranked.
+                    </TextBlock>
+                </StackPanel>
+            </Border>
+
+            <!-- Medials -->
+            <Border Style="{StaticResource Theme.Card}" Margin="0,0,0,16">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Theme.SectionHeader}" Text="Medials"/>
+                    <TextBlock Style="{StaticResource Theme.Hint}" Margin="0,2,0,8">
+                        Add after a consonant: k + y → ကြ. Canonical order is ြ, ျ, ွ, ှ — the
+                        engine enforces it automatically.
+                    </TextBlock>
+                    <ItemsControl Name="MedialsGrid">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel Orientation="Horizontal"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
+            <!-- Cluster aliases -->
+            <Border Style="{StaticResource Theme.Card}" Margin="0,0,0,16">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Theme.SectionHeader}"
+                               Text="Cluster-sound shortcuts"/>
+                    <TextBlock Name="ClusterAliasHint"
+                               Style="{StaticResource Theme.Hint}" Margin="0,2,0,8">
+                        Optional phonetic shortcuts for common consonant + medial clusters.
+                        Spelling out the consonant and medial still works.
+                    </TextBlock>
+                    <ItemsControl Name="ClusterAliasesGrid">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel Orientation="Horizontal"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
+            <!-- Vowel families -->
+            <Border Style="{StaticResource Theme.Card}" Margin="0,0,0,16">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Theme.SectionHeader}" Text="Vowels &amp; finals"/>
+                    <TextBlock Style="{StaticResource Theme.Hint}" Margin="0,2,0,12">
+                        Suffixes attach to a consonant or onset. Within a family, . marks a
+                        short/creaky tone, : marks a long/heavy tone, and bare keys are the default.
+                    </TextBlock>
+                    <ItemsControl Name="VowelFamiliesList">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
+            <!-- Special characters -->
+            <Border Style="{StaticResource Theme.Card}" Margin="0,0,0,16">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Theme.SectionHeader}" Text="Special characters"/>
+                    <ItemsControl Name="SpecialsList" Margin="0,4,0,0">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
+            <!-- Worked examples -->
+            <Border Style="{StaticResource Theme.Card}" Margin="0,0,0,16">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Theme.SectionHeader}" Text="Worked examples"/>
+                    <TextBlock Style="{StaticResource Theme.Hint}" Margin="0,2,0,8">
+                        Computed live from the engine's reverse-romanizer.
+                    </TextBlock>
+                    <ItemsControl Name="ExamplesList">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

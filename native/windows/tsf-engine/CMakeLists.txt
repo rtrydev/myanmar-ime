@@ -108,6 +108,11 @@ target_link_libraries(BurmeseIMETIP PRIVATE
     shell32
     d2d1
     dwrite
+    # DwmSetWindowAttribute for round corners + immersive dark mode
+    # hints on the candidate popup. Linked indirectly via the
+    # `#pragma comment(lib, "dwmapi.lib")` too, but listing here keeps
+    # the dependency visible at CMake configure time.
+    dwmapi
 )
 
 set_target_properties(BurmeseIMETIP PROPERTIES

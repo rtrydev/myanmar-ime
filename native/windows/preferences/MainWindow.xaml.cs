@@ -2,7 +2,9 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Text.Json;
 using System.Windows;
+using System.Windows.Controls;
 using Microsoft.Data.Sqlite;
 
 namespace Myangler.Preferences;
@@ -18,6 +20,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        Theme.HookWindow(this); // live light/dark + DWM hints
         LoadPreferencesIntoControls();
         Loaded += (_, _) =>
         {
@@ -27,7 +30,9 @@ public partial class MainWindow : Window
         };
     }
 
-    // -------- Setup tab --------
+    // ============================================================
+    //   Setup tab
+    // ============================================================
 
     private void OnOpenLanguageSettings(object sender, RoutedEventArgs e)
     {
@@ -46,22 +51,37 @@ public partial class MainWindow : Window
         }
     }
 
-    // -------- Preferences tab --------
+    // ============================================================
+    //   Preferences tab
+    // ============================================================
 
     private void LoadPreferencesIntoControls()
     {
-        CommitOnSpaceCheck.IsChecked    = RegistrySettings.GetBool(RegistrySettings.KeyCommitOnSpace, false);
-        ClusterAliasesCheck.IsChecked   = RegistrySettings.GetBool(RegistrySettings.KeyClusterAliases, true);
-        BurmesePunctCheck.IsChecked     = RegistrySettings.GetBool(RegistrySettings.KeyBurmesePunctuation, false);
-        NumberMeasureCheck.IsChecked    = RegistrySettings.GetBool(RegistrySettings.KeyNumberMeasureWords, false);
-        LearningCheck.IsChecked         = RegistrySettings.GetBool(RegistrySettings.KeyLearning, true);
+        CommitOnSpaceCheck.IsChecked  = RegistrySettings.GetBool(RegistrySettings.KeyCommitOnSpace, false);
+        ClusterAliasesCheck.IsChecked = RegistrySettings.GetBool(RegistrySettings.KeyClusterAliases, true);
+        BurmesePunctCheck.IsChecked   = RegistrySettings.GetBool(RegistrySettings.KeyBurmesePunctuation, false);
+        NumberMeasureCheck.IsChecked  = RegistrySettings.GetBool(RegistrySettings.KeyNumberMeasureWords, false);
+        LearningCheck.IsChecked       = RegistrySettings.GetBool(RegistrySettings.KeyLearning, true);
 
-        PageSizeBox.Text          = RegistrySettings.GetInt(RegistrySettings.KeyCandidatePageSize, 9)
-                                     .ToString(CultureInfo.InvariantCulture);
-        AnchorThresholdBox.Text   = RegistrySettings.GetInt(RegistrySettings.KeyAnchorThreshold, 8)
-                                     .ToString(CultureInfo.InvariantCulture);
-        LMPruneBox.Text           = RegistrySettings.GetDouble(RegistrySettings.KeyLMPruneMargin, 8.0)
-                                     .ToString("G", CultureInfo.InvariantCulture);
+        PageSizeSlider.Value = RegistrySettings.GetInt(RegistrySettings.KeyCandidatePageSize, 9);
+        AnchorSlider.Value   = RegistrySettings.GetInt(RegistrySettings.KeyAnchorThreshold, 8);
+        LMPruneSlider.Value  = RegistrySettings.GetDouble(RegistrySettings.KeyLMPruneMargin, 8.0);
+
+        UpdateSliderReadouts();
+    }
+
+    private void UpdateSliderReadouts()
+    {
+        PageSizeValue.Text = ((int)PageSizeSlider.Value).ToString(CultureInfo.InvariantCulture);
+        AnchorValue.Text   = ((int)AnchorSlider.Value).ToString(CultureInfo.InvariantCulture);
+        LMPruneValue.Text  = LMPruneSlider.Value.ToString("0.0", CultureInfo.InvariantCulture);
+    }
+
+    private void OnSliderChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_loading) return;
+        UpdateSliderReadouts();
+        SaveCurrentPreferences();
     }
 
     private void OnSettingsChanged(object sender, RoutedEventArgs e)
@@ -74,27 +94,16 @@ public partial class MainWindow : Window
     {
         try
         {
-            RegistrySettings.SetBool(RegistrySettings.KeyCommitOnSpace,        CommitOnSpaceCheck.IsChecked == true);
-            RegistrySettings.SetBool(RegistrySettings.KeyClusterAliases,       ClusterAliasesCheck.IsChecked == true);
-            RegistrySettings.SetBool(RegistrySettings.KeyBurmesePunctuation,   BurmesePunctCheck.IsChecked == true);
-            RegistrySettings.SetBool(RegistrySettings.KeyNumberMeasureWords,   NumberMeasureCheck.IsChecked == true);
-            RegistrySettings.SetBool(RegistrySettings.KeyLearning,             LearningCheck.IsChecked == true);
+            RegistrySettings.SetBool(RegistrySettings.KeyCommitOnSpace,      CommitOnSpaceCheck.IsChecked == true);
+            RegistrySettings.SetBool(RegistrySettings.KeyClusterAliases,     ClusterAliasesCheck.IsChecked == true);
+            RegistrySettings.SetBool(RegistrySettings.KeyBurmesePunctuation, BurmesePunctCheck.IsChecked == true);
+            RegistrySettings.SetBool(RegistrySettings.KeyNumberMeasureWords, NumberMeasureCheck.IsChecked == true);
+            RegistrySettings.SetBool(RegistrySettings.KeyLearning,           LearningCheck.IsChecked == true);
 
-            if (int.TryParse(PageSizeBox.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var ps)
-                && ps >= 1 && ps <= 24)
-            {
-                RegistrySettings.SetInt(RegistrySettings.KeyCandidatePageSize, ps);
-            }
-            if (int.TryParse(AnchorThresholdBox.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var th)
-                && th >= 1 && th <= 64)
-            {
-                RegistrySettings.SetInt(RegistrySettings.KeyAnchorThreshold, th);
-            }
-            if (double.TryParse(LMPruneBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var lm)
-                && lm >= 0.0 && lm <= 40.0)
-            {
-                RegistrySettings.SetDouble(RegistrySettings.KeyLMPruneMargin, lm);
-            }
+            RegistrySettings.SetInt(RegistrySettings.KeyCandidatePageSize, (int)PageSizeSlider.Value);
+            RegistrySettings.SetInt(RegistrySettings.KeyAnchorThreshold,   (int)AnchorSlider.Value);
+            RegistrySettings.SetDouble(RegistrySettings.KeyLMPruneMargin,  LMPruneSlider.Value);
+
             PreferencesStatus.Text = "Saved. The IME picks up changes within a second.";
         }
         catch (Exception ex)
@@ -103,7 +112,63 @@ public partial class MainWindow : Window
         }
     }
 
-    // -------- History tab --------
+    // Restore-defaults wired to four logical sections, matching the
+    // groupings on macOS and Linux. Restoring writes the defaults to
+    // the registry and refreshes the relevant controls.
+
+    private void OnRestoreInputBehavior(object sender, RoutedEventArgs e)
+    {
+        _loading = true;
+        try
+        {
+            CommitOnSpaceCheck.IsChecked  = false;
+            ClusterAliasesCheck.IsChecked = true;
+            PageSizeSlider.Value          = 9;
+            UpdateSliderReadouts();
+        }
+        finally { _loading = false; }
+        SaveCurrentPreferences();
+    }
+
+    private void OnRestoreCandidateRanking(object sender, RoutedEventArgs e)
+    {
+        _loading = true;
+        try
+        {
+            LMPruneSlider.Value = 8.0;
+            AnchorSlider.Value  = 8;
+            UpdateSliderReadouts();
+        }
+        finally { _loading = false; }
+        SaveCurrentPreferences();
+    }
+
+    private void OnRestoreTextOutput(object sender, RoutedEventArgs e)
+    {
+        _loading = true;
+        try
+        {
+            BurmesePunctCheck.IsChecked   = false;
+            NumberMeasureCheck.IsChecked  = false;
+        }
+        finally { _loading = false; }
+        SaveCurrentPreferences();
+    }
+
+    private void OnRestoreLearning(object sender, RoutedEventArgs e)
+    {
+        _loading = true;
+        try
+        {
+            LearningCheck.IsChecked = true;
+        }
+        finally { _loading = false; }
+        SaveCurrentPreferences();
+    }
+
+    // ============================================================
+    //   History tab
+    // ============================================================
 
     public class HistoryRow
     {
@@ -149,8 +214,6 @@ public partial class MainWindow : Window
                     Reading    = rdr.GetString(0),
                     Surface    = rdr.GetString(1),
                     Count      = rdr.GetInt64(2),
-                    // last_picked_at is a Unix epoch seconds Real per
-                    // the Swift core's SQLiteUserHistoryStore.
                     LastPicked = FormatEpoch(rdr.GetDouble(3))
                 });
             }
@@ -189,6 +252,31 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnHistoryRowDelete(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn || btn.DataContext is not HistoryRow row) return;
+        string path = HistoryDatabasePath();
+        if (!File.Exists(path)) return;
+        try
+        {
+            using var conn = new SqliteConnection($"Data Source={path}");
+            conn.Open();
+            using var cmd = conn.CreateCommand();
+            // Selections are uniquely keyed on (reading, surface) —
+            // see SQLiteUserHistoryStore.swift schema.
+            cmd.CommandText = "DELETE FROM selections WHERE reading=@r AND surface=@s";
+            cmd.Parameters.AddWithValue("@r", row.Reading);
+            cmd.Parameters.AddWithValue("@s", row.Surface);
+            cmd.ExecuteNonQuery();
+            _historyRows.Remove(row);
+            HistoryStatus.Text = $"{_historyRows.Count} entries.";
+        }
+        catch (Exception ex)
+        {
+            HistoryStatus.Text = $"Delete failed: {ex.Message}";
+        }
+    }
+
     private static string FormatEpoch(double seconds)
     {
         try
@@ -208,7 +296,9 @@ public partial class MainWindow : Window
         return Path.Combine(localAppData, "Myangler", "UserHistory.sqlite");
     }
 
-    // -------- Convert tab --------
+    // ============================================================
+    //   Convert tab
+    // ============================================================
 
     private void OnConvertClick(object sender, RoutedEventArgs e)
     {
@@ -222,12 +312,31 @@ public partial class MainWindow : Window
         }
     }
 
-    // -------- Diagnostics tab --------
+    // ============================================================
+    //   Diagnostics tab
+    // ============================================================
+
+    private string _diagRawJson = string.Empty;
 
     private void OnDiagnosticsRefresh(object sender, RoutedEventArgs e) => RefreshDiagnostics();
 
+    private void OnDiagnosticsCopy(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrEmpty(_diagRawJson)) return;
+        try
+        {
+            Clipboard.SetText(_diagRawJson);
+            DiagStatus.Text = "Copied to clipboard.";
+        }
+        catch (Exception ex)
+        {
+            DiagStatus.Text = $"Copy failed: {ex.Message}";
+        }
+    }
+
     private void RefreshDiagnostics()
     {
+        string raw;
         try
         {
             // Resolve the same paths the TIP DLL would: data files
@@ -235,17 +344,119 @@ public partial class MainWindow : Window
             // %ProgramFiles%\Myangler\Data\, history at
             // %LOCALAPPDATA%\Myangler\UserHistory.sqlite.
             // AppContext.BaseDirectory is the single-file-safe way
-            // to get the exe's directory (Assembly.Location returns
-            // an empty string when running under PublishSingleFile).
+            // to get the exe's directory.
             string installRoot = AppContext.BaseDirectory;
             string lex  = Path.Combine(installRoot, "Data", "BurmeseLexicon.sqlite");
             string lm   = Path.Combine(installRoot, "Data", "BurmeseLM.bin");
             string hist = HistoryDatabasePath();
-            DiagnosticsOutput.Text = Ffi.Diagnostics(lex, lm, hist);
+            raw = Ffi.Diagnostics(lex, lm, hist);
         }
         catch (Exception ex)
         {
-            DiagnosticsOutput.Text = $"FFI call failed: {ex.Message}";
+            raw = JsonSerializer.Serialize(new { error = ex.Message });
         }
+
+        _diagRawJson = raw;
+        ApplyDiagnosticsToView(raw);
+    }
+
+    /// <summary>
+    /// Parse the diagnostics JSON the FFI returned (one flat object,
+    /// keys: version, lexicon_path, lexicon_bytes, lm_path, lm_bytes,
+    /// history_path, history_bytes, optionally error) and project
+    /// each field onto a labeled row in the structured view.
+    /// </summary>
+    private void ApplyDiagnosticsToView(string raw)
+    {
+        // Pretty-print the raw payload for the expander.
+        DiagRawOutput.Text = PrettyJson(raw);
+
+        try
+        {
+            using var doc = JsonDocument.Parse(raw);
+            var root = doc.RootElement;
+
+            // Surface FFI-level errors as a status banner; still try
+            // to render any fields that are present.
+            if (root.TryGetProperty("error", out var err))
+            {
+                DiagStatus.Text = $"FFI reported: {err.GetString()}";
+                DiagStructuredCard.Visibility = Visibility.Collapsed;
+                DiagRawExpander.Visibility    = Visibility.Visible;
+                DiagRawExpander.IsExpanded    = true;
+                return;
+            }
+
+            DiagVersion.Text       = GetStr(root, "version", "(unknown)");
+            DiagLexiconPath.Text   = GetStr(root, "lexicon_path", "(missing)");
+            DiagLexiconSize.Text   = FormatBytes(GetLong(root, "lexicon_bytes"));
+            DiagLMPath.Text        = GetStr(root, "lm_path",      "(missing)");
+            DiagLMSize.Text        = FormatBytes(GetLong(root, "lm_bytes"));
+            DiagHistoryPath.Text   = GetStr(root, "history_path", "(missing)");
+            DiagHistorySize.Text   = FormatBytes(GetLong(root, "history_bytes"));
+
+            DiagStructuredCard.Visibility = Visibility.Visible;
+            // Keep the raw expander available but collapsed by default —
+            // power users can pop it open for bug reports.
+            DiagRawExpander.Visibility = Visibility.Visible;
+            DiagRawExpander.IsExpanded = false;
+            DiagStatus.Text = string.Empty;
+        }
+        catch (JsonException ex)
+        {
+            // Not parseable — show the raw text and the parse error so
+            // the user can still file a meaningful bug report.
+            DiagStructuredCard.Visibility = Visibility.Collapsed;
+            DiagRawExpander.Visibility    = Visibility.Visible;
+            DiagRawExpander.IsExpanded    = true;
+            DiagStatus.Text = $"Couldn't parse diagnostics: {ex.Message}";
+        }
+    }
+
+    private static string GetStr(JsonElement root, string key, string fallback)
+    {
+        if (root.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String)
+        {
+            string? s = v.GetString();
+            return string.IsNullOrEmpty(s) ? fallback : s;
+        }
+        return fallback;
+    }
+
+    private static long GetLong(JsonElement root, string key)
+    {
+        if (root.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.Number
+            && v.TryGetInt64(out var n))
+        {
+            return n;
+        }
+        return 0;
+    }
+
+    private static string PrettyJson(string raw)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(raw);
+            return JsonSerializer.Serialize(doc.RootElement,
+                new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch
+        {
+            return raw;
+        }
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes <= 0) return "—";
+        if (bytes < 1024) return $"{bytes} B";
+        double v = bytes;
+        string[] units = { "B", "KB", "MB", "GB" };
+        int unit = 0;
+        while (v >= 1024 && unit < units.Length - 1) { v /= 1024; unit++; }
+        return v < 10
+            ? string.Format(CultureInfo.InvariantCulture, "{0:F2} {1}", v, units[unit])
+            : string.Format(CultureInfo.InvariantCulture, "{0:F1} {1}", v, units[unit]);
     }
 }

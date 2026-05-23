@@ -32,21 +32,71 @@
   (no source-tree path lookups) and lets the file harvester read
   from one root.
 -->
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package
     Name="Myangler Burmese IME"
     Manufacturer="Myangler"
-    Version="0.1.27"
+    Version="0.1.29"
     UpgradeCode="B8754B45-25C4-4C47-904B-5C80897E9446"
     Scope="perMachine"
     Compressed="yes">
 
     <!--
-      MajorUpgrade: any newer build cleanly replaces the old install.
-      Pre-defined in WiX; the Schedule="afterInstallExecute" default
-      means files are copied first, then the old install is removed.
+      Custom upgrade handling. We replace the convenience `MajorUpgrade`
+      element with an explicit Upgrade table so we can detect three
+      cases separately:
+
+        OLDERVERSIONFOUND  — strictly older build is installed; remove
+                             it on the way through (true upgrade path).
+        SAMEVERSIONFOUND   — the exact same version is already on disk;
+                             show a Launch condition dialog instead of
+                             the silent "nothing happened" exit msiexec
+                             defaults to when the new install offers
+                             nothing to do.
+        NEWERVERSIONFOUND  — a strictly newer build is installed; block
+                             with a downgrade message.
+
+      The `<RemoveExistingProducts After="InstallInitialize" />` schedule
+      below is the early variant: it uninstalls the old build BEFORE
+      copying our new files. This costs a little more disk IO than
+      the WiX-default afterInstallExecute (which copies first, then
+      removes the old) but it sidesteps the "two stale Apps & Features
+      entries" mode we hit when the same UpgradeCode + new ProductCode
+      collide with the old MajorUpgrade schedule.
     -->
-    <MajorUpgrade DowngradeErrorMessage="A newer version of Myangler Burmese IME is already installed. Uninstall it first to install this older build." />
+    <Upgrade Id="B8754B45-25C4-4C47-904B-5C80897E9446">
+      <UpgradeVersion
+        Property="NEWERVERSIONFOUND"
+        Minimum="0.1.29"
+        IncludeMinimum="no"
+        OnlyDetect="yes" />
+      <UpgradeVersion
+        Property="OLDERVERSIONFOUND"
+        Maximum="0.1.29"
+        IncludeMaximum="no"
+        OnlyDetect="no" />
+      <UpgradeVersion
+        Property="SAMEVERSIONFOUND"
+        Minimum="0.1.29"
+        Maximum="0.1.29"
+        IncludeMinimum="yes"
+        IncludeMaximum="yes"
+        OnlyDetect="yes" />
+    </Upgrade>
+
+    <!--
+      Launch conditions. The `Installed` clause is what keeps the
+      uninstall path working — `Installed` is true during a maintenance
+      / removal pass, where SAMEVERSIONFOUND / NEWERVERSIONFOUND are
+      naturally also true (we're operating on ourselves).
+    -->
+    <Launch
+      Condition="NOT NEWERVERSIONFOUND OR Installed"
+      Message="A newer version of Myangler Burmese IME is already installed. Uninstall it first if you want to install this older build." />
+    <Launch
+      Condition="NOT SAMEVERSIONFOUND OR Installed"
+      Message="Myangler Burmese IME 0.1.29 is already installed. Use 'Repair' or 'Modify' from Settings -- Apps to reinstall, or uninstall the existing copy first." />
 
     <!--
       Media: a single embedded CAB. Compressed=yes on the Package
@@ -66,6 +116,24 @@
     -->
     <Icon Id="MyanglerIcon.ico" SourceFile="build\staging\myangler.ico" />
     <Property Id="ARPPRODUCTICON" Value="MyanglerIcon.ico" />
+
+    <!--
+      Install UI. WixUI_Minimal is the smallest of the WiX stock UI
+      sequences — one welcome+license page, then progress, then a
+      "Setup Complete" page with a Finish button. Without this the
+      MSI runs at Basic UI level (progress bar only, then the window
+      vanishes), which is the silent-exit behaviour the user noticed.
+
+      ui:WixUI is provided by WixToolset.UI.wixext; build.ps1 passes
+      `-ext WixToolset.UI.wixext` so wix resolves the namespace and
+      the predefined dialog set.
+
+      WixUILicenseRtf points at the bundled License.rtf — required by
+      WixUI_Minimal (the WelcomeEulaDlg has no opt-out for the
+      license page, so we ship a brief liability disclaimer).
+    -->
+    <ui:WixUI Id="WixUI_Minimal" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
 
     <!--
       Standard install dirs:
@@ -239,6 +307,19 @@
       <Custom Action="RegisterTip"   After="InstallFiles" Condition="NOT Installed" />
       <Custom Action="SetDefaultIME" After="RegisterTip"  Condition="NOT Installed" />
       <Custom Action="UnregisterTip" Before="RemoveFiles" Condition="Installed AND (REMOVE=&quot;ALL&quot;)" />
+
+      <!--
+        Schedule the old-version removal early (after InstallInitialize)
+        rather than late (afterInstallExecute) so the old install is
+        gone BEFORE our new files land. The late variant has bitten us
+        before: WiX MajorUpgrade with the same Version copied new files
+        on top of the old, then the late RemoveExistingProducts
+        triggered the old install's RemoveFiles which deleted the
+        freshly-copied new files (because file paths matched). Result:
+        two Apps & Features entries and 16:01-vintage .exe on disk.
+        The early schedule avoids the file-path collision entirely.
+      -->
+      <RemoveExistingProducts After="InstallInitialize" />
     </InstallExecuteSequence>
 
   </Package>

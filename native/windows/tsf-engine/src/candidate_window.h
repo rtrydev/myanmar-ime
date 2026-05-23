@@ -14,6 +14,18 @@
 // via worker.set_selected_sync before reading the commit surface.
 // Keyboard navigation (Up/Down/PageUp/PageDown/Tab) is dispatched
 // from key_event_sink.cpp into the moveSelection helpers below.
+//
+// Theming: the panel reads `HKCU\Software\Microsoft\Windows\Current
+// Version\Themes\Personalize::AppsUseLightTheme` and the DWM accent
+// color at construction, then refreshes on WM_SETTINGCHANGE /
+// WM_DWMCOLORIZATIONCOLORCHANGED. DWM rounded corners +
+// immersive-dark-mode are applied via DwmSetWindowAttribute so the
+// system shadow + corner radius match Win11 expectations.
+//
+// Page size: read from `HKCU\Software\Myangler\BurmeseIME::Candidate
+// PageSize` (the same value the Preferences app writes); refreshed
+// on every setCandidates so the user's setting changes propagate
+// within one keystroke.
 
 #pragma once
 
@@ -84,6 +96,20 @@ private:
     SIZE measureSize() const noexcept;
     void resizeToFit() noexcept;
 
+    // Theme palette + DWM rounded-corners / dark-mode handling.
+    // refreshTheme reads the current Personalize key + accent color
+    // and rebuilds the device-dependent brushes. applyDwmAttributes
+    // pokes DWM with the corner-preference and immersive-dark-mode
+    // hints so the system shadow + title-bar chrome match the
+    // in-window palette. Both are cheap to call repeatedly.
+    void refreshTheme() noexcept;
+    void applyDwmAttributes() noexcept;
+
+    // Re-read CandidatePageSize from HKCU. Called from setCandidates
+    // so the user's preference change is observed without an IPC
+    // round trip. Defaults to 9 (the macOS / Linux default).
+    void refreshPageSize() noexcept;
+
     HWND hwnd_ = nullptr;
     HMODULE selfModule_ = nullptr;
     bool visible_ = false;
@@ -91,9 +117,11 @@ private:
     std::vector<CandidateView> candidates_;
     int selectedIndex_ = 0;
 
-    // Pagination: how many rows we draw at a time, and which page
-    // window we're showing. Mirrors macOS/Linux page_size default of 9.
-    static constexpr int kPageSize = 9;
+    // Pagination. pageSize_ is read fresh from the registry on every
+    // setCandidates so it stays in sync with the Preferences app
+    // without an extra IPC channel.
+    static constexpr int kDefaultPageSize = 9;
+    int pageSize_  = kDefaultPageSize;
     int pageOffset_ = 0;
 
     POINT lastAnchor_{ 100, 100 };
@@ -108,9 +136,26 @@ private:
     ID2D1HwndRenderTarget*  renderTarget_    = nullptr;
     ID2D1SolidColorBrush*   bgBrush_         = nullptr;
     ID2D1SolidColorBrush*   selectionBrush_  = nullptr;
+    ID2D1SolidColorBrush*   selectionAccent_ = nullptr; // selected index pill
     ID2D1SolidColorBrush*   textBrush_       = nullptr;
+    ID2D1SolidColorBrush*   selTextBrush_    = nullptr; // text on selected row
     ID2D1SolidColorBrush*   indexBrush_      = nullptr;
     ID2D1SolidColorBrush*   borderBrush_     = nullptr;
+    ID2D1SolidColorBrush*   footerBrush_     = nullptr; // page indicator text
+
+    // Theme palette resolved from the OS.
+    struct Palette {
+        D2D1_COLOR_F background;
+        D2D1_COLOR_F selection;
+        D2D1_COLOR_F selectionAccent;
+        D2D1_COLOR_F text;
+        D2D1_COLOR_F selectedText;
+        D2D1_COLOR_F index;
+        D2D1_COLOR_F border;
+        D2D1_COLOR_F footer;
+    };
+    Palette palette_{};
+    bool   isDark_ = false;
 };
 
 } // namespace burmese

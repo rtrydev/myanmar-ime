@@ -1,189 +1,553 @@
 <Window x:Class="Myangler.Preferences.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:Myangler.Preferences"
         Title="Myangler Burmese IME"
-        Width="720" Height="540"
+        Width="900" Height="640"
+        MinWidth="760" MinHeight="500"
         WindowStartupLocation="CenterScreen"
-        ResizeMode="CanResize"
-        MinWidth="600" MinHeight="420"
+        Style="{StaticResource Theme.WindowChrome}"
         Icon="pack://application:,,,/Resources/myangler.ico">
-    <Window.Resources>
-        <Style TargetType="TabItem">
-            <Setter Property="Padding" Value="14,6"/>
-            <Setter Property="FontSize" Value="13"/>
-        </Style>
-        <Style x:Key="SectionHeader" TargetType="TextBlock">
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="FontSize" Value="14"/>
-            <Setter Property="Margin" Value="0,12,0,4"/>
-        </Style>
-        <Style x:Key="Hint" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#666"/>
-            <Setter Property="FontSize" Value="12"/>
-            <Setter Property="TextWrapping" Value="Wrap"/>
-            <Setter Property="Margin" Value="0,2,0,8"/>
-        </Style>
-    </Window.Resources>
 
-    <TabControl Margin="8" SelectedIndex="1">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
 
-        <!-- ====================== Setup ====================== -->
-        <TabItem Header="Setup">
-            <ScrollViewer Padding="16">
-                <StackPanel>
-                    <TextBlock Style="{StaticResource SectionHeader}"
-                               Text="Activate the Burmese keyboard"/>
-                    <TextBlock Style="{StaticResource Hint}">
-                        Add the Myangler Burmese input method in Windows Settings, then switch to it via Win+Space when you want to type Burmese.
-                    </TextBlock>
-                    <Button Name="OpenLanguageSettingsButton"
-                            Click="OnOpenLanguageSettings"
-                            Padding="12,6"
-                            HorizontalAlignment="Left"
-                            Margin="0,4,0,16"
-                            Content="Open Windows language settings…"/>
-
-                    <TextBlock Style="{StaticResource SectionHeader}"
-                               Text="If the IME isn't visible"/>
-                    <TextBlock Style="{StaticResource Hint}">
-                        The MSI installer should have registered the text service. If it doesn't appear in the keyboards list under Burmese, open an elevated PowerShell and re-run register_profile.exe install from the install directory.
-                    </TextBlock>
-
-                    <TextBlock Style="{StaticResource SectionHeader}"
-                               Text="What you can do here"/>
-                    <TextBlock Style="{StaticResource Hint}">
-                        Preferences — adjust the eight engine settings; changes propagate to the running IME within a second.
-                        History — view the words you've picked, clear individual rows or all of them.
-                        Convert — paste any Myanmar string to see its romanized reading.
-                        Diagnostics — runtime paths and file sizes, useful for bug reports.
-                    </TextBlock>
+        <!-- =================== Header =================== -->
+        <Border Grid.Row="0"
+                Background="Transparent"
+                Padding="24,18,24,8">
+            <StackPanel Orientation="Horizontal">
+                <Border Width="48" Height="48"
+                        CornerRadius="10"
+                        Background="{DynamicResource Theme.Accent}"
+                        VerticalAlignment="Center">
+                    <!--
+                        Header brand badge. White glyph on the system
+                        accent fill matches the Start Menu shortcut
+                        icon (myangler.ico) and the in-app accent
+                        treatment used elsewhere; the previous "accent
+                        on subtle-accent" was hard to read because both
+                        layers were the same hue.
+                    -->
+                    <TextBlock Text="က"
+                               FontFamily="Myanmar Text"
+                               FontSize="28"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               Foreground="White"/>
+                </Border>
+                <StackPanel Margin="14,0,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="Burmese IME"
+                               FontSize="20"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource Theme.Foreground}"/>
+                    <TextBlock Text="Hybrid Burmese romanization for Windows"
+                               FontSize="13"
+                               Margin="0,2,0,0"
+                               Foreground="{DynamicResource Theme.ForegroundMuted}"/>
                 </StackPanel>
-            </ScrollViewer>
-        </TabItem>
-
-        <!-- ==================== Preferences =================== -->
-        <TabItem Header="Preferences">
-            <ScrollViewer Padding="16">
-                <StackPanel>
-                    <TextBlock Style="{StaticResource SectionHeader}"
-                               Text="Composition"/>
-                    <CheckBox Name="CommitOnSpaceCheck" Content="Insert a space after committing (Space twice = space)"
-                              Margin="0,2,0,8" Checked="OnSettingsChanged" Unchecked="OnSettingsChanged"/>
-                    <CheckBox Name="ClusterAliasesCheck" Content="Cluster shortcuts (j, ch, gy, sh, gypan…)"
-                              Margin="0,2,0,8" Checked="OnSettingsChanged" Unchecked="OnSettingsChanged"/>
-                    <CheckBox Name="BurmesePunctCheck" Content="Auto-map ASCII punctuation to Myanmar after Burmese context"
-                              Margin="0,2,0,8" Checked="OnSettingsChanged" Unchecked="OnSettingsChanged"/>
-                    <CheckBox Name="NumberMeasureCheck" Content="Suggest measure words for typed numbers"
-                              Margin="0,2,0,8" Checked="OnSettingsChanged" Unchecked="OnSettingsChanged"/>
-                    <CheckBox Name="LearningCheck" Content="Learn from commits (per-user history)"
-                              Margin="0,2,0,12" Checked="OnSettingsChanged" Unchecked="OnSettingsChanged"/>
-
-                    <TextBlock Style="{StaticResource SectionHeader}"
-                               Text="Candidate panel"/>
-                    <StackPanel Orientation="Horizontal" Margin="0,2,0,8" VerticalAlignment="Center">
-                        <TextBlock Text="Page size:" Width="120" VerticalAlignment="Center"/>
-                        <TextBox Name="PageSizeBox" Width="60" VerticalAlignment="Center"
-                                 TextAlignment="Right" LostFocus="OnSettingsChanged"/>
-                        <TextBlock Style="{StaticResource Hint}" Margin="8,0,0,0"
-                                   VerticalAlignment="Center"
-                                   Text="Candidates shown per page (1–24, default 9)"/>
-                    </StackPanel>
-                    <StackPanel Orientation="Horizontal" Margin="0,2,0,8" VerticalAlignment="Center">
-                        <TextBlock Text="Anchor threshold:" Width="120" VerticalAlignment="Center"/>
-                        <TextBox Name="AnchorThresholdBox" Width="60" VerticalAlignment="Center"
-                                 TextAlignment="Right" LostFocus="OnSettingsChanged"/>
-                        <TextBlock Style="{StaticResource Hint}" Margin="8,0,0,0"
-                                   VerticalAlignment="Center"
-                                   Text="Syllables before frozen-prefix windowing kicks in (default 8)"/>
-                    </StackPanel>
-                    <StackPanel Orientation="Horizontal" Margin="0,2,0,12" VerticalAlignment="Center">
-                        <TextBlock Text="LM prune margin:" Width="120" VerticalAlignment="Center"/>
-                        <TextBox Name="LMPruneBox" Width="60" VerticalAlignment="Center"
-                                 TextAlignment="Right" LostFocus="OnSettingsChanged"/>
-                        <TextBlock Style="{StaticResource Hint}" Margin="8,0,0,0"
-                                   VerticalAlignment="Center"
-                                   Text="Trigram-LM beam width (default 8.0)"/>
-                    </StackPanel>
-
-                    <TextBlock Name="PreferencesStatus" Style="{StaticResource Hint}"
-                               Margin="0,12,0,0"/>
-                </StackPanel>
-            </ScrollViewer>
-        </TabItem>
-
-        <!-- ====================== History ===================== -->
-        <TabItem Header="History">
-            <DockPanel Margin="12">
-                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
-                    <Button Name="HistoryRefreshButton" Click="OnHistoryRefresh"
-                            Content="Refresh" Padding="10,4" Margin="0,0,8,0"/>
-                    <Button Name="HistoryClearAllButton" Click="OnHistoryClearAll"
-                            Content="Clear all" Padding="10,4"
-                            Foreground="#A33" />
-                    <TextBlock Name="HistoryStatus" Style="{StaticResource Hint}"
-                               VerticalAlignment="Center" Margin="12,0,0,0"/>
-                </StackPanel>
-                <DataGrid Name="HistoryGrid"
-                          AutoGenerateColumns="False"
-                          CanUserAddRows="False"
-                          CanUserDeleteRows="False"
-                          IsReadOnly="True"
-                          GridLinesVisibility="Horizontal"
-                          HeadersVisibility="Column"
-                          FontFamily="Segoe UI">
-                    <DataGrid.Columns>
-                        <DataGridTextColumn Header="Reading"  Binding="{Binding Reading}"  Width="160"/>
-                        <DataGridTextColumn Header="Surface"  Binding="{Binding Surface}"  Width="160"
-                                            FontFamily="Myanmar Text" FontSize="14"/>
-                        <DataGridTextColumn Header="Count"    Binding="{Binding Count}"    Width="80"/>
-                        <DataGridTextColumn Header="Last picked" Binding="{Binding LastPicked}" Width="*"/>
-                    </DataGrid.Columns>
-                </DataGrid>
-            </DockPanel>
-        </TabItem>
-
-        <!-- ====================== Convert ===================== -->
-        <TabItem Header="Convert">
-            <StackPanel Margin="16">
-                <TextBlock Style="{StaticResource SectionHeader}"
-                           Text="Myanmar → reading"/>
-                <TextBlock Style="{StaticResource Hint}">
-                    Type or paste a Myanmar string; the reverse-romanizer will return its romanized reading.
-                </TextBlock>
-                <TextBox Name="ConvertInput" Height="80"
-                         AcceptsReturn="True" TextWrapping="Wrap"
-                         VerticalScrollBarVisibility="Auto"
-                         FontFamily="Myanmar Text" FontSize="16"
-                         Margin="0,4,0,8"/>
-                <Button Name="ConvertButton" Click="OnConvertClick"
-                        Content="Reverse-romanize"
-                        Padding="12,6" HorizontalAlignment="Left" Margin="0,0,0,8"/>
-                <TextBlock Style="{StaticResource SectionHeader}"
-                           Text="Reading"/>
-                <TextBox Name="ConvertOutput" Height="80"
-                         IsReadOnly="True" AcceptsReturn="True"
-                         TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
-                         FontFamily="Consolas" FontSize="14"/>
             </StackPanel>
-        </TabItem>
+        </Border>
 
-        <!-- =================== Diagnostics ==================== -->
-        <TabItem Header="Diagnostics">
-            <DockPanel Margin="16">
-                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
-                    <Button Name="DiagRefreshButton" Click="OnDiagnosticsRefresh"
-                            Content="Refresh" Padding="10,4"/>
-                    <TextBlock Style="{StaticResource Hint}" VerticalAlignment="Center"
-                               Margin="12,0,0,0"
-                               Text="Asks the engine for its diagnostics JSON (paths, sizes, version)."/>
-                </StackPanel>
-                <TextBox Name="DiagnosticsOutput"
-                         IsReadOnly="True" AcceptsReturn="True"
-                         TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto"
-                         HorizontalScrollBarVisibility="Auto"
-                         FontFamily="Consolas" FontSize="13"/>
-            </DockPanel>
-        </TabItem>
+        <!-- =================== Tab control =================== -->
+        <TabControl Grid.Row="1"
+                    Style="{StaticResource Theme.NavTabControl}"
+                    SelectedIndex="0">
 
-    </TabControl>
+            <!-- ====================== Setup ====================== -->
+            <TabItem Header="Setup" Style="{StaticResource Theme.NavTabItem}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="24,16">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource Theme.PageTitle}"
+                                   Text="Getting started"/>
+                        <Border Style="{StaticResource Theme.Card}" Margin="0,0,0,16">
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource Theme.SectionHeader}"
+                                           Text="Activate the Burmese keyboard"/>
+                                <TextBlock Style="{StaticResource Theme.Hint}" Margin="0,4,0,8">
+                                    Add the Myangler Burmese input method in Windows Settings,
+                                    then switch to it via Win+Space when you want to type Burmese.
+                                </TextBlock>
+                                <Button Name="OpenLanguageSettingsButton"
+                                        Click="OnOpenLanguageSettings"
+                                        Style="{StaticResource Theme.AccentButton}"
+                                        Content="Open Windows language settings…"
+                                        HorizontalAlignment="Left"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource Theme.Card}" Margin="0,0,0,16">
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource Theme.SectionHeader}"
+                                           Text="Switching modes"/>
+                                <TextBlock Style="{StaticResource Theme.Body}" Margin="0,4,0,8">
+                                    The IME runs in two modes; click the language-bar item or
+                                    use the assigned shortcut to flip between them:
+                                </TextBlock>
+                                <StackPanel Orientation="Vertical" Margin="0,4,0,0">
+                                    <StackPanel Orientation="Horizontal" Margin="0,2,0,4">
+                                        <Border Style="{StaticResource Theme.KeyChip}"
+                                                Margin="0,0,10,0" Padding="10,4">
+                                            <TextBlock Text="က" FontSize="16"
+                                                       FontFamily="Myanmar Text"/>
+                                        </Border>
+                                        <TextBlock Style="{StaticResource Theme.Body}"
+                                                   Text="Compose — typed Latin becomes Myanmar"
+                                                   VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                                        <Border Style="{StaticResource Theme.KeyChip}"
+                                                Margin="0,0,10,0" Padding="10,4">
+                                            <TextBlock Text="ABC" FontSize="13"
+                                                       FontFamily="Consolas, Cascadia Mono"/>
+                                        </Border>
+                                        <TextBlock Style="{StaticResource Theme.Body}"
+                                                   Text="Roman passthrough — engine is bypassed"
+                                                   VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource Theme.Card}" Margin="0,0,0,16">
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource Theme.SectionHeader}"
+                                           Text="If the IME isn't visible"/>
+                                <TextBlock Style="{StaticResource Theme.Hint}" Margin="0,4,0,0">
+                                    The MSI installer should have registered the text service.
+                                    If it doesn't appear in the keyboards list under Burmese,
+                                    open an elevated PowerShell and re-run
+                                    <Run FontFamily="Consolas, Cascadia Mono"
+                                         Foreground="{DynamicResource Theme.Foreground}"
+                                         >register_profile.exe install</Run>
+                                    from the install directory.
+                                </TextBlock>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- ==================== Preferences =================== -->
+            <TabItem Header="Preferences" Style="{StaticResource Theme.NavTabItem}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="24,16">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource Theme.PageTitle}" Text="Preferences"/>
+
+                        <!-- Input behavior -->
+                        <Border Style="{StaticResource Theme.Card}" Margin="0,0,0,16">
+                            <StackPanel>
+                                <DockPanel Margin="0,0,0,8">
+                                    <Button DockPanel.Dock="Right"
+                                            Style="{StaticResource Theme.LinkButton}"
+                                            Content="Restore defaults"
+                                            Click="OnRestoreInputBehavior"/>
+                                    <TextBlock Style="{StaticResource Theme.SectionHeader}"
+                                               Text="Input behavior"/>
+                                </DockPanel>
+
+                                <CheckBox Name="CommitOnSpaceCheck"
+                                          Content="Commit on space (Space twice = literal space)"
+                                          Margin="0,2,0,8"
+                                          Checked="OnSettingsChanged" Unchecked="OnSettingsChanged"/>
+                                <CheckBox Name="ClusterAliasesCheck"
+                                          Content="Cluster-sound shortcuts (j, ch, gy, sh…)"
+                                          Margin="0,2,0,12"
+                                          Checked="OnSettingsChanged" Unchecked="OnSettingsChanged"/>
+
+                                <Grid Margin="0,2,0,2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="160"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="44"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Candidate panel size"
+                                               VerticalAlignment="Center"
+                                               Foreground="{DynamicResource Theme.Foreground}"/>
+                                    <Slider Grid.Column="1" Name="PageSizeSlider"
+                                            Minimum="1" Maximum="24"
+                                            TickFrequency="1" IsSnapToTickEnabled="True"
+                                            ValueChanged="OnSliderChanged"
+                                            VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="2"
+                                               Name="PageSizeValue"
+                                               TextAlignment="Right"
+                                               VerticalAlignment="Center"
+                                               FontFamily="Consolas, Cascadia Mono"
+                                               Foreground="{DynamicResource Theme.ForegroundMuted}"/>
+                                </Grid>
+                                <TextBlock Style="{StaticResource Theme.Hint}" Margin="0,2,0,0"
+                                           Text="Candidates shown per page (default 9)."/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Candidate ranking -->
+                        <Border Style="{StaticResource Theme.Card}" Margin="0,0,0,16">
+                            <StackPanel>
+                                <DockPanel Margin="0,0,0,8">
+                                    <Button DockPanel.Dock="Right"
+                                            Style="{StaticResource Theme.LinkButton}"
+                                            Content="Restore defaults"
+                                            Click="OnRestoreCandidateRanking"/>
+                                    <TextBlock Style="{StaticResource Theme.SectionHeader}"
+                                               Text="Candidate ranking"/>
+                                </DockPanel>
+
+                                <Grid Margin="0,2,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="160"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="44"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="LM prune margin"
+                                               VerticalAlignment="Center"
+                                               Foreground="{DynamicResource Theme.Foreground}"/>
+                                    <Slider Grid.Column="1" Name="LMPruneSlider"
+                                            Minimum="0" Maximum="16"
+                                            TickFrequency="0.5" IsSnapToTickEnabled="True"
+                                            ValueChanged="OnSliderChanged"
+                                            VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="2"
+                                               Name="LMPruneValue"
+                                               TextAlignment="Right"
+                                               VerticalAlignment="Center"
+                                               FontFamily="Consolas, Cascadia Mono"
+                                               Foreground="{DynamicResource Theme.ForegroundMuted}"/>
+                                </Grid>
+                                <Grid Margin="0,2,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="160"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="44"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Anchor threshold"
+                                               VerticalAlignment="Center"
+                                               Foreground="{DynamicResource Theme.Foreground}"/>
+                                    <Slider Grid.Column="1" Name="AnchorSlider"
+                                            Minimum="4" Maximum="16"
+                                            TickFrequency="1" IsSnapToTickEnabled="True"
+                                            ValueChanged="OnSliderChanged"
+                                            VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="2"
+                                               Name="AnchorValue"
+                                               TextAlignment="Right"
+                                               VerticalAlignment="Center"
+                                               FontFamily="Consolas, Cascadia Mono"
+                                               Foreground="{DynamicResource Theme.ForegroundMuted}"/>
+                                </Grid>
+                                <TextBlock Style="{StaticResource Theme.Hint}" Margin="0,8,0,0"
+                                           Text="Higher anchor threshold = more stable composition under long buffers."/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Text output -->
+                        <Border Style="{StaticResource Theme.Card}" Margin="0,0,0,16">
+                            <StackPanel>
+                                <DockPanel Margin="0,0,0,8">
+                                    <Button DockPanel.Dock="Right"
+                                            Style="{StaticResource Theme.LinkButton}"
+                                            Content="Restore defaults"
+                                            Click="OnRestoreTextOutput"/>
+                                    <TextBlock Style="{StaticResource Theme.SectionHeader}"
+                                               Text="Text output"/>
+                                </DockPanel>
+                                <CheckBox Name="BurmesePunctCheck"
+                                          Content="Auto-map ASCII punctuation to Myanmar after Burmese context"
+                                          Margin="0,2,0,8"
+                                          Checked="OnSettingsChanged" Unchecked="OnSettingsChanged"/>
+                                <CheckBox Name="NumberMeasureCheck"
+                                          Content="Suggest measure words for typed numbers"
+                                          Margin="0,2,0,2"
+                                          Checked="OnSettingsChanged" Unchecked="OnSettingsChanged"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Learning -->
+                        <Border Style="{StaticResource Theme.Card}" Margin="0,0,0,16">
+                            <StackPanel>
+                                <DockPanel Margin="0,0,0,8">
+                                    <Button DockPanel.Dock="Right"
+                                            Style="{StaticResource Theme.LinkButton}"
+                                            Content="Restore defaults"
+                                            Click="OnRestoreLearning"/>
+                                    <TextBlock Style="{StaticResource Theme.SectionHeader}"
+                                               Text="Learning"/>
+                                </DockPanel>
+                                <CheckBox Name="LearningCheck"
+                                          Content="Learn from commits (per-user history)"
+                                          Margin="0,2,0,2"
+                                          Checked="OnSettingsChanged" Unchecked="OnSettingsChanged"/>
+                                <TextBlock Style="{StaticResource Theme.Hint}" Margin="0,4,0,0"
+                                           Text="See the History tab to review or clear remembered selections."/>
+                            </StackPanel>
+                        </Border>
+
+                        <TextBlock Name="PreferencesStatus"
+                                   Style="{StaticResource Theme.Hint}"
+                                   Margin="0,4,0,0"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- ====================== History ===================== -->
+            <TabItem Header="History" Style="{StaticResource Theme.NavTabItem}">
+                <DockPanel Margin="24,16">
+                    <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+                        <TextBlock Style="{StaticResource Theme.PageTitle}"
+                                   Text="Learned entries"/>
+                        <TextBlock Style="{StaticResource Theme.Hint}" Margin="0,0,0,8">
+                            Selections the IME has remembered. Removing one stops it from ranking
+                            above other candidates for the same input.
+                        </TextBlock>
+                        <StackPanel Orientation="Horizontal">
+                            <Button Name="HistoryRefreshButton" Click="OnHistoryRefresh"
+                                    Content="Refresh" Margin="0,0,8,0"/>
+                            <Button Name="HistoryClearAllButton" Click="OnHistoryClearAll"
+                                    Style="{StaticResource Theme.DestructiveButton}"
+                                    Content="Clear all"/>
+                            <TextBlock Name="HistoryStatus" Style="{StaticResource Theme.Hint}"
+                                       VerticalAlignment="Center" Margin="12,0,0,0"/>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <Border Style="{StaticResource Theme.Card}" Padding="0">
+                        <DataGrid Name="HistoryGrid"
+                                  AutoGenerateColumns="False"
+                                  CanUserAddRows="False"
+                                  CanUserDeleteRows="False"
+                                  IsReadOnly="True"
+                                  FontFamily="Segoe UI Variable, Segoe UI">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Reading"
+                                                    Binding="{Binding Reading}"
+                                                    Width="160"/>
+                                <DataGridTextColumn Header="Surface"
+                                                    Binding="{Binding Surface}"
+                                                    Width="160">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="FontFamily"
+                                                    Value="Myanmar Text, Segoe UI"/>
+                                            <Setter Property="FontSize" Value="14"/>
+                                            <Setter Property="VerticalAlignment" Value="Center"/>
+                                            <Setter Property="Foreground"
+                                                    Value="{DynamicResource Theme.Foreground}"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="Count"
+                                                    Binding="{Binding Count}"
+                                                    Width="70"/>
+                                <DataGridTextColumn Header="Last picked"
+                                                    Binding="{Binding LastPicked}"
+                                                    Width="*"/>
+                                <DataGridTemplateColumn Header="" Width="44">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <Button Style="{StaticResource Theme.IconButton}"
+                                                    Click="OnHistoryRowDelete"
+                                                    ToolTip="Remove this entry"
+                                                    Content="✕"/>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Border>
+                </DockPanel>
+            </TabItem>
+
+            <!-- ====================== Syntax ====================== -->
+            <TabItem Header="Syntax" Style="{StaticResource Theme.NavTabItem}">
+                <local:SyntaxTab/>
+            </TabItem>
+
+            <!-- ====================== Convert ===================== -->
+            <TabItem Header="Convert" Style="{StaticResource Theme.NavTabItem}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="24,16">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource Theme.PageTitle}"
+                                   Text="Myanmar → reading"/>
+                        <Border Style="{StaticResource Theme.Card}">
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource Theme.Hint}" Margin="0,0,0,8">
+                                    Type or paste a Myanmar string; the reverse-romanizer returns
+                                    its romanized reading.
+                                </TextBlock>
+                                <TextBox Name="ConvertInput" Height="80"
+                                         AcceptsReturn="True" TextWrapping="Wrap"
+                                         VerticalScrollBarVisibility="Auto"
+                                         FontFamily="Myanmar Text, Segoe UI" FontSize="16"
+                                         Margin="0,4,0,8"/>
+                                <Button Name="ConvertButton" Click="OnConvertClick"
+                                        Style="{StaticResource Theme.AccentButton}"
+                                        Content="Reverse-romanize"
+                                        HorizontalAlignment="Left" Margin="0,0,0,12"/>
+                                <TextBlock Style="{StaticResource Theme.SectionHeader}"
+                                           Text="Reading"/>
+                                <TextBox Name="ConvertOutput" Height="80"
+                                         IsReadOnly="True" AcceptsReturn="True"
+                                         TextWrapping="Wrap"
+                                         VerticalScrollBarVisibility="Auto"
+                                         FontFamily="Consolas, Cascadia Mono"
+                                         FontSize="14"
+                                         Margin="0,4,0,0"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- =================== Diagnostics ==================== -->
+            <TabItem Header="Diagnostics" Style="{StaticResource Theme.NavTabItem}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="24,16">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource Theme.PageTitle}" Text="Diagnostics"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                            <Button Name="DiagRefreshButton" Click="OnDiagnosticsRefresh"
+                                    Content="Refresh" Margin="0,0,8,0"/>
+                            <Button Name="DiagCopyButton" Click="OnDiagnosticsCopy"
+                                    Content="Copy raw JSON"/>
+                        </StackPanel>
+
+                        <!-- Structured view of the parsed diagnostics JSON. -->
+                        <Border Name="DiagStructuredCard"
+                                Style="{StaticResource Theme.Card}"
+                                Margin="0,0,0,16">
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource Theme.SectionHeader}"
+                                           Text="Engine"/>
+                                <Grid Margin="0,4,0,12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="140"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Version"
+                                               Foreground="{DynamicResource Theme.ForegroundMuted}"/>
+                                    <TextBlock Grid.Column="1" Name="DiagVersion"
+                                               FontFamily="Consolas, Cascadia Mono"
+                                               Foreground="{DynamicResource Theme.Foreground}"/>
+                                </Grid>
+
+                                <TextBlock Style="{StaticResource Theme.SectionHeader}"
+                                           Text="Lexicon"/>
+                                <Grid Margin="0,4,0,4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="140"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="File"
+                                               Foreground="{DynamicResource Theme.ForegroundMuted}"
+                                               Margin="0,0,0,2"/>
+                                    <TextBlock Grid.Row="0" Grid.Column="1" Name="DiagLexiconPath"
+                                               FontFamily="Consolas, Cascadia Mono"
+                                               FontSize="12"
+                                               TextWrapping="Wrap"
+                                               Foreground="{DynamicResource Theme.Foreground}"
+                                               Margin="0,0,0,2"/>
+                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Size"
+                                               Foreground="{DynamicResource Theme.ForegroundMuted}"/>
+                                    <TextBlock Grid.Row="1" Grid.Column="1" Name="DiagLexiconSize"
+                                               FontFamily="Consolas, Cascadia Mono"
+                                               Foreground="{DynamicResource Theme.Foreground}"/>
+                                </Grid>
+
+                                <Separator Margin="0,8" Background="{DynamicResource Theme.Divider}"/>
+
+                                <TextBlock Style="{StaticResource Theme.SectionHeader}"
+                                           Text="Language model"/>
+                                <Grid Margin="0,4,0,4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="140"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="File"
+                                               Foreground="{DynamicResource Theme.ForegroundMuted}"
+                                               Margin="0,0,0,2"/>
+                                    <TextBlock Grid.Row="0" Grid.Column="1" Name="DiagLMPath"
+                                               FontFamily="Consolas, Cascadia Mono"
+                                               FontSize="12"
+                                               TextWrapping="Wrap"
+                                               Foreground="{DynamicResource Theme.Foreground}"
+                                               Margin="0,0,0,2"/>
+                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Size"
+                                               Foreground="{DynamicResource Theme.ForegroundMuted}"/>
+                                    <TextBlock Grid.Row="1" Grid.Column="1" Name="DiagLMSize"
+                                               FontFamily="Consolas, Cascadia Mono"
+                                               Foreground="{DynamicResource Theme.Foreground}"/>
+                                </Grid>
+
+                                <Separator Margin="0,8" Background="{DynamicResource Theme.Divider}"/>
+
+                                <TextBlock Style="{StaticResource Theme.SectionHeader}"
+                                           Text="User history"/>
+                                <Grid Margin="0,4,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="140"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="File"
+                                               Foreground="{DynamicResource Theme.ForegroundMuted}"
+                                               Margin="0,0,0,2"/>
+                                    <TextBlock Grid.Row="0" Grid.Column="1" Name="DiagHistoryPath"
+                                               FontFamily="Consolas, Cascadia Mono"
+                                               FontSize="12"
+                                               TextWrapping="Wrap"
+                                               Foreground="{DynamicResource Theme.Foreground}"
+                                               Margin="0,0,0,2"/>
+                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Size"
+                                               Foreground="{DynamicResource Theme.ForegroundMuted}"/>
+                                    <TextBlock Grid.Row="1" Grid.Column="1" Name="DiagHistorySize"
+                                               FontFamily="Consolas, Cascadia Mono"
+                                               Foreground="{DynamicResource Theme.Foreground}"/>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <!--
+                            Fall-through view: if the JSON failed to parse
+                            (FFI unavailable / older shim format), show the
+                            raw payload so bug reports still capture it.
+                        -->
+                        <Expander Name="DiagRawExpander"
+                                  Header="Raw JSON"
+                                  Visibility="Collapsed"
+                                  Foreground="{DynamicResource Theme.Foreground}">
+                            <Border Style="{StaticResource Theme.Card}" Padding="0" Margin="0,8,0,0">
+                                <TextBox Name="DiagRawOutput"
+                                         IsReadOnly="True" AcceptsReturn="True"
+                                         TextWrapping="Wrap"
+                                         VerticalScrollBarVisibility="Auto"
+                                         MaxHeight="240"
+                                         FontFamily="Consolas, Cascadia Mono"
+                                         FontSize="12"
+                                         BorderThickness="0"
+                                         Background="Transparent"/>
+                            </Border>
+                        </Expander>
+
+                        <TextBlock Name="DiagStatus"
+                                   Style="{StaticResource Theme.Hint}"
+                                   Margin="0,8,0,0"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+        </TabControl>
+    </Grid>
 </Window>

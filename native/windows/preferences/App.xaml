@@ -3,11 +3,17 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
-        <!--
-            Single global brush palette so the app responds to the
-            system's light theme cleanly. Dark-mode follow-up is
-            deferred; WPF on .NET 9 doesn't auto-theme the way
-            WinUI 3 does, so dark mode needs explicit handling.
-        -->
+        <ResourceDictionary>
+            <!--
+                Fluent / Win11 control palette. Brushes underneath are
+                rebuilt by Theme.cs (which reads the system Personalize
+                key on startup and re-reads on WM_SETTINGCHANGE), so
+                everything here that references {DynamicResource Theme.*}
+                follows the live system theme.
+            -->
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Resources/Fluent.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
     </Application.Resources>
 </Application>

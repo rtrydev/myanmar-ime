@@ -37,6 +37,15 @@ public partial class App : Application
         // search path.
         NativeLibrary.SetDllImportResolver(typeof(Ffi).Assembly, ResolveBurmeseFfi);
 
+        // Publish the initial Theme.* brushes BEFORE base.OnStartup
+        // dispatches StartupUri, otherwise MainWindow.xaml parses while
+        // the resource keys are still missing and WPF logs binding
+        // errors (and the window flashes default WPF chrome for a
+        // frame). Apply() seeds App.Resources from the system
+        // Personalize key; per-window MicaB / dark-mode DWM hints are
+        // applied later via Theme.HookWindow in MainWindow.
+        Theme.Apply();
+
         base.OnStartup(e);
         LogInfo($"started, BaseDirectory={AppContext.BaseDirectory}");
     }
