@@ -89,11 +89,49 @@ FfiLibrary& FfiLibrary::operator=(FfiLibrary&& other) noexcept {
 }
 
 void FfiLibrary::unload() noexcept {
-    if (module_) {
-        FreeLibrary(module_);
-        module_ = nullptr;
-        table_ = FfiTable{};
-    }
+    // Deliberately DO NOT FreeLibrary. The Swift runtime that ships
+    // with BurmeseIMEFFI.dll has a buggy DLL_PROCESS_DETACH handler:
+    // when invoked from a process that still has live user threads
+    // (which is exactly what FreeLibrary mid-process-life does), it
+    // enters a busy-wait that never terminates — observed as a
+    // 100% CPU hang in the host process that pins it in Task Manager
+    // even after the user closes the window.
+    //
+    // Repro sequence:
+    //   1. User opens Notepad → TextService activates, we LoadLibraryEx.
+    //   2. User closes Notepad → TSF calls Deactivate, then Releases the
+    //      TIP. Refcount hits zero, TextService is destroyed.
+    //   3. ~FfiLibrary used to FreeLibrary(BurmeseIMEFFI.dll) here,
+    //      on Notepad's main thread, while engine-worker / settings-
+    //      watcher / Swift-internal threads were still alive.
+    //   4. Swift's DLL_PROCESS_DETACH spun forever → main thread stuck
+    //      inside FreeLibrary → Notepad never reaches ExitProcess →
+    //      process stays in Task Manager at 100% CPU.
+    //
+    // The simpler and correct fix: never FreeLibrary. The DLL stays
+    // loaded for the rest of the host process's lifetime. At real
+    // process exit, Windows has already suspended every other thread
+    // before calling DLL_PROCESS_DETACH, so Swift's cleanup runs
+    // against a quiescent runtime and completes cleanly.
+    //
+    // Side effects of leaking the load:
+    //   * Module-handle refcount stays positive — harmless, the OS
+    //     reclaims at process exit regardless.
+    //   * The file C:\Program Files\Myangler\BurmeseIMEFFI.dll cannot
+    //     be deleted while any host process has it loaded — same
+    //     constraint we had with FreeLibrary (the host's import
+    //     reference would have held it anyway).
+    //   * Subsequent FfiLibrary instances in the same process call
+    //     LoadLibraryEx again; Windows returns the cached handle and
+    //     just bumps the refcount. They will also skip FreeLibrary,
+    //     so the count climbs over time — but per-process, not
+    //     per-system.
+    //
+    // We DO clear the function-pointer table so any stray post-
+    // destruction access through `table()` segfaults loudly rather
+    // than silently dispatching to a stale function pointer.
+    module_ = nullptr;
+    table_ = FfiTable{};
 }
 
 bool FfiLibrary::load(HMODULE selfModule) noexcept {
