@@ -102,6 +102,13 @@ Copy-Item -LiteralPath $shimDll      -Destination $staging
 Copy-Item -LiteralPath $registerExe  -Destination $staging
 Copy-Item -LiteralPath (Join-Path $vcpkg 'bin\sqlite3.dll') -Destination $staging
 
+# Brand icon. Referenced by Package.wxs ARPPRODUCTICON (so Apps &
+# Features shows the Myangler brand). The .ico itself isn't shipped
+# as a file — wix embeds it into the MSI's icon table and Windows
+# extracts it on install.
+Copy-Item -LiteralPath (Join-Path $repo 'native\windows\preferences\Resources\myangler.ico') `
+          -Destination $staging
+
 # Engine data: lexicon + LM. Source today is native\macos\Data\
 # because the corpus pipeline still emits there; the installer just
 # copies. If the pipeline output later moves to a shared location,

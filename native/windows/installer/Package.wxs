@@ -36,7 +36,7 @@
   <Package
     Name="Myangler Burmese IME"
     Manufacturer="Myangler"
-    Version="0.1.6"
+    Version="0.1.18"
     UpgradeCode="B8754B45-25C4-4C47-904B-5C80897E9446"
     Scope="perMachine"
     Compressed="yes">
@@ -54,6 +54,18 @@
       loose files alongside it.
     -->
     <MediaTemplate EmbedCab="yes" />
+
+    <!--
+      Brand icon for Add/Remove Programs (Apps & Features). The same
+      multi-resolution .ico re-rendered from native/linux/data/
+      myangler.svg that the Preferences app embeds via
+      <ApplicationIcon> in its csproj. Staged into build/staging/ by
+      build.ps1 so this reference resolves at wix-build time.
+      ARPPRODUCTICON is the WiX-recognised property name; the Id
+      must end in .ico per WiX convention.
+    -->
+    <Icon Id="MyanglerIcon.ico" SourceFile="build\staging\myangler.ico" />
+    <Property Id="ARPPRODUCTICON" Value="MyanglerIcon.ico" />
 
     <!--
       Standard install dirs:

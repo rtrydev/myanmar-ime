@@ -5,7 +5,8 @@
         Width="720" Height="540"
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanResize"
-        MinWidth="600" MinHeight="420">
+        MinWidth="600" MinHeight="420"
+        Icon="pack://application:,,,/Resources/myangler.ico">
     <Window.Resources>
         <Style TargetType="TabItem">
             <Setter Property="Padding" Value="14,6"/>

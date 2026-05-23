@@ -26,7 +26,27 @@
     <RootNamespace>Myangler.Preferences</RootNamespace>
     <AssemblyName>BurmeseIMEPreferences</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!--
+      ApplicationIcon sets the embedded Win32 icon resource on the
+      .exe (the icon Explorer/taskbar/Alt-Tab pick up) AND becomes
+      the default WPF Window icon when MainWindow.xaml doesn't
+      override it. The file is checked in at
+      Resources\myangler.ico — a multi-resolution .ico re-rendered
+      from native/linux/data/myangler.svg so the macOS, Linux, and
+      Windows shells all wear the same identity.
+    -->
+    <ApplicationIcon>Resources\myangler.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Bundled as a content file too, so MainWindow.xaml can reference
+      it via pack URI for the Window.Icon binding (and we have the
+      .ico available at runtime alongside the exe for shortcut-target
+      and any future "browse to icon" affordances).
+    -->
+    <Resource Include="Resources\myangler.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <!--
