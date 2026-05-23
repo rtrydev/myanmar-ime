@@ -31,7 +31,7 @@ Windows equivalents (PowerShell):
 # SQLite via vcpkg manifest (repo ships vcpkg.json):
 & "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\vcpkg\vcpkg.exe" `
     install --triplet x64-windows
-# Installer tooling (optional, only for the planned WiX MSI):
+# Installer tooling (only for the MSI build, not for the core):
 dotnet tool install --global wix
 ```
 
@@ -71,6 +71,7 @@ Packages/BurmeseIMECore/        pure Swift engine package
   Tools/corpus_builder/         corpus -> TSV + SQLite + LM
 native/macos/                   IMK bundle, SwiftUI prefs, installer
 native/linux/                   IBus C engine, Swift FFI, GTK prefs, deb
+native/windows/                 TSF text service DLL, Swift FFI, WPF prefs, WiX MSI
 ```
 
 The core has no macOS-only runtime dependency. SQLite imports must use:
@@ -537,21 +538,66 @@ Subdirectories:
   a process that still has live user threads — observed as a 100%
   CPU pin on host close before we ripped out the FreeLibrary).
 - `preferences/` — `BurmeseIMEPreferences.exe`, WPF + .NET 9
-  self-contained single-file. Five tabs (Setup · Preferences ·
-  History · Convert · Diagnostics) matching macOS / Linux. Binds
+  self-contained, multi-file publish (NOT single-file — WPF on
+  .NET 9 unreliably extracts its native sidecars on first launch
+  and crashes deep in HwndSubclass before the OnStartup logger
+  runs; build.ps1 keeps the publish multi-file and the MSI ships
+  the whole tree). Six tabs (Setup · Preferences · History ·
+  Syntax · Convert · Diagnostics) matching macOS / Linux. Binds
   the eight settings to `HKCU\Software\Myangler\BurmeseIME`, reads
   history via `Microsoft.Data.Sqlite`, P/Invokes
   `burmese_engine_reverse_romanize` + `_diagnostics` for the
-  Convert / Diagnostics tabs.
-- `installer/` — WiX 7 source + `build.ps1`. Stages every shipping
-  artefact under `installer/build/staging/`, then `wix build`.
-  Produces a per-machine MSI with a Start Menu shortcut to the
-  Preferences app. Two custom actions wrap
-  `register_profile.exe install` / `uninstall` so the MSI's
-  registration path is byte-identical to what a dev would run by
-  hand. `register_profile.exe` itself is just
-  `LoadLibrary` + `GetProcAddress("DllRegisterServer")` against
+  Convert / Diagnostics tabs (Diagnostics parses the JSON into
+  structured rows; the raw payload is kept behind an expander for
+  bug reports). `Theme.cs` reads the system Personalize key
+  (`HKCU\...\Themes\Personalize::AppsUseLightTheme`) + DWM
+  `AccentColor` at startup and on every `WM_SETTINGCHANGE`,
+  republishes a fixed set of `Theme.*` dynamic brushes that
+  `Resources/Fluent.xaml` references — the whole app follows
+  Windows light/dark + accent live. `Theme.HookWindow` also pokes
+  DWM's `IMMERSIVE_DARK_MODE`, `WINDOW_CORNER_PREFERENCE`, and
+  `SYSTEMBACKDROP_TYPE=MAINWINDOW` so the title bar, shadow, and
+  Mica fill match the in-window palette. `Romanization.cs` is a
+  C# snapshot of the Swift romanization tables used by the
+  Syntax tab — keep it in sync when the canonical tables in
+  `Packages/BurmeseIMECore/Sources/BurmeseIMECore/Romanization.swift`
+  change.
+- `installer/` — WiX 7 source + `build.ps1` + `License.rtf`.
+  Stages every shipping artefact under `installer/build/staging/`,
+  then `wix build -ext WixToolset.UI.wixext` (the extension brings
+  in `WixUI_Minimal`, the welcome+license+progress+completion
+  dialog set; without it the MSI runs at Basic UI level and exits
+  silently with no completion dialog — a real bug-magnet). The
+  install pipeline:
+    * `WixUI_Minimal` UI with a bundled brief License.rtf.
+    * Explicit `Upgrade` table — NOT the convenience `MajorUpgrade`
+      element. Three `UpgradeVersion` ranges detect strictly-newer
+      (block with downgrade dialog), strictly-older (silent
+      uninstall + replace), and same-version (block with a "use
+      Repair / Modify or uninstall first" `Launch` dialog instead
+      of the silent quit msiexec defaults to when the new install
+      offers nothing to do). `Launch` dialogs gate on
+      `NOT XVERSIONFOUND OR Installed` so maintenance / removal
+      passes still work.
+    * `RemoveExistingProducts` scheduled `After="InstallInitialize"`
+      (early), not the WiX-default `afterInstallExecute`. The late
+      schedule had bitten us with same-version-upgrade-replace
+      semantics: new files were copied on top of old, then the late
+      RemoveExistingProducts triggered the OLD install's RemoveFiles
+      which deleted the freshly-copied new files (same file paths),
+      leaving stale exe on disk + double entries in Apps & Features.
+    * Per-machine install under `%ProgramFiles%\Myangler\` with a
+      Start Menu shortcut to the Preferences app.
+  Three custom actions wrap `register_profile.exe install` /
+  `set-default` / `uninstall` so the MSI's registration path is
+  byte-identical to what a dev would run by hand.
+  `register_profile.exe` itself is just `LoadLibrary` +
+  `GetProcAddress("DllRegisterServer")` against
   `BurmeseIMETIP.dll`, so `regsvr32 BurmeseIMETIP.dll` works too.
+  The MSI `Version` attribute in `Package.wxs` and the
+  `BurmeseIMEFFIVersion` constant in
+  `native/linux/swift-shim/Sources/BurmeseIMEFFI/FFI.swift` must
+  be bumped in lockstep — the Diagnostics tab surfaces the latter.
 
 **Architecture sketch — keep this map handy.** Every TIP-side type
 maps to something in the macOS controller or `engine.c`; reading
@@ -597,6 +643,23 @@ would clip below the work area. Keyboard nav (Up/Down/Tab/PageUp/
 PageDown) routes through the existing keymap's Nav* branches.
 `WM_MOUSEACTIVATE` returns `MA_NOACTIVATE` so clicking the panel
 doesn't steal focus from the host text field.
+
+Theming: reads `HKCU\...\Themes\Personalize::AppsUseLightTheme`
+and `HKCU\Software\Microsoft\Windows\DWM::AccentColor` at create
+and on every `WM_SETTINGCHANGE` /
+`WM_DWMCOLORIZATIONCOLORCHANGED`, then rebuilds the D2D solid-color
+brushes from the resolved palette. Selection is an accent-tinted
+rounded pill with a leading accent sliver. The window also calls
+`DwmSetWindowAttribute` for `IMMERSIVE_DARK_MODE`,
+`WINDOW_CORNER_PREFERENCE=ROUND`, and `SYSTEMBACKDROP_TYPE=
+TRANSIENT_WINDOW` so the OS chrome + shadow + corner radius
+match the palette on Win11; the calls fail silently on Win10
+without harm. `CandidatePageSize` is re-read from
+`HKCU\Software\Myangler\BurmeseIME` on every snapshot (was hard
+coded to 9), so the user's Preferences value drives the panel
+height without an IPC round trip. A footer band shows
+"page X/Y · N candidates" whenever the candidate list exceeds
+one page.
 
 **Win11 immersive shell.** The Win11 Start Menu / Search Bar
 (`SearchHost.exe`) and UWP apps run in TSF immersive mode

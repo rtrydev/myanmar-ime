@@ -62,7 +62,7 @@ Developer PowerShell**:
 # One-time prerequisites — see "Requirements" below.
 cd native\windows\installer
 .\build.ps1
-# -> build\Myangler-Burmese-IME.msi (~91 MB)
+# -> build\Myangler-Burmese-IME.msi (~97 MB)
 ```
 
 Install on the same machine (or any other Windows 10/11 host) from
@@ -299,7 +299,8 @@ myanmar-ime/
 │   ├── Tools/corpus_builder/       corpus -> TSV + SQLite + LM
 │   └── Tests/
 ├── native/macos/                   IMK bundle, SwiftUI Preferences, pkg
-└── native/linux/                   IBus engine, Swift shim, GTK prefs, deb
+├── native/linux/                   IBus engine, Swift shim, GTK prefs, deb
+└── native/windows/                 TSF text service DLL, Swift shim, WPF prefs, WiX MSI
 ```
 
 The core package has no macOS-only runtime dependency. SQLite imports use
@@ -344,7 +345,13 @@ macOS stores settings in the shared
 under `~/Library/Application Support/BurmeseIME/UserHistory.sqlite`.
 Linux mirrors settings through GSettings schema
 `com.myangler.inputmethod.burmese` and stores history at
-`~/.local/share/myangler/UserHistory.sqlite`.
+`~/.local/share/myangler/UserHistory.sqlite`. Windows stores settings
+under `HKCU\Software\Myangler\BurmeseIME` (the TSF DLL watches the key
+via `RegNotifyChangeKeyValue` so changes from the Preferences app
+propagate within a message-pump tick) and history at
+`%LOCALAPPDATA%\Myangler\UserHistory.sqlite` — with a per-AppContainer
+fallback under `%LOCALAPPDATA%\Packages\<family>\AC\Myangler\` for
+hosts like `SearchHost.exe`.
 
 ---
 
@@ -448,7 +455,9 @@ These files are generated together and must not be hand-edited:
 - `Packages/BurmeseIMECore/Data/BurmeseLexiconSource.tsv`;
 - `native/macos/Data/BurmeseLexicon.sqlite`;
 - `native/macos/Data/BurmeseLM.bin`;
-- Linux staging copies/symlinks under `native/linux/data/staging/`.
+- Linux staging copies/symlinks under `native/linux/data/staging/`;
+- Windows `installer/build.ps1` copies the two `native/macos/Data/`
+  artefacts into the MSI staging tree; no separate Windows source.
 
 Regenerate through the corpus pipeline:
 

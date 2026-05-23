@@ -48,7 +48,7 @@ Build the whole MSI:
 ```powershell
 cd native\windows\installer
 .\build.ps1
-# -> build\Myangler-Burmese-IME.msi  (~91 MB)
+# -> build\Myangler-Burmese-IME.msi  (~97 MB)
 ```
 
 Install on this machine (elevated):
