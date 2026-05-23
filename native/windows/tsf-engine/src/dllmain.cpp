@@ -102,6 +102,25 @@ extern "C" HRESULT __stdcall DllCanUnloadNow() {
 
 extern "C" HRESULT __stdcall DllRegisterServer() {
     burmese::log_line(L"DllRegisterServer pid=%u", GetCurrentProcessId());
+
+    // Scrub-first. WiX MajorUpgrade with the default
+    // Schedule="afterInstallExecute" does NOT reliably run the OLD
+    // version's deferred UnregisterTip custom action — observed empirically
+    // when 0.1.16 → 0.1.17 left 0.1.16's stale TSF categories in HKLM, which
+    // poisoned 0.1.17's behavior. Doing an idempotent unregister at the top
+    // of DllRegisterServer guarantees a clean baseline before fresh
+    // registration writes the current category + COM entries. Cost: two
+    // extra registry sweeps per install, both ~milliseconds. Benefit:
+    // a bad-release ship can't permanently damage a user's HKLM — the
+    // next clean release self-heals on install.
+    //
+    // The unregister helpers use kUnregisterCategories (the superset of
+    // every category any historical version has ever written), so this
+    // is safe even if a future release reintroduces extra categories
+    // and we have to roll back again.
+    burmese::unregister_profile_and_category();
+    burmese::unregister_inproc_server();
+
     HRESULT hr = burmese::register_inproc_server();
     if (FAILED(hr)) {
         burmese::log_line(L"  register_inproc_server failed 0x%08X", static_cast<unsigned>(hr));
