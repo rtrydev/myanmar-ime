@@ -115,9 +115,10 @@ HRESULT setCompositionTextAndCaret(TfEditCookie ec,
 
 // ---- Composition operations ----------------------------------------
 
-void TextService::renderPreedit(ITfContext* ctx) noexcept {
+void TextService::renderPreedit(ITfContext* ctx,
+                                const std::wstring* overrideText) noexcept {
     if (!ctx) return;
-    const std::wstring preedit = widen_utf8(buffer_);
+    const std::wstring preedit = overrideText ? *overrideText : widen_utf8(buffer_);
 
     runEditSession(ctx, clientId_, TF_ES_SYNC | TF_ES_READWRITE,
         [this, ctx, preedit](TfEditCookie ec) -> HRESULT {

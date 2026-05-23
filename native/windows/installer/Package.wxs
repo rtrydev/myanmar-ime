@@ -36,7 +36,7 @@
   <Package
     Name="Myangler Burmese IME"
     Manufacturer="Myangler"
-    Version="0.1.18"
+    Version="0.1.27"
     UpgradeCode="B8754B45-25C4-4C47-904B-5C80897E9446"
     Scope="perMachine"
     Compressed="yes">

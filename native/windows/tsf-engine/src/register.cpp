@@ -199,14 +199,32 @@ const GUID* const kRegisterCategories[] = {
     &GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT,
     &GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT,
     &GUID_TFCAT_TIPCAP_UIELEMENTENABLED,
+    // Bisection conclusion (0.1.21–0.1.24): per-category testing of 4 of
+    // the 5 undocumented extras Pinyin registers confirmed that
+    // categories are NOT what gates Win11 immersive shell candidate-UI
+    // rendering. Even with kDisplayAttributeProperty + kTipcapSecureMode
+    // + kTipcapComLess all safely registered, BeginUIElement in
+    // SearchHost still returns pbShow=TRUE and the shell never calls
+    // SetSelection/Show on our UI element. The gate is almost certainly
+    // a LANGID whitelist (East-Asian only — Japanese 0411, Korean 0412,
+    // Chinese 0404/0804); Burmese 0455 isn't in that club because
+    // Burmese is traditionally a keyboard-layout language, not an IME
+    // language. Reverted to the documented 5 here; the inline-preedit
+    // fallback in TextService::publishCandidateSnapshot handles
+    // immersive hosts instead. Full bisection notes in
+    // memory/win_tsf_immersive_categories.md.
 };
 
-// Categories unregister_profile_and_category SCRUBS. Superset that
-// includes the undocumented ones we briefly registered in 0.1.16,
-// so a fresh install of 0.1.17+ over 0.1.16 (or a manual
-// uninstall) clears every category we have ever written.
-// UnregisterCategory on a category that isn't registered is a
-// silent no-op, so the extras here are safe.
+// Categories unregister_profile_and_category SCRUBS. Superset of
+// every category any historical version has ever written —
+// currently the safe 5 plus the 5 undocumented Pinyin-style ones
+// that 0.1.16 and the 0.1.19–0.1.24 bisection passes briefly
+// registered before we confirmed they don't unlock Win11 shell
+// candidate rendering (and one — InputModeCompartment — actively
+// breaks key handling). Keeping the superset here means a fresh
+// install of any later version self-heals stale HKLM state from
+// any of those releases. UnregisterCategory on a category that
+// isn't registered is a silent no-op so the extras here are safe.
 const GUID* const kUnregisterCategories[] = {
     &GUID_TFCAT_TIP_KEYBOARD,
     &GUID_TFCAT_DISPLAYATTRIBUTEPROVIDER,

@@ -101,7 +101,18 @@ public:
     // Called from the keystroke path after every buffer mutation so
     // the user sees their typing land immediately, independent of
     // engine latency.
-    void renderPreedit(ITfContext* ctx) noexcept;
+    //
+    // `overrideText` overrides the default (widened `buffer_`) when
+    // non-null. Used by the immersive-mode fallback in
+    // publishCandidateSnapshot: when the engine returns and we
+    // detect the host is an immersive shell (where our HWND popup
+    // is invisible), we re-render the preedit using the selected
+    // candidate's Burmese surface so the user sees the conversion
+    // inline. Each next keystroke renders the latin again, then
+    // engine result re-renders the surface; brief latin-to-burmese
+    // flicker per keystroke is accepted in this mode.
+    void renderPreedit(ITfContext* ctx,
+                       const std::wstring* overrideText = nullptr) noexcept;
 
     // Drop into an edit session, set the composition text to
     // `final_text` (UTF-8), end the composition, advance the
@@ -207,6 +218,28 @@ private:
     DWORD                      uiElementId_      = TF_INVALID_UIELEMENTID;
     bool                       uiElementShowsOwn_ = true;
 
+    // TF_TMF_IMMERSIVEMODE was set on Activate. When true, our
+    // CandidateWindow popup is invisible behind the immersive shell
+    // overlay AND BeginUIElement won't volunteer to render either
+    // (Win11 hardcodes its native candidate UI to East-Asian
+    // LANGIDs; Burmese isn't in that whitelist — confirmed by
+    // exhaustive category bisection 0.1.21–0.1.24). The fallback:
+    // the latin preedit stays as the default view (matching classic
+    // hosts when the candidate panel is visible) — Space commits
+    // the top candidate. Nav keys (Up/Down/PageUp/PageDown/Tab)
+    // cycle through candidates and re-render the preedit with the
+    // newly-selected candidate's Burmese surface so the user can
+    // see which alternative they're committing to.
+    bool                       immersiveMode_ = false;
+
+    // Toggles whether the next publishCandidateSnapshot should
+    // override the latin preedit with the selected candidate's
+    // surface. Off by default (latin preedit shows). Flipped on
+    // by any Nav key in immersive mode (so the cycled selection
+    // is visible). Reset by any buffer-mutating key (Typeable /
+    // Backspace) and by commit / cancel.
+    bool                       immersiveShowingSelection_ = false;
+
     // Apply the freshly parsed snapshot to whichever UI surface
     // the host wants — system-managed candidate panel
     // (uiElementShowsOwn_ == false) or our own CandidateWindow.
@@ -233,6 +266,15 @@ private:
     void onUiSelect(int index) noexcept;
     void onUiFinalize()         noexcept;
     void onUiAbort()            noexcept;
+
+    // Immersive-mode fallback: refresh the dotted preedit to show
+    // the surface of whatever candidateWindow_.selectedIndex()
+    // currently points at. Called from the keystroke path after
+    // Nav* actions cycled the selection so the user sees their
+    // pick reflected inline (the actual candidate window is
+    // invisible behind the shell overlay in immersive hosts).
+    // No-op outside immersive mode or when there are no candidates.
+    void refreshImmersivePreedit() noexcept;
 
     // Atom for GUID_DisplayAttributeInput, registered with the TSF
     // category manager during Activate. TF_INVALID_GUIDATOM means

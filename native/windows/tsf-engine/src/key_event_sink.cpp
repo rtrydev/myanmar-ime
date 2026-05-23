@@ -139,6 +139,10 @@ bool TextService::handleKeyDown(ITfContext* ctx, WPARAM vk, LPARAM /*lParam*/, b
         case KeymapAction::Typeable: {
             if (test) return true;
             buffer_.push_back(km.typed_char);
+            // Any new keystroke invalidates the cycled selection in
+            // immersive mode — preedit goes back to latin until the
+            // user cycles again on the fresh candidate set.
+            immersiveShowingSelection_ = false;
             // Render preedit BEFORE scheduling the async engine
             // update so the user always sees their typing land
             // immediately, even if the engine is busy. This is the
@@ -151,6 +155,7 @@ bool TextService::handleKeyDown(ITfContext* ctx, WPARAM vk, LPARAM /*lParam*/, b
             if (buffer_.empty()) return false;
             if (test) return true;
             buffer_.pop_back();
+            immersiveShowingSelection_ = false;
             renderPreedit(ctx);
             if (buffer_.empty()) {
                 // Whole composition gone. Drop pending work and
@@ -211,21 +216,28 @@ bool TextService::handleKeyDown(ITfContext* ctx, WPARAM vk, LPARAM /*lParam*/, b
             if (!candidateWindow_.isVisible()) return false;
             if (test) return true;
             candidateWindow_.moveUp();
+            // Refresh the inline preedit so the new selection is
+            // visible in immersive hosts where the popup itself is
+            // composited behind the shell. No-op in classic hosts.
+            refreshImmersivePreedit();
             return true;
         case KeymapAction::NavDown:
             if (!candidateWindow_.isVisible()) return false;
             if (test) return true;
             candidateWindow_.moveDown();
+            refreshImmersivePreedit();
             return true;
         case KeymapAction::NavPageUp:
             if (!candidateWindow_.isVisible()) return false;
             if (test) return true;
             candidateWindow_.pageUp();
+            refreshImmersivePreedit();
             return true;
         case KeymapAction::NavPageDown:
             if (!candidateWindow_.isVisible()) return false;
             if (test) return true;
             candidateWindow_.pageDown();
+            refreshImmersivePreedit();
             return true;
         case KeymapAction::NavHome:
         case KeymapAction::NavEnd:

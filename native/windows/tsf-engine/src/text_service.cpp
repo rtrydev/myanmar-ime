@@ -147,10 +147,12 @@ HRESULT STDMETHODCALLTYPE TextService::ActivateEx(ITfThreadMgr* mgr, TfClientId 
         if (SUCCEEDED(mgr->QueryInterface(IID_PPV_ARGS(mgrEx.put()))) && mgrEx) {
             DWORD flags = 0;
             HRESULT hr = mgrEx->GetActiveFlags(&flags);
+            const bool immersive = SUCCEEDED(hr) && (flags & TF_TMF_IMMERSIVEMODE);
+            immersiveMode_ = immersive;
             log_line(L"  ITfThreadMgrEx::GetActiveFlags hr=0x%08X flags=0x%08X (IMMERSIVEMODE=%d)",
-                     static_cast<unsigned>(hr), flags,
-                     (flags & TF_TMF_IMMERSIVEMODE) ? 1 : 0);
+                     static_cast<unsigned>(hr), flags, immersive ? 1 : 0);
         } else {
+            immersiveMode_ = false;
             log_line(L"  ITfThreadMgrEx unavailable");
         }
     }
@@ -463,6 +465,29 @@ void TextService::publishCandidateSnapshot(const ParsedSnapshot& snap) noexcept 
         // we don't ship a duplicate panel behind theirs.
         candidateWindow_.hide();
     }
+
+    // ---- Immersive-mode inline preedit override ----
+    //
+    // In immersive hosts (Win11 Search Bar / UWP) our HWND popup is
+    // composited behind the shell's XAML surface and invisible —
+    // confirmed by exhaustive category bisection 0.1.21–0.1.24, the
+    // shell-renders path is gated on a Microsoft-internal mechanism
+    // (likely a LANGID whitelist for East-Asian IMEs). Fallback
+    // model: latin preedit is the default view (matches what
+    // classic hosts show when the candidate panel is visible);
+    // Space commits the top candidate. Nav keys cycle and switch
+    // the preedit to the selected candidate's Burmese surface so
+    // the user can see what they'll commit. immersiveShowingSelection_
+    // is the toggle — set by refreshImmersivePreedit() in the Nav
+    // path, cleared by any buffer mutation / commit / cancel.
+    if (immersiveMode_ && immersiveShowingSelection_ && nonEmpty && currentContext_) {
+        const int sel = std::clamp(snap.selected, 0,
+                                   static_cast<int>(snap.candidates.size()) - 1);
+        std::wstring surface = widen(snap.candidates[static_cast<size_t>(sel)].surface);
+        if (!surface.empty()) {
+            renderPreedit(currentContext_.get(), &surface);
+        }
+    }
 }
 
 void TextService::endCandidateUIElement() noexcept {
@@ -479,6 +504,21 @@ void TextService::endCandidateUIElement() noexcept {
 void TextService::hideCandidatePanel() noexcept {
     endCandidateUIElement();
     candidateWindow_.hide();
+    immersiveShowingSelection_ = false;
+}
+
+void TextService::refreshImmersivePreedit() noexcept {
+    if (!immersiveMode_ || !currentContext_) return;
+    if (lastSnapshot_.candidates.empty()) return;
+    const int total = static_cast<int>(lastSnapshot_.candidates.size());
+    const int sel = std::clamp(candidateWindow_.selectedIndex(), 0, total - 1);
+    std::wstring surface = widen(lastSnapshot_.candidates[static_cast<size_t>(sel)].surface);
+    if (surface.empty()) return;
+    // Flip the toggle so a follow-up engine result (e.g. the user
+    // keeps cycling and another snapshot arrives) keeps showing the
+    // selected candidate's surface instead of reverting to latin.
+    immersiveShowingSelection_ = true;
+    renderPreedit(currentContext_.get(), &surface);
 }
 
 // Shell selected a different candidate (clicked a row, used arrow
