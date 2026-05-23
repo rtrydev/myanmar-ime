@@ -23,6 +23,7 @@ HRESULT register_inproc_server() noexcept;
 HRESULT unregister_inproc_server() noexcept;
 HRESULT register_profile_and_category() noexcept;
 HRESULT unregister_profile_and_category() noexcept;
+HRESULT set_user_default_profile() noexcept;
 
 } // namespace burmese
 
@@ -121,4 +122,15 @@ extern "C" HRESULT __stdcall DllUnregisterServer() {
     burmese::log_line(L"DllUnregisterServer pid=%u", GetCurrentProcessId());
     burmese::unregister_profile_and_category();
     return burmese::unregister_inproc_server();
+}
+
+// Set the current user's preferred IM for the Burmese language to
+// Myangler. Writes to HKCU only — must be invoked in the user's
+// context, not from a deferred MSI custom action running as SYSTEM
+// (which has its own useless HKCU profile). The MSI achieves this
+// by scheduling a second `register_profile.exe set-default` action
+// with Impersonate="yes".
+extern "C" HRESULT __stdcall DllSetUserDefaultProfile() {
+    burmese::log_line(L"DllSetUserDefaultProfile pid=%u", GetCurrentProcessId());
+    return burmese::set_user_default_profile();
 }

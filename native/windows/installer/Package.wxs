@@ -36,7 +36,7 @@
   <Package
     Name="Myangler Burmese IME"
     Manufacturer="Myangler"
-    Version="0.1.5"
+    Version="0.1.6"
     UpgradeCode="B8754B45-25C4-4C47-904B-5C80897E9446"
     Scope="perMachine"
     Compressed="yes">
@@ -195,6 +195,28 @@
       Impersonate="no"
       Return="ignore" />
 
+    <!--
+      Per-user HKCU action: mark Myangler as the user's preferred
+      Burmese IM. MUST run impersonated (Impersonate="yes") — the
+      RegisterTip action above runs as SYSTEM (Impersonate="no") for
+      the HKLM writes it needs, but SYSTEM's HKCU is its own profile
+      and writes there don't reach the user. Splitting the two
+      keeps each pass in the context that owns the registry hive
+      it's about to touch.
+
+      Without this action: Windows treats our profile as registered
+      but not preferred, so first Win+Space pick of Myangler picks
+      the OS-default Burmese IM instead (our DLL is never loaded),
+      and focus changes revert to English on the way back.
+    -->
+    <CustomAction
+      Id="SetDefaultIME"
+      FileRef="register_profile.exe"
+      ExeCommand="set-default"
+      Execute="deferred"
+      Impersonate="yes"
+      Return="ignore" />
+
     <InstallExecuteSequence>
       <!--
         Schedule registration AFTER files land so the .exe + DLLs the
@@ -203,6 +225,7 @@
         the TIP DLL to clean up registry entries.
       -->
       <Custom Action="RegisterTip"   After="InstallFiles" Condition="NOT Installed" />
+      <Custom Action="SetDefaultIME" After="RegisterTip"  Condition="NOT Installed" />
       <Custom Action="UnregisterTip" Before="RemoveFiles" Condition="Installed AND (REMOVE=&quot;ALL&quot;)" />
     </InstallExecuteSequence>
 

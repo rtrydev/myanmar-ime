@@ -181,6 +181,32 @@ HRESULT register_profile_and_category() noexcept {
     return S_OK;
 }
 
+// Per-user HKCU: set Myangler as the user's preferred IM for
+// Burmese. Without this Windows treats our profile as merely
+// *available* — selecting Myangler in Win+Space switches the input
+// language to Burmese but uses the language's preferred IM (the OS
+// built-in Burmese IM), not ours. Symptoms: first Win+Space pick of
+// Myangler doesn't load our TIP DLL at all — the user has to pick
+// twice to switch IM *within* Burmese to Myangler. Same root cause
+// behind "focus change reverts to English": Windows resets to the
+// preferred IM on every focus transition, and Myangler isn't
+// preferred yet.
+//
+// Must run in the user's context. From a deferred MSI custom
+// action this means Impersonate="yes"; from regsvr32 /
+// register_profile.exe run interactively it's the calling user.
+// SYSTEM-context invocation is a no-op (writes go to SYSTEM's
+// HKCU profile).
+HRESULT set_user_default_profile() noexcept {
+    ComPtr<ITfInputProcessorProfiles> profiles;
+    HRESULT hr = CoCreateInstance(
+        CLSID_TF_InputProcessorProfiles, nullptr,
+        CLSCTX_INPROC_SERVER, IID_PPV_ARGS(profiles.put()));
+    if (FAILED(hr)) return hr;
+    return profiles->SetDefaultLanguageProfile(
+        kLangIdBurmese, CLSID_TextService, GUID_Profile);
+}
+
 HRESULT unregister_profile_and_category() noexcept {
     // Best-effort: missing entries are fine. Any failure we report
     // from DllUnregisterServer would block the helper from cleaning

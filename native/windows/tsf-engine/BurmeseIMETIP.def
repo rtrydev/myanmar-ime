@@ -11,3 +11,4 @@ EXPORTS
     DllCanUnloadNow         PRIVATE
     DllRegisterServer       PRIVATE
     DllUnregisterServer     PRIVATE
+    DllSetUserDefaultProfile PRIVATE

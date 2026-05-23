@@ -13,8 +13,10 @@
 // installer (which is the production deployment path).
 //
 // Usage:
-//   register_profile install     -> DllRegisterServer
-//   register_profile uninstall   -> DllUnregisterServer
+//   register_profile install      -> DllRegisterServer
+//   register_profile uninstall    -> DllUnregisterServer
+//   register_profile set-default  -> DllSetUserDefaultProfile
+//                                    (must run in user's context)
 //
 // Exit codes:
 //   0  success
@@ -44,11 +46,14 @@ std::wstring exe_directory() {
 
 void usage() {
     std::fwprintf(stderr,
-        L"usage: register_profile install|uninstall\n"
+        L"usage: register_profile install|uninstall|set-default\n"
         L"\n"
-        L"Loads BurmeseIMETIP.dll from the same directory as this exe\n"
-        L"and calls its DllRegisterServer or DllUnregisterServer entry\n"
-        L"point. Requires an elevated shell (writes HKLM).\n");
+        L"  install      Register the COM CLSID + TSF profile + categories\n"
+        L"               (writes HKLM; requires elevated shell).\n"
+        L"  uninstall    Reverse of install.\n"
+        L"  set-default  Mark Myangler as the user's preferred Burmese IM\n"
+        L"               (writes HKCU; must run in the user's context, not\n"
+        L"               as SYSTEM or a different user).\n");
 }
 
 } // namespace
@@ -57,9 +62,10 @@ int wmain(int argc, wchar_t** argv) {
     if (argc < 2) { usage(); return 1; }
 
     const wchar_t* verb = argv[1];
-    const bool install   = (std::wcscmp(verb, L"install")   == 0);
-    const bool uninstall = (std::wcscmp(verb, L"uninstall") == 0);
-    if (!install && !uninstall) { usage(); return 1; }
+    const bool install    = (std::wcscmp(verb, L"install")     == 0);
+    const bool uninstall  = (std::wcscmp(verb, L"uninstall")   == 0);
+    const bool setDefault = (std::wcscmp(verb, L"set-default") == 0);
+    if (!install && !uninstall && !setDefault) { usage(); return 1; }
 
     const std::wstring dir = exe_directory();
     if (dir.empty()) {
@@ -77,7 +83,10 @@ int wmain(int argc, wchar_t** argv) {
         return 1;
     }
 
-    const char* fnName = install ? "DllRegisterServer" : "DllUnregisterServer";
+    const char* fnName =
+        install    ? "DllRegisterServer"      :
+        uninstall  ? "DllUnregisterServer"    :
+                     "DllSetUserDefaultProfile";
     auto fn = reinterpret_cast<DllEntry>(GetProcAddress(dll, fnName));
     if (!fn) {
         std::fwprintf(stderr,
