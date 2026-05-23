@@ -505,7 +505,7 @@ the .msi in one shot:
 ```powershell
 # VS Developer PowerShell, vcpkg manifest installed, WiX EULA accepted.
 cd native\windows\installer
-.\build.ps1   # produces build\Myangler-Burmese-IME.msi (~91 MB)
+.\build.ps1   # produces build\Myangler-Burmese-IME.msi (~97 MB)
 ```
 
 Subdirectories:
@@ -524,10 +524,18 @@ Subdirectories:
   plus `register_profile.exe` helper. Implements
   `ITfTextInputProcessorEx`, `ITfThreadMgrEventSink`,
   `ITfKeyEventSink`, `ITfCompositionSink`,
-  `ITfDisplayAttributeProvider`, plus an `ITfLangBarItemButton` for
-  the Compose/Roman toggle. Dynamically loads `BurmeseIMEFFI.dll`
+  `ITfDisplayAttributeProvider`, `ITfCandidateListUIElement` +
+  `ITfCandidateListUIElementBehavior` (the latter two via
+  `candidate_ui_element.{h,cpp}` — exposes our candidate list as
+  TSF UI-element data so the immersive shell can theoretically
+  render its own panel; see "Win11 immersive shell" below for the
+  practical outcome), plus an `ITfLangBarItemButton` for the
+  Compose/Roman toggle. Dynamically loads `BurmeseIMEFFI.dll`
   via `LoadLibraryW`+`GetProcAddress` (env var override
-  `MYANGLER_FFI_DLL` for dev iteration).
+  `MYANGLER_FFI_DLL` for dev iteration); never `FreeLibrary`s it
+  (Swift runtime DLL_PROCESS_DETACH busy-waits when invoked from
+  a process that still has live user threads — observed as a 100%
+  CPU pin on host close before we ripped out the FreeLibrary).
 - `preferences/` — `BurmeseIMEPreferences.exe`, WPF + .NET 9
   self-contained single-file. Five tabs (Setup · Preferences ·
   History · Convert · Diagnostics) matching macOS / Linux. Binds
@@ -590,6 +598,51 @@ PageDown) routes through the existing keymap's Nav* branches.
 `WM_MOUSEACTIVATE` returns `MA_NOACTIVATE` so clicking the panel
 doesn't steal focus from the host text field.
 
+**Win11 immersive shell.** The Win11 Start Menu / Search Bar
+(`SearchHost.exe`) and UWP apps run in TSF immersive mode
+(`TF_TMF_IMMERSIVEMODE` set on `ITfThreadMgrEx::GetActiveFlags`).
+There the candidate popup IS shown (`ShowWindow` succeeds,
+`IsWindowVisible` returns TRUE) but composited behind the shell's
+XAML island surface — invisible to the user. We implement
+`ITfCandidateListUIElement[Behavior]` so the shell COULD render
+its own native panel from our data, but `BeginUIElement` returns
+`pbShow=TRUE` regardless — Win11 hardcodes shell candidate
+rendering to East-Asian LANGIDs that Microsoft ships first-party
+IMEs for, and Burmese (0455) isn't in that whitelist.
+**Exhaustive category bisection in versions 0.1.19–0.1.24 ruled
+out the 5 undocumented Pinyin-style categories as the gate** —
+see the `kRegisterCategories` / `kUnregisterCategories` comment in
+`src/register.cpp` and the project memory at
+`memory/win_tsf_immersive_categories.md` for the full table of
+results before adding categories there again.
+
+Practical workaround for immersive hosts: the inline-preedit
+fallback in `TextService::publishCandidateSnapshot`. When the user
+cycles via Nav keys, `refreshImmersivePreedit()` rewrites the
+dotted preedit with the selected candidate's Burmese surface so
+they see what they're picking. Latin preedit is the default view
+(matches classic-host UX when the popup is visible); the
+`immersiveShowingSelection_` toggle flips on after any Nav key
+and resets on Typeable / Backspace / commit / cancel. Space
+commits whatever surface is currently shown — top candidate by
+default, the cycled one if the user navigated.
+
+**Registration self-healing.** `DllRegisterServer` calls
+`unregister_profile_and_category` + `unregister_inproc_server` at
+the top before fresh registration, so every install starts from
+a clean HKLM baseline regardless of what a prior version left
+behind. `kUnregisterCategories` is the SUPERSET of every category
+any historical version has ever written (currently the safe 5 +
+the 5 undocumented ones that 0.1.16/0.1.19 briefly registered and
+then reverted); `UnregisterCategory` on a never-registered
+category is a silent no-op so the extras are safe. This works
+around the WiX MajorUpgrade quirk where `<Custom Action=
+"UnregisterTip" Condition='Installed AND REMOVE="ALL"'>` does NOT
+reliably fire during a major-upgrade swap, leaving stale state in
+HKLM. Schedule="afterInstallExecute" stays (preserves rollback-on-
+failure safety); the idempotent scrub-first inside DllRegisterServer
+is what actually clears the state.
+
 **Settings.** `settings.{h,cpp}` owns
 `HKCU\Software\Myangler\BurmeseIME`. Watcher thread blocks on
 `RegNotifyChangeKeyValue` + a shutdown event, reapplies the whole
@@ -619,12 +672,21 @@ native double type; string keeps it human-readable in regedit.
 | `UserHistory.sqlite` | `%LOCALAPPDATA%\Myangler\` |
 
 The TIP discovers `Data\` relative to its own module path via
-`GetModuleFileNameW`. `UserHistory.sqlite` lives under
-`SHGetKnownFolderPath(FOLDERID_LocalAppData)` so it stays writable
-inside Low-Integrity / AppContainer hosts (UWP, sandboxed Office).
+`GetModuleFileNameW`. `UserHistory.sqlite` and `tip.log` resolve
+via `log_file.cpp::log_path()` which probes `%LOCALAPPDATA%\
+Myangler\` → `%LOCALAPPDATA Low%\Myangler\` → `%TEMP%\` in order,
+picking the first one a real `CreateFileW` actually accepts.
+This is necessary because AppContainer hosts like `SearchHost.exe`
+can't write to the normal `%LOCALAPPDATA%`; their writes get
+silently redirected to `%LOCALAPPDATA%\Packages\<PackageFamily>\
+AC\Myangler\`, which is where the per-AppContainer copy of the
+log and history end up. Every line is also mirrored to
+`OutputDebugString` (capturable via DbgView) so diagnostics flow
+even when file writes are denied entirely.
+
 `apt purge`-style cleanup behaviour: uninstalling the MSI does not
-delete the user-history file by design — matches the Linux package
-contract.
+delete the user-history file(s) by design — matches the Linux
+package contract.
 
 **CLSIDs and GUIDs.** Frozen identities in `src/guids.{h,cpp}`:
 

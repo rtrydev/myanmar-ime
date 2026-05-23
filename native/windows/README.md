@@ -64,8 +64,11 @@ msiexec /i .\build\Myangler-Burmese-IME.msi
 ```
 
 Uninstall via Settings → Apps → "Myangler Burmese IME" (or
-`msiexec /x` on the MSI path). User history under
-`%LOCALAPPDATA%\Myangler\UserHistory.sqlite` survives uninstall by
+`msiexec /x` on the MSI path). User history at
+`%LOCALAPPDATA%\Myangler\UserHistory.sqlite` (or
+`%LOCALAPPDATA%\Packages\<AppContainer>\AC\Myangler\
+UserHistory.sqlite` for sandboxed hosts like `SearchHost.exe`,
+where the system redirects the write) survives uninstall by
 design — matches the Linux `apt purge` contract.
 
 ## Dev iteration without rebuilding the MSI
@@ -109,7 +112,13 @@ $env:MYANGLER_FFI_DLL = "C:\Users\rtry\repos\myanmar-ime\native\windows\swift-sh
 | Symptom | First place to check |
 |---|---|
 | TIP doesn't appear in Settings → Language → Keyboards | `register_profile.exe install` was not elevated, or `DllRegisterServer` returned a failure (see `src/register.cpp`) |
+| Win+Space picks "Burmese (Phonetic)" not Myangler on first try | The per-user default-IM call failed — check `tip.log` for `SetDefaultLayoutOrTip ok=1`. If `ok=0`, the `input.dll` modern-default path failed; the legacy `SetDefaultLanguageProfile` returns `E_FAIL` on Win11 by design |
 | TIP loads but typing doesn't produce candidates | `BurmeseIMEFFI.dll` resolution failed — DbgView for `[BurmeseIMETIP] FFI load failed:` |
+| Composition shows but commit doesn't insert text | `commitComposition runEditSession hr=` in `tip.log`; host may have refused the synchronous edit session, see `edit_session.h` for the async fallback |
+| Notepad / Firefox process pinned at 100% CPU after window close | Should not recur — `FfiLibrary::unload()` no longer `FreeLibrary`s the Swift FFI shim. If it does, check the `unload()` comment in `src/ffi_loader.cpp` |
+| Host install left bad state from a prior version | `DllRegisterServer` self-heals via scrub-first. If categories look wrong, run `register_profile.exe uninstall` then `install` from an elevated shell |
+| Candidate panel doesn't appear in Win11 Start Menu / Search Bar | Expected — Win11 hardcodes shell-rendered candidate UI to East-Asian LANGIDs and Burmese isn't whitelisted; full bisection in 0.1.19–0.1.24 ruled out category-based workarounds. The fallback is the inline-preedit override: latin by default, Nav keys (Up/Down/PageUp/PageDown/Tab) cycle and reveal the Burmese surface inline |
+| Tip.log empty for SearchHost / UWP host | AppContainer redirect — look under `%LOCALAPPDATA%\Packages\MicrosoftWindows.Client.CBS_cw5n1h2txyewy\AC\Myangler\tip.log` (or attach DbgView to capture `[BurmeseIMETIP] *` lines) |
 | Candidate window appears but text doesn't | Composition path / display-attribute provider mismatch — DbgView for `[BurmeseIMETIP composition]` |
 | Engine seems to lag user typing | EngineWorker coalescing / stale-buffer guard — read `src/engine_worker.cpp` |
 | Settings don't take effect | RegNotifyChangeKeyValue watcher silently dropped — restart the TIP host (close + reopen Notepad) |
