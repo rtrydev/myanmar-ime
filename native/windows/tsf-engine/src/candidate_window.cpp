@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cwchar>
 
+#include "log_file.h"
+
 namespace burmese {
 
 namespace {
@@ -68,6 +70,9 @@ bool CandidateWindow::create(HMODULE selfModule) noexcept {
         static_cast<HINSTANCE>(selfModule_),
         this);
 
+    log_line(L"CandidateWindow::create hwnd=%p gle=%u",
+             static_cast<void*>(hwnd_),
+             hwnd_ ? 0u : GetLastError());
     if (!hwnd_) return false;
     return ensureDeviceIndependent();
 }
@@ -96,13 +101,39 @@ void CandidateWindow::setCandidates(const ParsedSnapshot& snapshot) noexcept {
         hide();
         return;
     }
-    if (!hwnd_) return;
+    if (!hwnd_) {
+        log_line(L"CandidateWindow::setCandidates hwnd_ is null — engine snapshot has %zu candidates but the window was never created",
+                 candidates_.size());
+        return;
+    }
     resizeToFit();
     if (!visible_) {
         ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
         visible_ = true;
     }
+    // Re-assert HWND_TOPMOST on every snapshot, not just on
+    // setPositionBelow. setPositionBelow only runs if the host's
+    // GetTextExt succeeded — in immersive shell contexts (Win11
+    // Start Menu / Search Bar) GetTextExt commonly returns
+    // TF_E_NOLAYOUT, so without this re-assertion the window is
+    // ShowWindow'd but its z-order never gets explicitly raised,
+    // and the shell surface ends up drawing over it. Cheap on the
+    // hosts that don't need it (already topmost).
+    SetWindowPos(hwnd_, HWND_TOPMOST, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
     InvalidateRect(hwnd_, nullptr, FALSE);
+
+    // Diagnostic: report whether the window is actually visible on
+    // screen from the OS's perspective after we asked it to show.
+    // In immersive contexts a TRUE here paired with "user reports
+    // not seeing it" pinpoints the issue as z-order rather than
+    // create/show plumbing.
+    BOOL osVisible = IsWindowVisible(hwnd_);
+    RECT wr{};
+    GetWindowRect(hwnd_, &wr);
+    log_line(L"CandidateWindow::setCandidates shown count=%zu sel=%d osVisible=%d rect=(%d,%d %dx%d)",
+             candidates_.size(), selectedIndex_, osVisible ? 1 : 0,
+             wr.left, wr.top, wr.right - wr.left, wr.bottom - wr.top);
 }
 
 void CandidateWindow::setPositionBelow(const RECT& caret) noexcept {
@@ -130,6 +161,8 @@ void CandidateWindow::setPositionBelow(const RECT& caret) noexcept {
     lastAnchor_ = anchor;
     SetWindowPos(hwnd_, HWND_TOPMOST, anchor.x, anchor.y, sz.cx, sz.cy,
                  SWP_NOACTIVATE);
+    log_line(L"CandidateWindow::setPositionBelow anchor=(%d,%d) size=%dx%d",
+             anchor.x, anchor.y, sz.cx, sz.cy);
 }
 
 void CandidateWindow::hide() noexcept {

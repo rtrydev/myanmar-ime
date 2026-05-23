@@ -29,6 +29,7 @@
 #include <memory>
 #include <string>
 
+#include "candidate_ui_element.h"
 #include "candidate_window.h"
 #include "com_helpers.h"
 #include "compose_button.h"
@@ -188,6 +189,50 @@ private:
     // window is the source of truth for what gets committed; this
     // field exists mostly for diagnostic / future-history use.
     ParsedSnapshot          lastSnapshot_;
+
+    // TSF UI-element bridge. Lets immersive shell hosts (Win11
+    // Search Bar, UWP apps) render their own native candidate
+    // panel from our data — necessary because immersive XAML
+    // surfaces draw above classic WS_EX_TOPMOST popups, so our
+    // CandidateWindow is invisible there even though ShowWindow
+    // succeeded. uiElement_ is created at Activate, registered
+    // with BeginUIElement on the first non-empty snapshot, and
+    // EndUIElement'd on hide. uiElementShowsOwn_ is the result
+    // of BeginUIElement's bShow OUT param — TRUE means the host
+    // is classic and still wants us to draw our window; FALSE
+    // means the shell will draw its own and we must suppress
+    // our popup.
+    ComPtr<ITfUIElementMgr>    uiElementMgr_;
+    ComPtr<CandidateUIElement> uiElement_;
+    DWORD                      uiElementId_      = TF_INVALID_UIELEMENTID;
+    bool                       uiElementShowsOwn_ = true;
+
+    // Apply the freshly parsed snapshot to whichever UI surface
+    // the host wants — system-managed candidate panel
+    // (uiElementShowsOwn_ == false) or our own CandidateWindow.
+    // Handles the BeginUIElement / UpdateUIElement / EndUIElement
+    // lifecycle around it.
+    void publishCandidateSnapshot(const ParsedSnapshot& snap) noexcept;
+
+    // Tear down any registered UI element. Idempotent.
+    void endCandidateUIElement() noexcept;
+
+    // One-call hide: ends the UI-element registration AND hides our
+    // HWND popup. Use from commit / cancel / focus-loss paths where
+    // the whole candidate UI should go away. Inside
+    // publishCandidateSnapshot we keep them split (immersive
+    // suppress hides our HWND but keeps the UI element alive).
+    void hideCandidatePanel() noexcept;
+
+    // Shell-side callbacks delivered via the message-only window.
+    // The Win11 immersive shell renders its own candidate panel and
+    // drives selection / commit / cancel back into us via
+    // ITfCandidateListUIElementBehavior; those interface methods
+    // PostMessage here so the actual work happens at a clean
+    // re-entrancy point on the TIP thread.
+    void onUiSelect(int index) noexcept;
+    void onUiFinalize()         noexcept;
+    void onUiAbort()            noexcept;
 
     // Atom for GUID_DisplayAttributeInput, registered with the TSF
     // category manager during Activate. TF_INVALID_GUIDATOM means

@@ -43,10 +43,10 @@ namespace burmese {
 namespace {
 
 void dbg_composition(const wchar_t* what) noexcept {
+    // log_line mirrors to OutputDebugString itself now. The
+    // "composition:" prefix in the log entry keeps the category
+    // separable in tip.log.
     log_line(L"composition: %s", what);
-    OutputDebugStringW(L"[BurmeseIMETIP composition] ");
-    OutputDebugStringW(what);
-    OutputDebugStringW(L"\n");
 }
 
 std::wstring widen_utf8(const std::string& s) {
@@ -162,10 +162,13 @@ void TextService::renderPreedit(ITfContext* ctx) noexcept {
 }
 
 void TextService::commitComposition(ITfContext* ctx, const std::string& final_utf8) noexcept {
+    log_line(L"commitComposition entry ctx=%p finalLen=%zu hasComp=%d",
+             static_cast<void*>(ctx), final_utf8.size(),
+             composition_ ? 1 : 0);
     if (!ctx) return;
     const std::wstring final_text = widen_utf8(final_utf8);
 
-    runEditSession(ctx, clientId_, TF_ES_SYNC | TF_ES_READWRITE,
+    HRESULT sessionHr = runEditSession(ctx, clientId_, TF_ES_SYNC | TF_ES_READWRITE,
         [this, ctx, final_text](TfEditCookie ec) -> HRESULT {
             if (!composition_) {
                 // No active composition — fall through and insert at
@@ -175,14 +178,18 @@ void TextService::commitComposition(ITfContext* ctx, const std::string& final_ut
                 ComPtr<ITfInsertAtSelection> ias;
                 if (FAILED(ctx->QueryInterface(IID_PPV_ARGS(ias.put())))
                     || !ias) {
+                    log_line(L"  commit no-composition path: QI ITfInsertAtSelection failed");
                     return E_FAIL;
                 }
                 ComPtr<ITfRange> dummy;
-                return ias->InsertTextAtSelection(
+                HRESULT hr = ias->InsertTextAtSelection(
                     ec, 0,
                     final_text.empty() ? L"" : final_text.c_str(),
                     static_cast<LONG>(final_text.size()),
                     dummy.put());
+                log_line(L"  commit no-composition path: InsertTextAtSelection hr=0x%08X",
+                         static_cast<unsigned>(hr));
+                return hr;
             }
 
             // Commit path passes TF_INVALID_GUIDATOM so the final
@@ -190,6 +197,8 @@ void TextService::commitComposition(ITfContext* ctx, const std::string& final_ut
             // preedit decoration.
             HRESULT hr = setCompositionTextAndCaret(
                 ec, ctx, composition_.get(), final_text, TF_INVALID_GUIDATOM);
+            log_line(L"  commit setCompositionTextAndCaret hr=0x%08X",
+                     static_cast<unsigned>(hr));
             // End composition even if SetText failed — keeping a
             // dangling composition open is worse than dropping a
             // failed replacement.
@@ -197,6 +206,7 @@ void TextService::commitComposition(ITfContext* ctx, const std::string& final_ut
             composition_.reset();
             return hr;
         });
+    log_line(L"  commitComposition runEditSession hr=0x%08X", static_cast<unsigned>(sessionHr));
 }
 
 void TextService::endCompositionQuietly() noexcept {

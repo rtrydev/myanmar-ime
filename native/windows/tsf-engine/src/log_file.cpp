@@ -15,19 +15,85 @@ SRWLOCK g_log_lock = SRWLOCK_INIT;
 std::wstring g_log_path;
 bool g_log_path_resolved = false;
 
+// Try a candidate directory: create the dir, build the full log path,
+// attempt to open the file for append. On success, store the path in
+// `outPath` and return true. The probe write is what tells us the
+// process has permission — file existence alone isn't enough because
+// CreateDirectoryW returns 0 with ERROR_ALREADY_EXISTS without ever
+// touching ACLs.
+bool try_candidate(REFKNOWNFOLDERID folderId,
+                   const wchar_t* subFile,
+                   std::wstring& outPath) noexcept {
+    PWSTR raw = nullptr;
+    if (FAILED(SHGetKnownFolderPath(folderId, 0, nullptr, &raw)) || !raw) {
+        return false;
+    }
+    std::wstring dir(raw);
+    CoTaskMemFree(raw);
+    dir += L"\\Myangler";
+    CreateDirectoryW(dir.c_str(), nullptr);
+
+    std::wstring file = dir + L"\\" + subFile;
+    HANDLE h = CreateFileW(
+        file.c_str(),
+        FILE_APPEND_DATA,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        nullptr,
+        OPEN_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    CloseHandle(h);
+    outPath = std::move(file);
+    return true;
+}
+
+// Resolve once. Multiple host-process integrity levels need different
+// homes for tip.log:
+//
+//   * Classic / medium-integrity host (Notepad, Office, browsers):
+//     %LOCALAPPDATA%\Myangler\tip.log — the documented default.
+//
+//   * AppContainer / Low-Integrity host (Win11 Start Menu's
+//     SearchHost.exe, UWP apps, sandboxed Office): the normal
+//     LocalAppData is access-denied to file writes. LocalAppDataLow
+//     (C:\Users\<u>\AppData\LocalLow\) is the documented escape hatch
+//     for low-integrity write access.
+//
+//   * Hardened sandboxes that block both: GetTempPath returns a
+//     directory the process can always write to (per-AppContainer
+//     redirected on Win10+, but always writable).
+//
+// We try each in order and remember the first one that accepts a
+// real CreateFileW probe. The discovered path is logged at the top
+// of the first message written via OutputDebugString too, so a
+// debugger user can find a sandbox-redirected log without spelunking.
 const std::wstring& log_path() noexcept {
     AcquireSRWLockExclusive(&g_log_lock);
     if (!g_log_path_resolved) {
-        PWSTR localAppData = nullptr;
-        if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &localAppData))
-            && localAppData) {
-            g_log_path = localAppData;
-            g_log_path += L"\\Myangler";
-            CreateDirectoryW(g_log_path.c_str(), nullptr);   // ignore errors
-            g_log_path += L"\\tip.log";
-            CoTaskMemFree(localAppData);
+        std::wstring chosen;
+        if (try_candidate(FOLDERID_LocalAppData,    L"tip.log", chosen)
+         || try_candidate(FOLDERID_LocalAppDataLow, L"tip.log", chosen)) {
+            g_log_path = std::move(chosen);
+        } else {
+            wchar_t tmp[MAX_PATH] = {0};
+            DWORD n = GetTempPathW(MAX_PATH, tmp);
+            if (n > 0 && n < MAX_PATH) {
+                g_log_path = std::wstring(tmp) + L"myangler-tip.log";
+            }
         }
         g_log_path_resolved = true;
+
+        // Echo the chosen path to the debugger stream once so a DbgView
+        // user can locate the actual on-disk log when sandboxing
+        // redirected it to LocalAppDataLow or %TEMP%.
+        if (!g_log_path.empty()) {
+            OutputDebugStringW(L"[BurmeseIMETIP] log file: ");
+            OutputDebugStringW(g_log_path.c_str());
+            OutputDebugStringW(L"\n");
+        } else {
+            OutputDebugStringW(L"[BurmeseIMETIP] log path resolution failed — file logging disabled\n");
+        }
     }
     ReleaseSRWLockExclusive(&g_log_lock);
     return g_log_path;
@@ -97,6 +163,14 @@ void format_and_write(const wchar_t* fmt, va_list args) noexcept {
     buf[total + 2] = L'\0';
 
     write_line(buf, total + 2);
+
+    // Mirror every line to the debugger stream too. DbgView (and
+    // any attached debugger) captures these regardless of file-
+    // system sandboxing, so diagnostics keep flowing even from
+    // Low-Integrity / AppContainer hosts where the file write may
+    // be redirected or denied entirely.
+    OutputDebugStringW(L"[BurmeseIMETIP] ");
+    OutputDebugStringW(buf);
 }
 
 } // namespace
@@ -109,20 +183,15 @@ void log_line(const wchar_t* fmt, ...) noexcept {
 }
 
 void log_dbg(const wchar_t* fmt, ...) noexcept {
-    // Format twice — once to the file, once to the debugger stream.
-    // Acceptable cost; only called during interesting events.
+    // Equivalent to log_line now that log_line always mirrors to
+    // OutputDebugString. Kept as a separate entry point because the
+    // call-site name still tells future readers "this event is
+    // worth a live debugger noticing", and we may want to escalate
+    // it later (e.g. add ETW emit) without touching every caller.
     va_list args;
     va_start(args, fmt);
     format_and_write(fmt, args);
     va_end(args);
-
-    wchar_t buf[4096];
-    va_start(args, fmt);
-    std::vswprintf(buf, std::size(buf), fmt, args);
-    va_end(args);
-    OutputDebugStringW(L"[BurmeseIMETIP] ");
-    OutputDebugStringW(buf);
-    OutputDebugStringW(L"\n");
 }
 
 } // namespace burmese

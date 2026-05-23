@@ -4,6 +4,7 @@
 #include <ShlObj.h>
 #include <ctfutb.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <string>
 
@@ -36,18 +37,14 @@ void ensureMessageWindowClass(HMODULE module) noexcept {
 }
 
 void dbg(const wchar_t* fmt, ...) noexcept {
-    // Route every dbg() in this TU through the file logger so a
-    // user reporting "doesn't work" produces a trace we can read
-    // without DbgView attached.
+    // log_line itself now mirrors every line to OutputDebugString,
+    // so this thunk just forwards. Kept for call-site brevity.
     wchar_t buf[1024];
     va_list args;
     va_start(args, fmt);
     _vsnwprintf_s(buf, _TRUNCATE, fmt, args);
     va_end(args);
     log_line(L"%s", buf);
-    OutputDebugStringW(L"[BurmeseIMETIP] ");
-    OutputDebugStringW(buf);
-    OutputDebugStringW(L"\n");
 }
 
 std::wstring widen(const std::string& s) {
@@ -140,6 +137,24 @@ HRESULT STDMETHODCALLTYPE TextService::ActivateEx(ITfThreadMgr* mgr, TfClientId 
 
     dbg(L"Activate clientId=%u", static_cast<unsigned>(cid));
 
+    // Log thread-mgr flags so we know if we're in TSF immersive mode.
+    // TF_TMF_IMMERSIVEMODE (0x40000000) being set is the signal that
+    // the host is a UWP / immersive shell — that's the scenario where
+    // a classic topmost popup gets composited behind the shell
+    // overlay and the user can't see our candidate window.
+    {
+        ComPtr<ITfThreadMgrEx> mgrEx;
+        if (SUCCEEDED(mgr->QueryInterface(IID_PPV_ARGS(mgrEx.put()))) && mgrEx) {
+            DWORD flags = 0;
+            HRESULT hr = mgrEx->GetActiveFlags(&flags);
+            log_line(L"  ITfThreadMgrEx::GetActiveFlags hr=0x%08X flags=0x%08X (IMMERSIVEMODE=%d)",
+                     static_cast<unsigned>(hr), flags,
+                     (flags & TF_TMF_IMMERSIVEMODE) ? 1 : 0);
+        } else {
+            log_line(L"  ITfThreadMgrEx unavailable");
+        }
+    }
+
     if (!ffi_.load(g_module)) {
         dbg(L"FFI load failed: %s", ffi_.errorDetail());
         // Continue: the TIP will be inert (no engine), but staying
@@ -153,6 +168,26 @@ HRESULT STDMETHODCALLTYPE TextService::ActivateEx(ITfThreadMgr* mgr, TfClientId 
 
     if (!candidateWindow_.create(g_module)) {
         dbg(L"candidateWindow.create failed (GetLastError=%u)", GetLastError());
+    }
+
+    // UI-element bridge for immersive shell hosts. Optional — if the
+    // host doesn't expose ITfUIElementMgr we just fall back to our
+    // own HWND popup (which is fine for classic hosts; the only
+    // hosts that need the UI-element protocol are the ones where
+    // BeginUIElement returns bShow=FALSE).
+    if (threadMgr_ && SUCCEEDED(threadMgr_->QueryInterface(
+            IID_PPV_ARGS(uiElementMgr_.put())))) {
+        auto* el = new (std::nothrow) CandidateUIElement();
+        if (el) {
+            uiElement_.attach(el);   // CandidateUIElement starts refcount=1
+            // Route shell-side selection / commit / cancel through the
+            // same message-only window the engine worker delivers to.
+            if (messageWindow_) {
+                uiElement_->setDelivery(messageWindow_, /*userParam=*/0);
+            }
+        }
+    } else {
+        log_line(L"ITfUIElementMgr unavailable — immersive hosts will not see a candidate panel");
     }
 
     // Resolve the GUID atom for our display attribute once. Used by
@@ -212,6 +247,9 @@ HRESULT STDMETHODCALLTYPE TextService::Deactivate() noexcept {
     // think there's a composition open. EndComposition needs a live
     // edit session, so do it while currentContext_ is still valid.
     endCompositionQuietly();
+    endCandidateUIElement();
+    uiElement_.reset();
+    uiElementMgr_.reset();
     candidateWindow_.destroy();
     removeLangBarItem();
     removeSinks();
@@ -306,9 +344,23 @@ LRESULT CALLBACK TextService::MessageWndProc(HWND hwnd, UINT msg, WPARAM wParam,
     }
     auto* self = reinterpret_cast<TextService*>(
         GetWindowLongPtrW(hwnd, GWLP_USERDATA));
-    if (self && msg == EngineWorker::kMessageResult) {
-        self->onEngineResult();
-        return 0;
+    if (self) {
+        if (msg == EngineWorker::kMessageResult) {
+            self->onEngineResult();
+            return 0;
+        }
+        if (msg == CandidateUIElement::kMessageUiSelect) {
+            self->onUiSelect(static_cast<int>(lParam));
+            return 0;
+        }
+        if (msg == CandidateUIElement::kMessageUiFinalize) {
+            self->onUiFinalize();
+            return 0;
+        }
+        if (msg == CandidateUIElement::kMessageUiAbort) {
+            self->onUiAbort();
+            return 0;
+        }
     }
     return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
@@ -329,10 +381,159 @@ void TextService::onEngineResult() {
         return;
     }
     lastSnapshot_ = std::move(parsed);
-    candidateWindow_.setCandidates(lastSnapshot_);
-    if (candidateWindow_.isVisible()) {
-        updateCandidatePosition();
+    publishCandidateSnapshot(lastSnapshot_);
+}
+
+void TextService::publishCandidateSnapshot(const ParsedSnapshot& snap) noexcept {
+    const bool nonEmpty = !snap.candidates.empty();
+
+    // ---- UI-element side (immersive shell hosts) ----
+    //
+    // Drive BeginUIElement / UpdateUIElement / EndUIElement off the
+    // candidate-list non-empty transitions so the shell knows when
+    // it has a panel open. The bShow OUT param tells us whether
+    // *we* should also draw our own HWND popup on top of (or
+    // instead of) the host's: TRUE means classic surface that
+    // expects our popup; FALSE means immersive surface that will
+    // draw its own native Win11-style panel from our data and
+    // doesn't want our popup duplicating it.
+    if (uiElement_ && uiElementMgr_) {
+        if (nonEmpty) {
+            // Always refresh the snapshot data the host will read
+            // via the ITfCandidateListUIElement getters. Use ALL
+            // flags as the dirty mask; setting too many is harmless
+            // (the host re-queries cheap getters), setting too few
+            // would leave the host showing stale candidate text.
+            constexpr DWORD ALL = TF_CLUIE_DOCUMENTMGR
+                                | TF_CLUIE_COUNT
+                                | TF_CLUIE_SELECTION
+                                | TF_CLUIE_STRING
+                                | TF_CLUIE_PAGEINDEX
+                                | TF_CLUIE_CURRENTPAGE;
+            uiElement_->setSnapshot(snap, ALL);
+
+            // Plumb the current doc-mgr through so the host knows
+            // which document the candidate list is attached to.
+            // Weak observation — see CandidateUIElement::setDocumentMgr.
+            ITfDocumentMgr* dim = nullptr;
+            if (currentContext_) {
+                ComPtr<ITfDocumentMgr> tmp;
+                if (SUCCEEDED(currentContext_->GetDocumentMgr(tmp.put())) && tmp) {
+                    dim = tmp.get();
+                }
+            }
+            uiElement_->setDocumentMgr(dim);
+
+            if (uiElementId_ == TF_INVALID_UIELEMENTID) {
+                BOOL show = TRUE;
+                DWORD cookie = TF_INVALID_UIELEMENTID;
+                HRESULT hr = uiElementMgr_->BeginUIElement(
+                    static_cast<ITfUIElement*>(uiElement_.get()),
+                    &show, &cookie);
+                if (SUCCEEDED(hr)) {
+                    uiElementId_       = cookie;
+                    uiElementShowsOwn_ = show ? true : false;
+                    log_line(L"BeginUIElement hr=0x%08X cookie=%u showOwn=%d",
+                             static_cast<unsigned>(hr),
+                             uiElementId_, uiElementShowsOwn_ ? 1 : 0);
+                } else {
+                    log_line(L"BeginUIElement failed hr=0x%08X — falling back to own HWND",
+                             static_cast<unsigned>(hr));
+                    uiElementShowsOwn_ = true;
+                }
+            } else {
+                HRESULT hr = uiElementMgr_->UpdateUIElement(uiElementId_);
+                if (FAILED(hr)) {
+                    log_line(L"UpdateUIElement hr=0x%08X", static_cast<unsigned>(hr));
+                }
+            }
+        } else {
+            endCandidateUIElement();
+        }
     }
+
+    // ---- Our own HWND popup (classic hosts and fallback) ----
+    if (!nonEmpty || uiElementShowsOwn_) {
+        candidateWindow_.setCandidates(snap);
+        if (candidateWindow_.isVisible()) {
+            updateCandidatePosition();
+        }
+    } else {
+        // Immersive host wants to draw its own; suppress ours so
+        // we don't ship a duplicate panel behind theirs.
+        candidateWindow_.hide();
+    }
+}
+
+void TextService::endCandidateUIElement() noexcept {
+    if (uiElementId_ != TF_INVALID_UIELEMENTID && uiElementMgr_) {
+        HRESULT hr = uiElementMgr_->EndUIElement(uiElementId_);
+        log_line(L"EndUIElement cookie=%u hr=0x%08X",
+                 uiElementId_, static_cast<unsigned>(hr));
+    }
+    uiElementId_       = TF_INVALID_UIELEMENTID;
+    uiElementShowsOwn_ = true;
+    if (uiElement_) uiElement_->setDocumentMgr(nullptr);
+}
+
+void TextService::hideCandidatePanel() noexcept {
+    endCandidateUIElement();
+    candidateWindow_.hide();
+}
+
+// Shell selected a different candidate (clicked a row, used arrow
+// keys inside its own panel). Mirror it into our local selection
+// state so a subsequent commit picks up the right surface, and
+// push it to the engine immediately so any commit-on-space the
+// shell drives lands on the right entry.
+void TextService::onUiSelect(int index) noexcept {
+    log_line(L"onUiSelect index=%d", index);
+    if (index < 0) return;
+    if (lastSnapshot_.candidates.empty()) return;
+    const int clamped = (std::min)(index,
+                                   static_cast<int>(lastSnapshot_.candidates.size()) - 1);
+    lastSnapshot_.selected = clamped;
+    candidateWindow_.setCandidates(lastSnapshot_);   // updates internal selectedIndex_
+    worker_.drain_and_wait_idle();
+    worker_.sync_update_buffer(buffer_);
+    worker_.set_selected_sync(clamped);
+}
+
+// Shell finalized the selection — equivalent to user pressing Space
+// in our keymap. Same shape as KeymapAction::Commit in
+// key_event_sink.cpp's handleKeyDown.
+void TextService::onUiFinalize() noexcept {
+    log_line(L"onUiFinalize buffer='%hs'", buffer_.c_str());
+    if (buffer_.empty() || !currentContext_) return;
+    worker_.drain_and_wait_idle();
+    worker_.sync_update_buffer(buffer_);
+    if (candidateWindow_.candidateCount() > 0) {
+        worker_.set_selected_sync(candidateWindow_.selectedIndex());
+    }
+    std::string surface = worker_.commit_sync();
+    if (!surface.empty()) {
+        worker_.record_selection_sync();
+        worker_.push_committed_context_sync(surface);
+        commitComposition(currentContext_.get(), surface);
+    } else {
+        endCompositionQuietly();
+    }
+    hideCandidatePanel();
+    buffer_.clear();
+}
+
+// Shell aborted the conversion (Esc inside its panel, focus loss,
+// etc.). Mirrors KeymapAction::Cancel — commit the raw Latin
+// buffer verbatim so the user's keystrokes don't vanish.
+void TextService::onUiAbort() noexcept {
+    log_line(L"onUiAbort buffer='%hs'", buffer_.c_str());
+    if (buffer_.empty() || !currentContext_) return;
+    worker_.drain_and_wait_idle();
+    (void)worker_.cancel_sync();
+    std::string raw = buffer_;
+    commitComposition(currentContext_.get(), raw);
+    hideCandidatePanel();
+    buffer_.clear();
 }
 
 void TextService::updateCandidatePosition() noexcept {
@@ -354,11 +555,20 @@ void TextService::updateCandidatePosition() noexcept {
             BOOL clipped = FALSE;
             hr = view->GetTextExt(ec, range.get(), &rc, &clipped);
             if (FAILED(hr)) {
-                // Some hosts (rich web editors, some Office views)
-                // return TF_E_NOLAYOUT during a layout pass. Skip
-                // silently — the next engine result will retry.
+                // Some hosts (rich web editors, some Office views,
+                // and notably the Win11 Start Menu / Search Bar)
+                // return TF_E_NOLAYOUT during or before a layout
+                // pass. The candidate window stays where it last
+                // anchored — setCandidates re-asserts HWND_TOPMOST
+                // unconditionally so the panel is still on-screen,
+                // just not next to the caret. The next engine
+                // result will retry.
+                log_line(L"updateCandidatePosition GetTextExt failed hr=0x%08X",
+                         static_cast<unsigned>(hr));
                 return S_OK;
             }
+            log_line(L"updateCandidatePosition GetTextExt ok rect=(%d,%d %dx%d)",
+                     rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top);
             candidateWindow_.setPositionBelow(rc);
             return S_OK;
         });
@@ -446,7 +656,7 @@ HRESULT STDMETHODCALLTYPE TextService::OnSetFocus(ITfDocumentMgr* docMgr, ITfDoc
     } else if (composition_) {
         endCompositionQuietly();
     }
-    candidateWindow_.hide();
+    hideCandidatePanel();
 
     currentContext_.reset();
     if (docMgr) {
@@ -529,7 +739,7 @@ void TextService::onComposeToggled(bool composeEnabled) noexcept {
             }
             buffer_.clear();
         }
-        candidateWindow_.hide();
+        hideCandidatePanel();
     }
 }
 

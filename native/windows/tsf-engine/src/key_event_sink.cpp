@@ -26,6 +26,7 @@
 #include <Windows.h>
 #include "edit_session.h"
 #include "keymap.h"
+#include "log_file.h"
 
 namespace burmese {
 
@@ -87,6 +88,20 @@ bool TextService::handleKeyDown(ITfContext* ctx, WPARAM vk, LPARAM /*lParam*/, b
     const KeymapResult km = keymap_map(
         static_cast<uint32_t>(vk), mods, shifted);
 
+    // Per-key diagnostic — tells us at a glance whether Space / Enter /
+    // arrow keys actually reach the TIP in a given host (immersive
+    // shells frequently intercept Enter/Space before TSF forwards
+    // them, which would silently break commit). Only on the non-test
+    // pass so we get one log line per real keystroke, not two.
+    if (!test) {
+        log_line(L"handleKeyDown vk=0x%02X mods=0x%02X shifted='%c' action=%d compose=%d bufLen=%zu",
+                 static_cast<unsigned>(vk), mods,
+                 shifted ? shifted : L'.',
+                 static_cast<int>(km.action),
+                 composeEnabled_ ? 1 : 0,
+                 buffer_.size());
+    }
+
     // Compose/Roman bypass: when the langbar toggle is off, every
     // typeable key inserts its raw ASCII immediately and the engine
     // is fully untouched — matching the IBus `myangler.compose`
@@ -144,7 +159,7 @@ bool TextService::handleKeyDown(ITfContext* ctx, WPARAM vk, LPARAM /*lParam*/, b
                 // empty-buffer backspace branch.
                 worker_.drain_and_wait_idle();
                 worker_.schedule_update(buffer_);
-                candidateWindow_.hide();
+                hideCandidatePanel();
             } else {
                 worker_.schedule_update(buffer_);
             }
