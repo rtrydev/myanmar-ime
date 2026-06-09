@@ -167,5 +167,6 @@ public enum BurmeseTestSuites {
         AbbreviationLedLexiconLiteralFallbackSuite.suite,
         AprefixIndependentVowelReachabilitySuite.suite,
         ProductionBenchScenarioParitySuite.suite,
+        AwCreakyAsatCodaSuite.suite,
     ]
 }

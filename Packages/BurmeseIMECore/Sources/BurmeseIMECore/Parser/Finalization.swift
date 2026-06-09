@@ -510,6 +510,25 @@ extension SyllableParser {
                             j -= 1
                             continue
                         }
+                        // TASK-079: the aw-family creaky-asat coda
+                        // `<C> 1031 102B|102C 1037 103A` (ော့် / ေါ့်)
+                        // is regular orthography — the creaky
+                        // possessive/emphatic of every `ော်` word
+                        // (`ကျွန်တော့်`, `တော့်`, `နော့်`, …). Unicode
+                        // canonical order stores the dot-below (ccc 7)
+                        // BEFORE the asat (ccc 9), which is the order
+                        // the romanization tables and the shipped
+                        // lexicon use uniformly. Peel the aw-cluster
+                        // and resume the walk before the `1031`; any
+                        // other dep-vowel before the creaky (lone aa,
+                        // lone e-kar, i/u/o clusters) stays rejected.
+                        if j >= 2,
+                           indices[j - 1].value == 0x102B || indices[j - 1].value == 0x102C,
+                           indices[j - 2].value == 0x1031 {
+                            j -= 3
+                            sawVowelCluster = true
+                            continue
+                        }
                         return false
                     }
                     // After the structured aw-cluster peel above,

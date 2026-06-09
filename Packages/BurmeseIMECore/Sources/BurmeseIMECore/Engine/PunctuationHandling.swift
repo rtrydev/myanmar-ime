@@ -75,6 +75,42 @@ extension BurmeseEngine {
         vowelSuffixesWithTrailingDot.contains(where: { prefix.hasSuffix($0) })
     }
 
+    /// TASK-079: dot-vowel-modifier suffixes whose creaky cluster legally
+    /// accepts a trailing asat — the aw-family creaky forms (`aw.` →
+    /// `1031 102C 1037`, `aw2.` → `1031 102B 1037`), which close into the
+    /// regular `ော့်` / `ေါ့်` coda (`… 1037 103A`, the creaky
+    /// possessive/emphatic of every `ော်` word). When the user types `*`
+    /// directly after one of these suffixes, the `*` is the syllable's
+    /// coda asat, not adjacent document punctuation, so the embedded
+    /// composing-punct split must not fire and the frozen renderer must
+    /// keep the `*` attached to the composable run. Derived from the
+    /// romanization table: roman ends in `.` and Myanmar output ends with
+    /// the aw-creaky cluster `1031 102B|102C 1037`.
+    internal static let asatAcceptingCreakyDotSuffixes: Set<String> = {
+        Set(Romanization.vowels.compactMap { entry -> String? in
+            guard entry.roman.hasSuffix(".") else { return nil }
+            let scalars = Array(entry.myanmar.unicodeScalars.map(\.value))
+            guard scalars.count >= 3 else { return nil }
+            guard scalars[scalars.count - 1] == 0x1037,
+                  scalars[scalars.count - 2] == 0x102B
+                    || scalars[scalars.count - 2] == 0x102C,
+                  scalars[scalars.count - 3] == 0x1031 else { return nil }
+            return entry.roman
+        })
+    }()
+
+    /// True when the `*` at `idx` completes an aw-family creaky-asat coda:
+    /// the chars before it end with an asat-accepting creaky dot suffix
+    /// (`aw.` / `aw2.`). Such a `*` belongs to the preceding syllable.
+    internal static func starCompletesCreakyAsatCoda(
+        in buffer: String,
+        at idx: String.Index
+    ) -> Bool {
+        guard buffer[idx] == "*", idx > buffer.startIndex else { return false }
+        let prefix = buffer[..<idx]
+        return asatAcceptingCreakyDotSuffixes.contains(where: { prefix.hasSuffix($0) })
+    }
+
     /// TASK-014 / TASK-023 / TASK-024: when a candidate surface ends in a
     /// shape that can take a tone marker on its existing syllable cluster
     /// and the trailing literal text starts with `:` or `.`, return a
@@ -349,6 +385,13 @@ extension BurmeseEngine {
         }
         if c == "." || c == ":" {
             return true
+        }
+        // TASK-079: a `*` that completes an aw-family creaky-asat coda
+        // (`taw.` + `*` → `တော့်`) is the syllable's coda asat — the
+        // `.` before it is a vowel modifier, not document punctuation,
+        // so the `.*` adjacency must not force a split here.
+        if c == "*", Self.starCompletesCreakyAsatCoda(in: buffer, at: idx) {
+            return false
         }
         return Self.hasAdjacentComposingPunctuation(in: buffer, at: idx)
     }
@@ -727,6 +770,15 @@ extension BurmeseEngine {
                         continue
                     }
                 }
+            }
+            // TASK-079: a `*` completing an aw-family creaky-asat coda
+            // (`taw.` + `*` → `တော့်`) stays attached to the composable
+            // run — flushing it as a literal would wedge a raw `*`
+            // between Myanmar scalars and strip the syllable's coda.
+            if c == "*",
+               Self.asatAcceptingCreakyDotSuffixes.contains(where: { current.hasSuffix($0) }) {
+                current.append("*")
+                continue
             }
             // Flush at any literal-punct split char *or* the in-syllable
             // composing-punct subset (`*`, `'`). The split-char set
