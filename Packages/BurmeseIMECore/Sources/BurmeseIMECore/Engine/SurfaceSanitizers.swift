@@ -152,13 +152,27 @@ extension BurmeseEngine {
         }
     }
 
-    internal static func sanitizeMalformedMyanmarMarks(_ candidates: [Candidate]) -> [Candidate] {
+    /// TASK-081: `preservedSurfaces` carries lexicon-/history-attested
+    /// surfaces whose reading matches the user's typed buffer (exact
+    /// alias or compose key). Burmese has a closed set of lexicalized
+    /// irregular spellings (`ယောက်ျား`, `ကျွန်ုပ်`, …) that the
+    /// structural legality scan correctly rejects as *generative*
+    /// shapes but that are the standard dictionary orthography — the
+    /// scan must not outvote curated lexicon data on exact-reading
+    /// input. Preserved surfaces are exempt from dropping; they do
+    /// not count toward `hasClean`, so the all-illegal escape hatch
+    /// (return everything unchanged) is unaffected.
+    internal static func sanitizeMalformedMyanmarMarks(
+        _ candidates: [Candidate],
+        preservedSurfaces: Set<String> = []
+    ) -> [Candidate] {
         let hasClean = candidates.contains {
             SyllableParser.scanOutputLegality($0.surface)
         }
         guard hasClean else { return candidates }
         return candidates.filter {
-            SyllableParser.scanOutputLegality($0.surface)
+            preservedSurfaces.contains($0.surface)
+                || SyllableParser.scanOutputLegality($0.surface)
         }
     }
 

@@ -1979,6 +1979,35 @@ public final class BurmeseEngine: @unchecked Sendable {
         let prioritizedKeys = Set(prioritizedLexicon.map(lexiconCandidateKey))
         let trailingLexicon = uniqueLexiconCandidates.filter { !prioritizedKeys.contains(lexiconCandidateKey($0)) }
 
+        // TASK-081: surfaces attested for the user's exact reading —
+        // curated lexicon rows whose alias/compose reading matches the
+        // typed buffer, plus history entries the user previously
+        // committed under the same alias. These are exempt from the
+        // structural legality filter below: Burmese has lexicalized
+        // irregular spellings (`ယောက်ျား`, `ကျွန်ုပ်`, …) that no
+        // syllable grammar generates, and the sanitizer must not
+        // censor curated/committed orthography on exact-reading input.
+        // Parser-fabricated illegal surfaces are unaffected — they
+        // never enter these sets.
+        // Built from the RAW store hits (`lexiconCandidates`), not the
+        // post-absorption `uniqueLexiconCandidates` — an exact hit whose
+        // surface was absorbed into a grammar/lattice candidate is still
+        // attested orthography and must stay exempt.
+        let attestedExactReadingSurfaces: Set<String> = {
+            var surfaces = Set<String>()
+            for hit in lexiconCandidates {
+                if exactAliasPrefixes.contains(Romanization.aliasReading(hit.reading))
+                    || exactComposePrefixes.contains(Romanization.composeLookupKey(hit.reading)) {
+                    surfaces.insert(hit.surface)
+                }
+            }
+            for historyCandidate in historyCandidates
+            where Romanization.aliasReading(historyCandidate.reading) == aliasPrefix {
+                surfaces.insert(historyCandidate.surface)
+            }
+            return surfaces
+        }()
+
         let promotedYapinGrammarFirst = appliesYapinPromotion
             && primaryGrammar.first.map { Self.isYapinReading($0.candidate.reading) } == true
 
@@ -2099,7 +2128,10 @@ public final class BurmeseEngine: @unchecked Sendable {
         }
         merged = Self.expandAaVariants(merged)
         merged = Self.sanitizeOrphanZwnj(merged)
-        merged = Self.sanitizeMalformedMyanmarMarks(merged)
+        merged = Self.sanitizeMalformedMyanmarMarks(
+            merged,
+            preservedSurfaces: attestedExactReadingSurfaces
+        )
         merged = Self.sanitizeIndepVowelVirama(merged)
         // TASK-052: explicit-`+` two-syllable forms whose surface
         // contains adjacent independent-vowel scalars (`a+i` →
@@ -2786,7 +2818,14 @@ public final class BurmeseEngine: @unchecked Sendable {
             cacheLock.unlock()
         }
 
-        let sanitizedAffixed = Self.sanitizeMalformedMyanmarMarks(mergedWithAffixes)
+        // TASK-081: same attested-surface exemption as the first
+        // sanitize call. Affix-wrapped surfaces won't match the raw
+        // attested set, but a buffer carrying digit/literal affixes
+        // was never an exact-reading match in the first place.
+        let sanitizedAffixed = Self.sanitizeMalformedMyanmarMarks(
+            mergedWithAffixes,
+            preservedSurfaces: attestedExactReadingSurfaces
+        )
         let sanitizedAffixed2 = Self.sanitizeIndepVowelVirama(sanitizedAffixed)
         // TASK-052: same preserved-surfaces guard as the first
         // sanitize call so the user-respecting two-syllable

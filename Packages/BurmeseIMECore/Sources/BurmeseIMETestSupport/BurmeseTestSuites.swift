@@ -168,5 +168,6 @@ public enum BurmeseTestSuites {
         AprefixIndependentVowelReachabilitySuite.suite,
         ProductionBenchScenarioParitySuite.suite,
         AwCreakyAsatCodaSuite.suite,
+        LexiconAttestedIrregularSpellingSuite.suite,
     ]
 }
