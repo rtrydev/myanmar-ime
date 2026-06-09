@@ -169,5 +169,6 @@ public enum BurmeseTestSuites {
         ProductionBenchScenarioParitySuite.suite,
         AwCreakyAsatCodaSuite.suite,
         LexiconAttestedIrregularSpellingSuite.suite,
+        NgaOnsetKinziInferenceSuite.suite,
     ]
 }

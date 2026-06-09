@@ -73,7 +73,14 @@ public enum KinziInferenceSuite {
                 "minkh",  // kh
                 "kinga",  // g
                 "mingh",  // gh
-                "minnga", // ng
+                // "minnga" (ng) removed by TASK-082: this entry was a
+                // mechanical sweep over the velar stackClass members,
+                // but kinzi over nga itself (`င်္င` =
+                // `1004 103A 1039 1004`) is unattested in Burmese
+                // orthography — the `…n|ng…` boundary is written with
+                // a plain nga onset (`နိုင်ငံ` = `နိုင်` + `ငံ`). The
+                // nga-lower exclusion in `inferImplicitStackMarkers`
+                // is pinned by NgaOnsetKinziInferenceSuite.
             ]
             for input in cases {
                 assertTopHasKinzi(ctx, engine: engine, input: input)

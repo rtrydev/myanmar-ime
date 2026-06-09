@@ -784,9 +784,27 @@ extension BurmeseEngine {
            chars[0] == "a", chars[1] == "i",
            chars[2] == "n", chars[3] == "g" {
             let lowers = stackLowerConsonantsStarting(chars: chars, at: 4)
-            if lowers.contains(where: { Grammar.isValidStack(upper: Myanmar.nga, lower: $0) }) {
+            // TASK-082: nga (U+1004) is never an inferred stack lower —
+            // kinzi over nga (`င်္င`) is unattested orthography. When
+            // the only stackable consonant after the diphthong is nga
+            // itself (the `…aing|ng…` boundary), the next syllable is a
+            // plain nga onset, not a stack site.
+            if lowers.contains(where: {
+                $0 != Myanmar.nga && Grammar.isValidStack(upper: Myanmar.nga, lower: $0)
+            }) {
                 let collapsed = "ai+" + String(chars[4...])
                 return (collapsed, 1, 0, 0, nil, 1, nil, 0)
+            }
+            // Bare-onset tail (no consonant after the diphthong's `ng`,
+            // e.g. `ainga`): mirror the mid-buffer liberal branch below
+            // so the kinzi-preview sibling stays panel-reachable while
+            // the liberal rarity bump keeps the open form at rank 0.
+            // Skipped when a consonant lower exists (nga-only case
+            // above falls through to the regular loop, where the
+            // nga-lower exclusion blocks the site).
+            if lowers.isEmpty {
+                let liberalInput = "ai+" + String(chars[2...])
+                return (liberalInput, 1, 1, 1, nil, 0, nil, 0)
             }
         }
         // Mid-buffer generalisation of the diphthong-coda collapse.
@@ -831,7 +849,14 @@ extension BurmeseEngine {
                 // open form at rank 0 even when the LM is silent.
                 return (liberalInput, 1, 1, 1, nil, 0, nil, 0)
             }
-            guard lowers.contains(where: { Grammar.isValidStack(upper: Myanmar.nga, lower: $0) }) else {
+            // TASK-082: nga is never an inferred stack lower (kinzi
+            // over nga `င်္င` is unattested) — a `…aing|ng…` boundary
+            // (`naingngan` = `နိုင်` + `ငံ`) renders a plain nga onset.
+            // Treating the nga-only case as non-stackable routes it to
+            // the blocked path below, so the open form wins naturally.
+            guard lowers.contains(where: {
+                $0 != Myanmar.nga && Grammar.isValidStack(upper: Myanmar.nga, lower: $0)
+            }) else {
                 // Has a consonant lower but it cannot stack with nga —
                 // block the regular loop here so open form wins naturally.
                 blockedLowerIndices.insert(ngStart)
@@ -1582,6 +1607,14 @@ extension BurmeseEngine {
         var sawLiberal = false
         for upper in upperMatch.uppers {
             for lower in lowers {
+                // TASK-082: nga (U+1004) never serves as a stack LOWER
+                // in Burmese/Pali orthography — kinzi over nga (`င်္င`)
+                // and `<C>`-over-nga virama stacks are unattested. A
+                // `…n|ng…` / `…ng|ng…` letter boundary is a plain nga
+                // onset for the next syllable. Explicit user-typed `+`
+                // remains the escape hatch; only the implicit inference
+                // is excluded here.
+                guard lower != Myanmar.nga else { continue }
                 guard Grammar.isValidStackLiberal(upper: upper, lower: lower) else {
                     continue
                 }
