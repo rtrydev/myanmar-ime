@@ -170,5 +170,6 @@ public enum BurmeseTestSuites {
         AwCreakyAsatCodaSuite.suite,
         LexiconAttestedIrregularSpellingSuite.suite,
         NgaOnsetKinziInferenceSuite.suite,
+        AbsorbedExactAliasReachabilitySuite.suite,
     ]
 }

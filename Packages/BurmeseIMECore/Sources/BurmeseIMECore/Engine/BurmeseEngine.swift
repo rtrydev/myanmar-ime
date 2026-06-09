@@ -1817,6 +1817,30 @@ public final class BurmeseEngine: @unchecked Sendable {
                 }
             }
         }
+        // TASK-083: exact-reading lexicon surfaces — raw store hits
+        // whose alias/compose reading matches the user's typed buffer.
+        // When such a hit's surface is also a parser-emittable parse
+        // (e.g. the retroflex variant `ခဏ` for `khana`), the
+        // absorption folds the (often negative, −1000-per-penalty)
+        // store score into the grammar candidate and removes the hit
+        // from `uniqueLexiconCandidates`, bypassing the
+        // `prioritizedLexicon` panel-presence guarantee. The set is
+        // used (a) to preserve the absorbed grammar candidate through
+        // the LM-margin prune below and (b) to re-inject any exact
+        // hit still missing from the merged panel — reachability, not
+        // ranking: injected candidates land past the page cap.
+        let exactAliasPrefixes = Set(Romanization.lookupAliasReadings(for: normalized).map(\.aliasReading))
+        let exactComposePrefixes = Set(Romanization.lookupComposeReadings(for: normalized).map(\.composeReading))
+        let exactReadingLexiconSurfaces: Set<String> = {
+            var surfaces = Set<String>()
+            for hit in lexiconCandidates {
+                if exactAliasPrefixes.contains(Romanization.aliasReading(hit.reading))
+                    || exactComposePrefixes.contains(Romanization.composeLookupKey(hit.reading)) {
+                    surfaces.insert(hit.surface)
+                }
+            }
+            return surfaces
+        }()
         if appliesYapinPromotion,
            let yapinSurface = Self.yapinPromotionPreservedSurface(
                 in: grammarCandidates,
@@ -1825,6 +1849,7 @@ public final class BurmeseEngine: @unchecked Sendable {
             var preservingGrammarSurfaces = combinedPreserveSurfaces
             preservingGrammarSurfaces.insert(yapinSurface)
             preservingGrammarSurfaces.formUnion(medialConsistencyPreservedSurfaces)
+            preservingGrammarSurfaces.formUnion(exactReadingLexiconSurfaces)
             grammarCandidates = pruneGrammarByLmMargin(
                 grammarCandidates,
                 preservingSurfaces: preservingGrammarSurfaces
@@ -1832,6 +1857,7 @@ public final class BurmeseEngine: @unchecked Sendable {
         } else {
             var preservingGrammarSurfaces = combinedPreserveSurfaces
             preservingGrammarSurfaces.formUnion(medialConsistencyPreservedSurfaces)
+            preservingGrammarSurfaces.formUnion(exactReadingLexiconSurfaces)
             grammarCandidates = pruneGrammarByLmMargin(
                 grammarCandidates,
                 preservingSurfaces: preservingGrammarSurfaces
@@ -1966,8 +1992,6 @@ public final class BurmeseEngine: @unchecked Sendable {
 
         let primaryGrammar = Array(grammarCandidates.prefix(3))
         let remainingGrammar = Array(grammarCandidates.dropFirst(3))
-        let exactAliasPrefixes = Set(Romanization.lookupAliasReadings(for: normalized).map(\.aliasReading))
-        let exactComposePrefixes = Set(Romanization.lookupComposeReadings(for: normalized).map(\.composeReading))
         let exactAliasLexicon = uniqueLexiconCandidates.filter { exactAliasPrefixes.contains($0.aliasReading) }
         let exactComposeLexicon = uniqueLexiconCandidates.filter {
             !exactAliasPrefixes.contains($0.aliasReading) && exactComposePrefixes.contains($0.composeReading)
@@ -1989,18 +2013,13 @@ public final class BurmeseEngine: @unchecked Sendable {
         // censor curated/committed orthography on exact-reading input.
         // Parser-fabricated illegal surfaces are unaffected — they
         // never enter these sets.
-        // Built from the RAW store hits (`lexiconCandidates`), not the
-        // post-absorption `uniqueLexiconCandidates` — an exact hit whose
-        // surface was absorbed into a grammar/lattice candidate is still
-        // attested orthography and must stay exempt.
+        // Built from the RAW store hits (`exactReadingLexiconSurfaces`,
+        // computed before the LM-margin prune), not the post-absorption
+        // `uniqueLexiconCandidates` — an exact hit whose surface was
+        // absorbed into a grammar/lattice candidate is still attested
+        // orthography and must stay exempt.
         let attestedExactReadingSurfaces: Set<String> = {
-            var surfaces = Set<String>()
-            for hit in lexiconCandidates {
-                if exactAliasPrefixes.contains(Romanization.aliasReading(hit.reading))
-                    || exactComposePrefixes.contains(Romanization.composeLookupKey(hit.reading)) {
-                    surfaces.insert(hit.surface)
-                }
-            }
+            var surfaces = exactReadingLexiconSurfaces
             for historyCandidate in historyCandidates
             where Romanization.aliasReading(historyCandidate.reading) == aliasPrefix {
                 surfaces.insert(historyCandidate.surface)
@@ -2124,6 +2143,23 @@ public final class BurmeseEngine: @unchecked Sendable {
             where bareYaAsRaVariantSurfaces.contains(grammarCandidate.candidate.surface)
                 && !mergedSurfaces.contains(grammarCandidate.candidate.surface) {
                 merged.append(grammarCandidate.candidate)
+            }
+        }
+        // TASK-083: exact-reading lexicon hit injection — same pattern
+        // as the strict-stack and bare-ya/ra injections above. An exact
+        // alias/compose hit whose surface was absorbed into a
+        // rarity-penalized grammar parse (and then buried below the
+        // page cap or dropped by the prune) is the digit-less reading's
+        // only path to the variant spelling (`khana` → `ခဏ`,
+        // `ku.m+pani` → `ကုမ္ပဏီ`); digits are literal, so without
+        // panel presence the word is unwritable. Appended past the cap:
+        // reachability, never a ranking promotion.
+        if !exactReadingLexiconSurfaces.isEmpty {
+            var mergedSurfaces = Set(merged.map(\.surface))
+            for hit in lexiconCandidates
+            where exactReadingLexiconSurfaces.contains(hit.surface)
+                && mergedSurfaces.insert(hit.surface).inserted {
+                merged.append(hit)
             }
         }
         merged = Self.expandAaVariants(merged)
