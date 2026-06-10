@@ -75,18 +75,32 @@ extension BurmeseEngine {
                 let pv = prev.value
                 if pv >= 0x103B && pv <= 0x103E { sawMedial = true }
                 if Myanmar.isConsonant(prev) {
-                    // `Grammar.requiresTallAa` is the orthographic source of
-                    // truth at every position the descender consonant
-                    // appears, regardless of what scalar precedes it. The
-                    // earlier "if preceded by virama, fall back to short"
-                    // carve-out (task 01) was wrong — the lexicon shows the
-                    // tall hook is the only attested form for kinzi+ဂ+aa
-                    // (`အင်္ဂါ`, `ဘင်္ဂါလီ`), the only attested form for
-                    // ဂ_+aa Pali stacks (`မဂ္ဂါဝပ်`), and the dominant form
-                    // for ပ_+aa (`အဓိပ္ပါယ်` 23,838× vs. `အဓိပ္ပာယ်`
-                    // 17,340×). Any per-surface short-aa exception is now
-                    // encoded as a data table override (see task 05),
-                    // not as a structural rule here.
+                    // TASK-087: when the aa's base consonant is the LOWER
+                    // of a plain Pali virama stack (`<C> 1039 <C>`), the
+                    // aa shape is lexical, not structural — the stacked
+                    // pair already descends, so MLC convention picks the
+                    // shape per word: `သိက္ခာ`, `ရိက္ခာ`, `ဥပေက္ခာ`,
+                    // `စန္ဒာ`, `နန္ဒာ` keep round ာ while `သဒ္ဓါ`,
+                    // `မဂ္ဂါ…` keep the tall hook (a full-store scan
+                    // finds 153 stack-lower sites whose curated shape
+                    // contradicts the structural prediction). Treat the
+                    // shape as authored: store surfaces pass through
+                    // verbatim and parser outputs keep the typed shape.
+                    //
+                    // Kinzi is also virama-preceded (`103A 1039 <C>`)
+                    // but stays under the structural rule: tall is the
+                    // only attested form for kinzi+ဂ+aa (`အင်္ဂါ`,
+                    // `ဘင်္ဂါလီ`) and the parser's own top-1 for kinzi
+                    // buffers carries round aa — this rewrite is what
+                    // produces the correct kinzi rendering.
+                    if j >= 1, scalars[j - 1].value == 0x1039,
+                       !(j >= 2 && scalars[j - 2].value == 0x103A) {
+                        break
+                    }
+                    // `Grammar.requiresTallAa` is the orthographic source
+                    // of truth for plain onsets (and kinzi bases): the
+                    // descender consonants ခ ဂ င ဒ ပ ဝ take tall ါ,
+                    // everything else takes round ာ.
                     let wantsTall = tallAaSet.contains(prev.value) && !sawMedial
                     let target: UInt32 = wantsTall ? tallAa : shortAa
                     if v != target {

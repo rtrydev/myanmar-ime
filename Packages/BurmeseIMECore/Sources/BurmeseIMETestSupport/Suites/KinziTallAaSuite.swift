@@ -1,13 +1,20 @@
 import Foundation
 @_spi(Testing) import BurmeseIMECore
 
-/// Coverage for task 01: `correctAaShape` must keep the orthographically
-/// dominant tall ါ (U+102B) on descender consonants regardless of whether
-/// the consonant sits as the lower of a virama stack or below a kinzi
-/// superscript. Lexicon evidence (`အင်္ဂါ`, `မဂ္ဂါဝပ်`, `အဓိပ္ပါယ်`)
-/// shows the previous "if preceded by virama, fall back to short ာ"
-/// carve-out was wrong: tall is the only attested form for kinzi+ga+aa
-/// and ဂ_+aa, and it dominates by frequency for ပ္ပ_+aa.
+/// Coverage for task 01 (amended by TASK-087): `correctAaShape` keeps the
+/// orthographically dominant tall ါ (U+102B) on descender consonants at
+/// plain-onset positions and below a kinzi superscript — tall is the only
+/// attested form for kinzi+ga+aa (`အင်္ဂါ`, `ဘင်္ဂါလီ`).
+///
+/// TASK-087 narrowed the original task-01 rule: when the aa's base is the
+/// lower of a PLAIN Pali virama stack (`<C> 1039 <C>`, kinzi excluded),
+/// the shape is a per-word lexical convention (`သိက္ခာ`, `စန္ဒာ`, `နန္ဒာ`
+/// round vs `သဒ္ဓါ`, `မဂ္ဂါ…` tall — 153 curated store spellings
+/// contradict the structural prediction), so the rewrite is skipped and
+/// the typed/authored shape passes through. The bare engine renders the
+/// typed round `ar`; curated tall spellings stay reachable through
+/// lexicon hits, which now pass through verbatim
+/// (StackLowerAaShapeFidelitySuite pins the production behavior).
 public enum KinziTallAaSuite {
 
     private static let tallAa: UInt32 = 0x102B
@@ -46,9 +53,15 @@ public enum KinziTallAaSuite {
             }
         },
 
-        // Pali virama stacks where the lower is a descender (ပ_, ဂ_,
-        // ဒ_) take the tall hook in the dominant lexicon spelling.
-        TestCase("paliStack_descenderLower_aa_isTall") { ctx in
+        // TASK-087: Pali virama stacks where the lower is a descender
+        // (ပ_, ဂ_, ဒ_) keep the TYPED shape on the bare engine — the
+        // aa shape after a plain stack lower is a per-word lexical
+        // convention the structural rule cannot express (`စန္ဒာ`,
+        // `နန္ဒာ` round vs `မဂ္ဂါ…` tall), so the rewrite is skipped
+        // and the parser's round `ar` materialization passes through.
+        // Curated tall spellings are served verbatim by lexicon hits
+        // on the production engine (StackLowerAaShapeFidelitySuite).
+        TestCase("paliStack_lowerAa_keepsTypedShape") { ctx in
             let engine = BurmeseEngine()
             for input in ["pap+par", "ag+gar", "ad+dar"] {
                 let state = engine.update(buffer: input, context: [])
@@ -57,31 +70,36 @@ public enum KinziTallAaSuite {
                     continue
                 }
                 ctx.assertTrue(
-                    endsWithTallAa(top),
+                    endsWithShortAa(top),
                     input,
-                    detail: "expected tall ါ on top candidate, got '\(top)'"
+                    detail: "expected typed round ာ on top candidate, got '\(top)'"
                 )
             }
         },
 
         // Direct unit on `correctAaShape` with synthetic surfaces so
-        // the rule is asserted outside the engine pipeline. Each entry
-        // is the raw scalar list a parser/lexicon path could emit; the
-        // sanitizer must rewrite the closing aa to U+102B.
-        TestCase("correctAaShape_rewritesStackedDescender") { ctx in
+        // the rule is asserted outside the engine pipeline. The kinzi
+        // base (`103A 1039 <C>`) is still rewritten to U+102B; plain
+        // stack lowers (`<C> 1039 <C>`) keep their authored shape in
+        // BOTH directions (TASK-087).
+        TestCase("correctAaShape_rewritesKinziKeepsStackLower") { ctx in
             let cases: [(String, String)] = [
-                // မင်္ဂာ → မင်္ဂါ
+                // Kinzi stays structural: မင်္ဂာ → မင်္ဂါ
                 ("\u{1019}\u{1004}\u{103A}\u{1039}\u{1002}\u{102C}",
                  "\u{1019}\u{1004}\u{103A}\u{1039}\u{1002}\u{102B}"),
-                // ပပ္ပာ → ပပ္ပါ
+                // Plain stack lowers pass through verbatim:
+                // ပပ္ပာ stays round
                 ("\u{1015}\u{1015}\u{1039}\u{1015}\u{102C}",
-                 "\u{1015}\u{1015}\u{1039}\u{1015}\u{102B}"),
-                // အဂ္ဂာ → အဂ္ဂါ
+                 "\u{1015}\u{1015}\u{1039}\u{1015}\u{102C}"),
+                // အဂ္ဂာ stays round
                 ("\u{1021}\u{1002}\u{1039}\u{1002}\u{102C}",
-                 "\u{1021}\u{1002}\u{1039}\u{1002}\u{102B}"),
-                // အဒ္ဒာ → အဒ္ဒါ
+                 "\u{1021}\u{1002}\u{1039}\u{1002}\u{102C}"),
+                // အဒ္ဒာ stays round
                 ("\u{1021}\u{1012}\u{1039}\u{1012}\u{102C}",
-                 "\u{1021}\u{1012}\u{1039}\u{1012}\u{102B}"),
+                 "\u{1021}\u{1012}\u{1039}\u{1012}\u{102C}"),
+                // …and authored tall is preserved too: သဒ္ဓါ stays tall
+                ("\u{101E}\u{1012}\u{1039}\u{1013}\u{102B}",
+                 "\u{101E}\u{1012}\u{1039}\u{1013}\u{102B}"),
             ]
             for (input, expected) in cases {
                 let actual = BurmeseEngine.correctAaShape(input)

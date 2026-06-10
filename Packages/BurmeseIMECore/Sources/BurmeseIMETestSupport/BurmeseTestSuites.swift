@@ -175,5 +175,6 @@ public enum BurmeseTestSuites {
         SuffixingParticleReachabilitySuite.suite,
         EmbeddedToneSplitLexiconFidelitySuite.suite,
         LoanwordBareConsonantCodaSuite.suite,
+        StackLowerAaShapeFidelitySuite.suite,
     ]
 }
