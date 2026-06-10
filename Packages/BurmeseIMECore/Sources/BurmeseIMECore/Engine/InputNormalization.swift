@@ -10,6 +10,37 @@ extension BurmeseEngine {
         "ar2", "aw2", "out2", "aung2",
     ]
 
+    /// TASK-080: the suffixing symbol particles — ၍ (U+104D, `ywe`) and
+    /// ၏ (U+104F, `ei`) — are standalone vowel rules the DP only admits
+    /// where an onsetless syllable can start, so the parse pool never
+    /// contains a `<word> + particle` segmentation even though attaching
+    /// after a completed word is the particles' only grammatical
+    /// position. Derived from the romanization table: standalone entries
+    /// whose Myanmar output is a single scalar in the symbol-particle
+    /// block U+104C–U+104F. Longest roman first so suffix collisions
+    /// resolve toward the longer key.
+    internal static let suffixingSymbolParticles: [(roman: String, myanmar: String)] = {
+        Romanization.vowels.compactMap { entry -> (roman: String, myanmar: String)? in
+            guard entry.isStandalone else { return nil }
+            let scalars = Array(entry.myanmar.unicodeScalars)
+            guard scalars.count == 1,
+                  (0x104C...0x104F).contains(scalars[0].value) else { return nil }
+            return (entry.roman, entry.myanmar)
+        }
+        .sorted { $0.roman.count > $1.roman.count }
+    }()
+
+    /// The suffixing symbol particle that terminates `reading`, if the
+    /// reading extends past the particle key itself (a bare `ei`/`ywe`
+    /// buffer is already served by the standalone vowel rule).
+    internal static func trailingSuffixingParticle(
+        of reading: String
+    ) -> (roman: String, myanmar: String)? {
+        suffixingSymbolParticles.first {
+            reading.count > $0.roman.count && reading.hasSuffix($0.roman)
+        }
+    }
+
     internal static func normalizeForParser(_ input: String) -> String {
         // Digits are always literal in user input (never variant
         // selectors), so the parser must never see `2`/`3`. They get

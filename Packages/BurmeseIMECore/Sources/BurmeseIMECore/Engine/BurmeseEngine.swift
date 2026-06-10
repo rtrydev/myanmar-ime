@@ -2946,6 +2946,88 @@ public final class BurmeseEngine: @unchecked Sendable {
                 ))
             }
         }
+        // TASK-080 (1): truncated-reading exact-hit rescue. When the
+        // right-shrink probe cut the reading (`thinei` → kept `thine`,
+        // dropped `i`; `ng*:` → kept `ng*`, dropped `:`), the alias
+        // prefix used for the regular lexicon lookup came from the
+        // TRUNCATED buffer, so exact alias/compose hits for the full
+        // reading (`သင်၏`, `မိမိ၏`, `၎င်း`, …) were never queried.
+        // Query the full pre-shrink reading and inject the hits.
+        // Penalty-0 hits go to the front when the truncation cut
+        // composing LETTERS — that class fabricates `ယ်အီ`-style tails
+        // at rank 0, so the curated reading must beat them. When only
+        // punctuation was cut, the existing tone-composition rendering
+        // is sound and the hits append for panel reachability only.
+        if !droppedTail.isEmpty,
+           droppedTail.count <= 2,
+           leadingLiteral.isEmpty,
+           digitPrefix.isEmpty,
+           literalTail.isEmpty,
+           !preTrimmedNormalized.isEmpty {
+            let wholeBufferHits = candidateStore.lookupExactForLattice(
+                reading: preTrimmedNormalized
+            )
+            if !wholeBufferHits.isEmpty {
+                var existing = Set(sanitizedWithAffixes.map(\.surface))
+                let promoteToFront = droppedTailHasAsciiLetters
+                var frontHits: [Candidate] = []
+                for hit in wholeBufferHits {
+                    guard existing.insert(hit.candidate.surface).inserted else { continue }
+                    let candidate = Candidate(
+                        surface: hit.candidate.surface,
+                        reading: displayBuffer,
+                        source: .lexicon,
+                        score: hit.candidate.score
+                    )
+                    if promoteToFront && hit.aliasPenalty == 0 {
+                        frontHits.append(candidate)
+                    } else {
+                        sanitizedWithAffixes.append(candidate)
+                    }
+                }
+                // Walked best-first; reverse so the store's top
+                // penalty-0 hit lands at index 0.
+                for candidate in frontHits.reversed() {
+                    sanitizedWithAffixes.insert(candidate, at: 0)
+                }
+            }
+        }
+        // TASK-080 (2): generative `<word> + ၏/၍` segmentation. The
+        // suffixing particles attach after a completed word — their
+        // only grammatical position — but the parser's mid-buffer
+        // standalone gate (TASK-007) keeps them out of the DP pool,
+        // so non-lexicon combinations (`tharywe` → `သာ၍`) were
+        // unreachable. Synthesize `<acceptable prefix parse> +
+        // <particle>` variants and APPEND them: reachability, never a
+        // ranking promotion, so the letter-chain parses keep rank 0
+        // and the bare-engine mid-buffer cleanliness pins
+        // (StandaloneParticleMidBufferSuite) are unaffected.
+        if leadingLiteral.isEmpty,
+           digitPrefix.isEmpty,
+           literalTail.isEmpty,
+           let particle = Self.trailingSuffixingParticle(of: preTrimmedNormalized) {
+            let prefixReading = String(
+                preTrimmedNormalized.dropLast(particle.roman.count)
+            )
+            if !prefixReading.isEmpty {
+                let prefixParses = cachedGrammarParses(
+                    prefixReading,
+                    maxResults: 2,
+                    isFullBuffer: true
+                )
+                var existing = Set(sanitizedWithAffixes.map(\.surface))
+                for parse in prefixParses where Self.isAcceptableParse(parse) {
+                    let surface = Self.correctAaShape(parse.output) + particle.myanmar
+                    guard existing.insert(surface).inserted else { continue }
+                    sanitizedWithAffixes.append(Candidate(
+                        surface: surface,
+                        reading: displayBuffer,
+                        source: .grammar,
+                        score: Double(parse.score)
+                    ))
+                }
+            }
+        }
         var finalCandidates: [Candidate]
         if leadingLiteral.isEmpty,
            digitPrefix.isEmpty,
