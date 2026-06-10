@@ -250,6 +250,7 @@ private struct SpecialCharactersSection: View {
         (".", "Short / creaky tone", "Appended to a vowel key: ay → ေ, ay. → ေ့."),
         ("ywe", "Locative / conjunctive ၍", "Standalone particle meaning \"and thus\". Type on its own — no consonant needed."),
         ("ei", "Genitive ၏", "Standalone possessive / sentence-ending particle."),
+        ("hnite", "Locative ၌", "Standalone particle meaning \"at / in\", read နှိုက်. Also composes after a word: rarhnite → ရာ၌."),
     ]
 
     var body: some View {

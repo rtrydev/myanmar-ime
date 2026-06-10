@@ -115,8 +115,9 @@ public final class SyllableParser: Sendable {
 
     /// Per-vowel: true when the entry is a `standalone: true` rule
     /// whose Myanmar output begins with an independent-vowel scalar
-    /// (U+1023..U+102A) or a free-standing-particle scalar (U+104D
-    /// `ywe`, U+104F `ei`). These rules represent characters that
+    /// (U+1023..U+102A) or a free-standing-particle scalar in the
+    /// symbol block (U+104C `hnite`, U+104D `ywe`, U+104F `ei`).
+    /// These rules represent characters that
     /// never appear inside a multi-syllable Burmese word; mid-buffer
     /// matches between two consonants produce orthographically
     /// nonsense surfaces (TASK-007). The DP charges a structural
@@ -415,11 +416,12 @@ public final class SyllableParser: Sendable {
             }
             // TASK-007: tag standalone vowel rules whose Myanmar
             // output begins with an independent-vowel scalar
-            // (U+1023..U+102A) or a free-standing particle (U+104D /
-            // U+104F) AND whose canonical roman contains no numeric
-            // disambiguator. These characters are valid only at
-            // syllable boundaries / word starts; mid-buffer matches
-            // produce orthographically nonsense surfaces.
+            // (U+1023..U+102A) or a free-standing particle in the
+            // symbol block (U+104C..U+104F) AND whose canonical roman
+            // contains no numeric disambiguator. These characters are
+            // valid only at syllable boundaries / word starts;
+            // mid-buffer matches produce orthographically nonsense
+            // surfaces.
             //
             // Digit-bearing standalone keys (`u2`, `u2.`, `u2:`, `ay2`)
             // are USER-EXPLICIT — typing the `2` is the canonical
@@ -443,7 +445,7 @@ public final class SyllableParser: Sendable {
                !entry.canonicalRoman.contains(where: Romanization.isNumericAliasMarker) {
                 let v = first.value
                 let isIndependentVowel = v >= 0x1023 && v <= 0x102A
-                let isFreeParticle = v == 0x104D || v == 0x104F
+                let isFreeParticle = v >= 0x104C && v <= 0x104F
                 if isIndependentVowel || isFreeParticle {
                     vowelMidBufPen[Int(entry.id)] = true
                 }

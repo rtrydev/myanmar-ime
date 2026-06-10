@@ -371,8 +371,16 @@ public enum Romanization {
         // with any dependent-vowel sibling, and the alias-penalty from a "2"
         // form would let the onset+medial+vowel parse of "ywe" (ယွယ်) out-rank
         // the standalone ၍ on ties.
-        .init("ywe", "\u{104D}", standalone: true), // ၍ locative/conjunctive particle
+        //
+        // TASK-086: `hnite` is the phonetic key for ၌ — the particle is
+        // read identically to the verb နှိုက် (hnai'), so any phonetic
+        // key collides with that verb's canonical reading. That is a
+        // homophone-panel situation (durable rule §7), not a clash: the
+        // DP gates the standalone rule by position, the lexicon keeps
+        // serving the verb, and both stay reachable under the one key.
+        .init("ywe", "\u{104D}", standalone: true), // ၍ conjunctive particle
         .init("ei",  "\u{104F}", standalone: true), // ၏ genitive/possessive particle
+        .init("hnite", "\u{104C}", standalone: true), // ၌ locative particle (read နှိုက်)
     ]
 
     /// Sorted vowel keys by descending length for longest-match.

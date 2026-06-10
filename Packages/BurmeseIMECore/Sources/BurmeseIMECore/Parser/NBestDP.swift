@@ -592,7 +592,7 @@ extension SyllableParser {
                     // TASK-007: skip the transition entirely when a
                     // standalone vowel rule whose Myanmar output begins
                     // with an independent-vowel scalar (U+1023..U+102A)
-                    // or a free-standing particle (U+104D / U+104F)
+                    // or a free-standing particle (U+104C..U+104F)
                     // would land between consonant bases. Two trigger
                     // shapes: (a) the previous state is non-seed
                     // (already-emitted Burmese context), or (b) more
@@ -640,7 +640,7 @@ extension SyllableParser {
                     // vowel produces an independent-vowel scalar
                     // (1023..102A) AND the previous arc is `vowelOnly`
                     // with empty emission. Free-standing particles
-                    // (`104D / 104F`) and any non-empty previous arc
+                    // (`104C..104F`) and any non-empty previous arc
                     // are unaffected.
                     var standaloneAfterEmptyAliasPenalty = 0
                     var standaloneAfterEmptyForceMin = false

@@ -172,6 +172,8 @@ internal static class Romanization
             "Standalone particle meaning \"and thus\". Type on its own — no consonant needed."),
         new("ei",  "Genitive ၏",
             "Standalone possessive / sentence-ending particle."),
+        new("hnite", "Locative ၌",
+            "Standalone particle meaning \"at / in\", read နှိုက်. Also composes after a word: rarhnite → ရာ၌."),
     ];
 
     /// <summary>Worked-example pairs used by the Syntax tab.</summary>

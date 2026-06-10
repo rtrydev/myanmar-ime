@@ -37,10 +37,11 @@ public enum StandaloneParticleMidBufferSuite {
     }
 
     /// Polluting scalars: independent vowels (U+1023..U+102A) and
-    /// free-standing particles (U+104D `ywe`, U+104F `ei`).
+    /// free-standing particles (U+104C `hnite`, U+104D `ywe`,
+    /// U+104F `ei`).
     private static let pollutingScalars: Set<UInt32> = [
         0x1023, 0x1024, 0x1025, 0x1026, 0x1027, 0x1029, 0x102A,
-        0x104D, 0x104F,
+        0x104C, 0x104D, 0x104F,
     ]
 
     /// True when `surface` contains a polluting scalar at a position

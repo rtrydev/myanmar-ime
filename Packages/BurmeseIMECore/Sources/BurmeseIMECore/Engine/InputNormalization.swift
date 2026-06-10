@@ -10,15 +10,16 @@ extension BurmeseEngine {
         "ar2", "aw2", "out2", "aung2",
     ]
 
-    /// TASK-080: the suffixing symbol particles — ၍ (U+104D, `ywe`) and
-    /// ၏ (U+104F, `ei`) — are standalone vowel rules the DP only admits
-    /// where an onsetless syllable can start, so the parse pool never
-    /// contains a `<word> + particle` segmentation even though attaching
-    /// after a completed word is the particles' only grammatical
-    /// position. Derived from the romanization table: standalone entries
-    /// whose Myanmar output is a single scalar in the symbol-particle
-    /// block U+104C–U+104F. Longest roman first so suffix collisions
-    /// resolve toward the longer key.
+    /// TASK-080: the suffixing symbol particles — ၍ (U+104D, `ywe`),
+    /// ၏ (U+104F, `ei`), and ၌ (U+104C, `hnite`, TASK-086) — are
+    /// standalone vowel rules the DP only admits where an onsetless
+    /// syllable can start, so the parse pool never contains a
+    /// `<word> + particle` segmentation even though attaching after a
+    /// completed word is the particles' only grammatical position.
+    /// Derived from the romanization table: standalone entries whose
+    /// Myanmar output is a single scalar in the symbol-particle block
+    /// U+104C–U+104F. Longest roman first so suffix collisions resolve
+    /// toward the longer key.
     internal static let suffixingSymbolParticles: [(roman: String, myanmar: String)] = {
         Romanization.vowels.compactMap { entry -> (roman: String, myanmar: String)? in
             guard entry.isStandalone else { return nil }
