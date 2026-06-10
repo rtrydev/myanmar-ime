@@ -636,23 +636,27 @@ extension BurmeseEngine {
     /// `<consonant><U+103A>` codas back-to-back attached to a single
     /// anchor with no real intervening base. The shape is:
     ///
-    ///   <X>?<C1><U+103A><C2><U+103A>...
+    ///   <X>?<C1><U+103A><U+101A><U+103A>...
     ///
     /// where:
     ///   - `<X>` is empty, U+1021 (orphan-anchor implicit-အ), or any
     ///     independent vowel U+1021..U+102A (a stand-alone-vowel
     ///     anchor like `1027` from `aye+e`).
-    ///   - Both `<C1>` and `<C2>` are bare consonant bases (U+1000..
-    ///     U+1021 or U+103F) with no dep-vowel, medial, virama, or
-    ///     fresh anchor between them.
-    ///   - The pattern occurs at the very start of the surface (no
-    ///     consonant base precedes `<C1>` other than `<X>`).
+    ///   - `<C1>` is a bare consonant base (U+1000..U+1021 or
+    ///     U+103F) and the lone consonant between the two asats is
+    ///     ya (U+101A), with no dep-vowel, medial, virama, or fresh
+    ///     anchor between them.
     ///
     /// The bug class is the doubled-`e`-rule chain
     /// (`eea`/`een`/`eeing`/...): the `e` rule emits `101A 103A`
     /// (ya-asat) and two consecutive `e`-rule arcs concatenate to
     /// `... 101A 103A 101A 103A ...` with no new base between. The
-    /// second coda has no real syllable to close.
+    /// second coda has no real syllable to close. The `e` rule is the
+    /// only rule that emits a coda without an explicit coda key, so
+    /// the lone in-between consonant of every fabricated chain is ya
+    /// — TASK-085 narrows the predicate accordingly so the legitimate
+    /// loanword bare-consonant codas (`ဘတ်စ်`, `ဗိုင်းရပ်စ်`,
+    /// `ဝက်ဘ်ဆိုက်`, …) stop being flagged.
     ///
     /// Two-syllable shapes where the second coda has its own
     /// dedicated consonant base (e.g. `let+pet` →
@@ -1230,19 +1234,33 @@ extension BurmeseEngine {
         // stacks, closed-syllable preludes, mid-buffer occurrences,
         // …). The generalised rule: walk the surface looking for
         // any pair of `<C><103A>` codas back-to-back where the run
-        // between the two asats is just one bare consonant base —
-        // no dep-vowel, medial, virama, tone mark, or independent-
+        // between the two asats is just one bare YA (U+101A) — no
+        // dep-vowel, medial, virama, tone mark, or independent-
         // vowel anchor — i.e. the second coda's "anchor" is a
-        // phantom syllable rather than a real syllable.
+        // phantom ya-asat continuation rather than a real syllable.
         //
         // For each position `i` where `scalars[i] == 103A` and
         // `scalars[i - 1]` is a consonant base, find the next
         // `103A` at position `j` (the next asat in the surface).
         // The run between is `scalars[i + 1 ..< j]`. Reject when:
         //   - the run contains exactly ONE consonant base, AND
+        //   - that base is ya (U+101A), AND
         //   - the run contains no dep-vowel (102B..1032), medial
         //     (103B..103E), tone mark (1036..1038), virama (1039),
         //     or independent-vowel scalar (1021..102A).
+        //
+        // TASK-085: the ya restriction matters. The `e` rule is the
+        // only rule that emits a coda without an explicit coda key,
+        // and it always emits ya-asat (`101A 103A`) — so every
+        // doubled-coda chain the bug class can fabricate has ya as
+        // the lone in-between consonant. A lone NON-ya consonant
+        // between two asats is the standard loanword orthography
+        // for foreign consonant clusters and acronym letters
+        // (`ဘတ်စ်` bus, `ဗိုင်းရပ်စ်` virus, `ဝက်ဘ်ဆိုက်` website,
+        // `အက်စ်` the letter S — 453 shipped lexicon entries carry
+        // the `<C>်<C>်` shape, none of them `<C>်ယ်`). Flagging
+        // those collapsed entire buffers to a literal-only panel
+        // once the literal fallback counted as the clean sibling.
         //
         // Single-coda + own real syllable + coda (legit) is
         // preserved by either:
@@ -1267,12 +1285,14 @@ extension BurmeseEngine {
             // characterise the run between the two asats.
             var j = i + 1
             var consonantBaseCountBetween = 0
+            var loneConsonantBetween: UInt32 = 0
             var sawAttachableMark = false
             var sawFreshAnchor = false
             while j < scalars.count, scalars[j] != 0x103A {
                 let v = scalars[j]
                 if (v >= 0x1000 && v <= 0x1021) || v == 0x103F {
                     consonantBaseCountBetween += 1
+                    loneConsonantBetween = v
                 }
                 if isIndependentVowel(v) {
                     sawFreshAnchor = true
@@ -1294,9 +1314,12 @@ extension BurmeseEngine {
             guard j < scalars.count else { break }
 
             // Doubled-coda chain when the run between the asats is
-            // exactly one consonant base with no dep-vowel,
+            // exactly one bare ya (U+101A) with no dep-vowel,
             // medial, virama, tone mark, or fresh anchor between.
+            // Non-ya lone consonants are the legitimate loanword
+            // bare-consonant coda shape (TASK-085).
             if consonantBaseCountBetween == 1
+                && loneConsonantBetween == 0x101A
                 && !sawAttachableMark
                 && !sawFreshAnchor {
                 return true
