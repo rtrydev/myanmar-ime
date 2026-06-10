@@ -506,6 +506,67 @@ public enum Romanization {
         }
     }
 
+    /// TASK-084: symbol-particle scalars that own a roman key, paired
+    /// with that key. Derived from the standalone vowel entries whose
+    /// Myanmar output is a single scalar in U+104C–U+104F (the same
+    /// derivation the engine's `suffixingSymbolParticles` uses). Used
+    /// by `isExactTrustworthyRow` to detect store rows indexed before
+    /// the scalar had a roman key.
+    private static let keyedSymbolParticles: [(scalar: UInt32, roman: String)] = {
+        vowels.compactMap { entry -> (scalar: UInt32, roman: String)? in
+            guard entry.isStandalone else { return nil }
+            let scalars = Array(entry.myanmar.unicodeScalars)
+            guard scalars.count == 1,
+                  (0x104C...0x104F).contains(scalars[0].value) else { return nil }
+            return (scalars[0].value, entry.roman)
+        }
+    }()
+
+    /// TASK-084: true when a lexicon row's `(surface, reading)` pair
+    /// can be trusted for exact-match privileges (prioritization,
+    /// panel reinjection, prefix-window crowd-out rescue).
+    ///
+    /// The shipped store carries a residue of corpus rows whose
+    /// reading silently under-covers the surface — the reverse
+    /// romanizer drops scalars it has no mapping for, so `၁ဝ` indexes
+    /// under `wa`, `၃က` under `ka`, `သို႔` (Zawgyi creaky) under
+    /// `tho`, and the 21 ၌-bearing rows under particle-less readings.
+    /// Those rows hid behind the prefix LIMIT window for years; once
+    /// exact-equality hits are unioned past the window they would
+    /// resurface at high rank for keystrokes that never typed the
+    /// missing scalar. Three structural legs:
+    ///
+    /// 1. No digit scalar (ASCII `0-9`, Myanmar U+1040–U+1049):
+    ///    digits are literal and the exact-lookup paths only ever run
+    ///    on digit-free normalized buffers, so any digit in the
+    ///    surface is phantom for the matched reading.
+    /// 2. No scalar in U+104A/U+104B (section marks never part of a
+    ///    reading) or U+1050–U+109F (extension scalars — Shan/Mon/
+    ///    Zawgyi leftovers like U+1094 — that no forward rule emits).
+    /// 3. For each symbol particle with a roman key (၌ `hnite`,
+    ///    ၍ `ywe`, ၏ `ei`): a surface containing the scalar must
+    ///    carry the key in its reading. Rows generated before the
+    ///    scalar's mapping existed (the ၌ class) fail this and keep
+    ///    their pre-TASK-084 window-gated behavior.
+    package static func isExactTrustworthyRow(surface: String, reading: String) -> Bool {
+        for scalar in surface.unicodeScalars {
+            let v = scalar.value
+            if (v >= 0x30 && v <= 0x39) || (v >= 0x1040 && v <= 0x1049) {
+                return false
+            }
+            if v == 0x104A || v == 0x104B || (v >= 0x1050 && v <= 0x109F) {
+                return false
+            }
+        }
+        for particle in keyedSymbolParticles
+        where surface.unicodeScalars.contains(where: { $0.value == particle.scalar }) {
+            if !reading.contains(particle.roman) {
+                return false
+            }
+        }
+        return true
+    }
+
 
     private struct LoanwordClusterAliasRule: Sendable {
         let canonical: String

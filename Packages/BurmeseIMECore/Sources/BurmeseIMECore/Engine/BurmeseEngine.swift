@@ -1003,7 +1003,33 @@ public final class BurmeseEngine: @unchecked Sendable {
         // case), because there the lookup is empty and this guard is false.
         let preAliasPrefix = Romanization.aliasReading(normalized)
         let preComposeKey = Romanization.composeLookupKey(normalized)
+        // TASK-084: whole-buffer exact store hits, keyed by the MATCHED
+        // alias/compose reading rather than a canonical-reading
+        // reconstruction. Builder-synthesized alias rows (the `ah-`/`a-`
+        // U+1021 typing conventions, loanword cluster rewrites) carry
+        // alias readings the engine cannot regenerate from the typed
+        // buffer via `lookupAliasReadings`, so reconstruction-based
+        // exactness misses them entirely. Queried once per update
+        // (LRU-backed equality statements) and reused for: the
+        // anchor-windowing suppression below, the lexicon-pool union,
+        // and the exact-recognition key set that feeds
+        // `exactReadingLexiconSurfaces` / `exactAliasLexicon`.
+        // `isExactTrustworthyRow` keeps reading-under-covering corpus
+        // residue (digit-bearing `၁ဝ`-class rows, Zawgyi leftovers,
+        // pre-mapping ၌ rows) out of the exact-privilege paths.
+        let wholeBufferExactHits = candidateStore.lookupExact(
+            reading: normalized,
+            previousSurface: context.last
+        ).filter {
+            Romanization.isExactTrustworthyRow(surface: $0.surface, reading: $0.reading)
+        }
+        var exactMatchedHitKeys: Set<String> = []
+        exactMatchedHitKeys.reserveCapacity(wholeBufferExactHits.count)
+        for hit in wholeBufferExactHits {
+            exactMatchedHitKeys.insert("\(hit.surface)\u{0}\(hit.reading)")
+        }
         let hasExactLexiconMatch: Bool = {
+            if !wholeBufferExactHits.isEmpty { return true }
             let hits = candidateStore.lookup(prefix: preAliasPrefix, previousSurface: context.last)
             return hits.contains {
                 Romanization.aliasReading($0.reading) == preAliasPrefix
@@ -1551,6 +1577,17 @@ public final class BurmeseEngine: @unchecked Sendable {
             // Only promote lexicon entries whose reading is exactly the
             // tail — partial prefix matches would drift keystroke-to-keystroke
             // and destabilize the frozen-prefix anchor for long sentences.
+            //
+            // TASK-084 deliberately does NOT widen this filter to
+            // matched-alias exact tails: composing a synthetic-alias
+            // tail hit (`ahaung` tail → `အောင်`) across every frozen
+            // branch and marking the result exact destabilizes the
+            // anchor for long sentences (verified: the `raahaungkyo:`
+            // segment of the careerAndFamily corpus sentence locks a
+            // kinzi-fabricated branch into every final candidate).
+            // Whole-buffer synthetic-alias rows are unioned below
+            // instead — that is the path the `ah-` convention's
+            // panel-reachability guarantee runs through.
             let exactTailHits = tailHits.filter {
                 Romanization.aliasReading($0.reading) == tailAlias
             }
@@ -1566,12 +1603,34 @@ public final class BurmeseEngine: @unchecked Sendable {
                     ))
                 }
             }
+            // TASK-084: whole-buffer exact rows are full-surface hits in
+            // their own right — without this union a long synthetic-alias
+            // buffer (`ahathaing:ahawaing:`) only ever sees fabricated
+            // `<frozen prefix><tail>` compositions.
+            if !wholeBufferExactHits.isEmpty {
+                var seen = Set(composed.map { "\($0.surface)\u{0}\($0.reading)" })
+                for hit in wholeBufferExactHits
+                where seen.insert("\(hit.surface)\u{0}\(hit.reading)").inserted {
+                    composed.append(hit)
+                }
+            }
             lexiconCandidates = composed
         } else {
-            lexiconCandidates = candidateStore.lookup(
+            var pooled = candidateStore.lookup(
                 prefix: aliasPrefix,
                 previousSurface: previousSurface
             )
+            // TASK-084: union the whole-buffer exact hits so a
+            // matched-alias exact row is always in the pool even when
+            // the prefix window or alias-variant routing missed it.
+            if !wholeBufferExactHits.isEmpty {
+                var seen = Set(pooled.map { "\($0.surface)\u{0}\($0.reading)" })
+                for hit in wholeBufferExactHits
+                where seen.insert("\(hit.surface)\u{0}\(hit.reading)").inserted {
+                    pooled.append(hit)
+                }
+            }
+            lexiconCandidates = pooled
         }
 
         // Word-lattice decoder (task: long-sentence quality debt). The
@@ -1871,11 +1930,17 @@ public final class BurmeseEngine: @unchecked Sendable {
         // exemption resurfaced them at rank 0 on exact-reading input
         // (`tang+` → `တင္`, `.ka` → `့က`, `vu.d+` → `ဗုဒ္`,
         // `myi.u:` → `မျိူး`).
+        // TASK-084: a hit also counts as exact when its MATCHED
+        // alias/compose reading equals the typed buffer — the
+        // `exactMatchedHitKeys` membership covers builder-synthesized
+        // alias rows whose canonical reading can never reconstruct the
+        // typed convention (`ahain` → canonical `ain2`).
         let exactReadingLexiconSurfaces: Set<String> = {
             var surfaces = Set<String>()
             for hit in lexiconCandidates {
                 if exactAliasPrefixes.contains(Romanization.aliasReading(hit.reading))
-                    || exactComposePrefixes.contains(Romanization.composeLookupKey(hit.reading)),
+                    || exactComposePrefixes.contains(Romanization.composeLookupKey(hit.reading))
+                    || exactMatchedHitKeys.contains("\(hit.surface)\u{0}\(hit.reading)"),
                    !Self.isEncodingInvalidSurface(hit.surface) {
                     surfaces.insert(hit.surface)
                 }
@@ -2033,9 +2098,18 @@ public final class BurmeseEngine: @unchecked Sendable {
 
         let primaryGrammar = Array(grammarCandidates.prefix(3))
         let remainingGrammar = Array(grammarCandidates.dropFirst(3))
-        let exactAliasLexicon = uniqueLexiconCandidates.filter { exactAliasPrefixes.contains($0.aliasReading) }
+        // TASK-084: matched-alias exact hits join the alias-exact pool —
+        // they are equality matches of the user's typed keystrokes via
+        // a builder-synthesized index row, the same trust level as a
+        // reconstructed alias-exact hit.
+        let exactAliasLexicon = uniqueLexiconCandidates.filter {
+            exactAliasPrefixes.contains($0.aliasReading)
+                || exactMatchedHitKeys.contains(lexiconCandidateKey($0))
+        }
         let exactComposeLexicon = uniqueLexiconCandidates.filter {
-            !exactAliasPrefixes.contains($0.aliasReading) && exactComposePrefixes.contains($0.composeReading)
+            !exactAliasPrefixes.contains($0.aliasReading)
+                && !exactMatchedHitKeys.contains(lexiconCandidateKey($0))
+                && exactComposePrefixes.contains($0.composeReading)
         }
         let prioritizedLexicon = Array(
             (exactAliasLexicon.isEmpty ? exactComposeLexicon : exactAliasLexicon)

@@ -22,6 +22,18 @@ public protocol CandidateStore: Sendable {
     /// `lookupExact` — its pre-penalised score is what the panel
     /// ranker already expects.
     func lookupExactForLattice(reading: String) -> [(candidate: Candidate, aliasPenalty: Int)]
+
+    /// TASK-084: candidates whose stored alias reading equals
+    /// `aliasReading` VERBATIM — no compose-key fallback and no
+    /// reading-variant expansion. This is the keystroke-faithful
+    /// matched-alias set: a hit is returned exactly when the user's
+    /// typed alias (separators and tone keys intact) is indexed for
+    /// it, which covers builder-synthesized alias rows (`ah…`/`a…`
+    /// U+1021 conventions, loanword cluster rewrites) that a
+    /// canonical-reading reconstruction can never recognize. Callers
+    /// that should also accept separator-stripped compose matches or
+    /// the y↔r lookup rewrites keep using `lookupExact`.
+    func lookupAliasExact(aliasReading: String) -> [Candidate]
 }
 
 extension CandidateStore {
@@ -37,6 +49,17 @@ extension CandidateStore {
         // fall back to treating every hit as alias_penalty 0. Real stores
         // (SQLite) override to read the column.
         lookupExact(reading: reading, previousSurface: nil).map { ($0, 0) }
+    }
+
+    public func lookupAliasExact(aliasReading: String) -> [Candidate] {
+        // Default: generic stores have no matched-alias channel — the
+        // canonical-reading reconstruction is the best available
+        // approximation (pre-TASK-084 semantics). The SQLite store
+        // overrides with a direct equality probe on the alias index.
+        let normalized = Romanization.aliasReading(aliasReading)
+        return lookup(prefix: aliasReading, previousSurface: nil).filter {
+            Romanization.aliasReading($0.reading) == normalized
+        }
     }
 }
 
@@ -54,6 +77,10 @@ public struct EmptyCandidateStore: CandidateStore {
     }
 
     public func lookupExactForLattice(reading: String) -> [(candidate: Candidate, aliasPenalty: Int)] {
+        []
+    }
+
+    public func lookupAliasExact(aliasReading: String) -> [Candidate] {
         []
     }
 }

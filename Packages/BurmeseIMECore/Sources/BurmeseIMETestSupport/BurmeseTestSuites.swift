@@ -177,5 +177,6 @@ public enum BurmeseTestSuites {
         LoanwordBareConsonantCodaSuite.suite,
         StackLowerAaShapeFidelitySuite.suite,
         LocativeParticleReachabilitySuite.suite,
+        SynthesizedAliasExactHitSuite.suite,
     ]
 }

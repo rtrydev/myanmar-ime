@@ -124,17 +124,38 @@ public final class SQLiteCandidateStore: CandidateStore, @unchecked Sendable {
         prefixLookupCacheLock.unlock()
 
         var candidates: [Candidate] = []
+        // TASK-084: the range queries below order by `alias_penalty ASC,
+        // rank_score DESC LIMIT 20` with no preference for exact-length
+        // matches, so a penalty-1 exact row (`ahain` → `အိမ်`) can be
+        // crowded out of the window by 20 penalty-0 completions of
+        // longer readings sharing the prefix. Union the exact-equality
+        // rows first — exact matches of the typed prefix are the
+        // strongest hits this lookup can return and must never be lost
+        // to same-prefix completions. The combined result is what the
+        // prefix LRU caches, so the hot path pays the equality probes
+        // only on a cache miss. Union rows are gated by
+        // `isExactTrustworthyRow`: corpus rows whose reading silently
+        // under-covers the surface (`၁ဝ` ← `wa`, `၃က` ← `ka`,
+        // `သို႔` ← `tho`) used to hide behind the LIMIT window and
+        // must not be rescued past it; the window rows themselves are
+        // returned exactly as before.
         for variant in Romanization.lookupAliasReadings(for: prefix) {
             let upperBound = prefixUpperBound(variant.aliasReading)
+            let exactRows = lookupExactAlias(reading: variant.aliasReading).filter {
+                Romanization.isExactTrustworthyRow(surface: $0.surface, reading: $0.reading)
+            }
             candidates += applyLookupPenalty(
-                lookupPrefix(prefix: variant.aliasReading, upperBound: upperBound),
+                exactRows + lookupPrefix(prefix: variant.aliasReading, upperBound: upperBound),
                 variant.extraPenalty
             )
         }
         for variant in Romanization.lookupComposeReadings(for: prefix) {
             let upperBound = prefixUpperBound(variant.composeReading)
+            let exactRows = lookupExactCompose(reading: variant.composeReading).filter {
+                Romanization.isExactTrustworthyRow(surface: $0.surface, reading: $0.reading)
+            }
             candidates += applyLookupPenalty(
-                lookupComposePrefix(prefix: variant.composeReading, upperBound: upperBound),
+                exactRows + lookupComposePrefix(prefix: variant.composeReading, upperBound: upperBound),
                 variant.extraPenalty
             )
         }
@@ -200,6 +221,17 @@ public final class SQLiteCandidateStore: CandidateStore, @unchecked Sendable {
         }
         latticeLookupCacheLock.unlock()
         return deduped
+    }
+
+    public func lookupAliasExact(aliasReading: String) -> [Candidate] {
+        // TASK-084: direct equality probe on `reading_alias_index` —
+        // verbatim matched-alias semantics, no compose fallback and no
+        // variant expansion. Reuses the prepared exact statement
+        // (indexed `alias_reading = ?` probe), so the cost is one
+        // B-tree lookup per call; callers on the per-keystroke hot
+        // path issue at most one of these per update.
+        guard !aliasReading.isEmpty else { return [] }
+        return deduplicateCandidates(lookupExactAlias(reading: aliasReading))
     }
 
     public func lookupExact(reading: String, previousSurface: String?) -> [Candidate] {

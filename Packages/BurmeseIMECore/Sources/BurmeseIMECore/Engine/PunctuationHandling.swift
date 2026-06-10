@@ -436,6 +436,25 @@ extension BurmeseEngine {
                 reading: displayBuffer,
                 previousSurface: context.last
             )
+            // TASK-084: builder-synthesized alias rows (`ah…`/`a…`
+            // U+1021 conventions) match the typed buffer verbatim in
+            // the alias index but their canonical reading can never
+            // reconstruct it, so the alias-exact gate below missed
+            // them. Query the verbatim matched-alias set once and
+            // accept membership as alias-exactness. Gated by
+            // `isExactTrustworthyRow` so reading-under-covering corpus
+            // residue is not promoted; the reconstruction branch keeps
+            // its pre-TASK-084 semantics untouched.
+            let aliasExactKeys: Set<String> = Set(
+                candidateStore.lookupAliasExact(aliasReading: fullAlias)
+                    .filter {
+                        Romanization.isExactTrustworthyRow(
+                            surface: $0.surface,
+                            reading: $0.reading
+                        )
+                    }
+                    .map { "\($0.surface)\u{0}\($0.reading)" }
+            )
             var front: [Candidate] = []
             var seen: Set<String> = []
             for hit in exactHits {
@@ -445,9 +464,11 @@ extension BurmeseEngine {
                 // separators — for a buffer like `'thar` that would
                 // resurface `သာ` and silently drop the user's typed
                 // apostrophe from rank 0. A row only qualifies when
-                // its canonical reading covers the typed buffer
-                // alias verbatim.
-                guard Romanization.aliasReading(hit.reading) == fullAlias,
+                // its canonical reading covers the typed buffer alias
+                // verbatim OR the alias index carries the typed alias
+                // for it verbatim (matched-alias exactness, TASK-084).
+                guard Romanization.aliasReading(hit.reading) == fullAlias
+                        || aliasExactKeys.contains("\(hit.surface)\u{0}\(hit.reading)"),
                       !hit.surface.isEmpty,
                       !Self.hasAsciiScalars(hit.surface),
                       // TASK-081 follow-up: encoding-broken corpus rows
