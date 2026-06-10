@@ -90,7 +90,7 @@ public final class BurmeseEngine: @unchecked Sendable {
     internal static let lmDominanceThreshold: Double = 1.0
 
     internal let parser: SyllableParser
-    private let candidateStore: any CandidateStore
+    internal let candidateStore: any CandidateStore
     /// Word-lattice / segmentation decoder layered on top of the parser
     /// + lexicon. Initialised eagerly because it captures the LM and
     /// store references that are passed in at engine-init time anyway.
@@ -98,7 +98,7 @@ public final class BurmeseEngine: @unchecked Sendable {
     /// always invoke it; an empty store / null LM degrade it into a
     /// pass-through that returns `[]` quickly.
     private let latticeDecoder: WordLatticeDecoder
-    private let historyStore: any UserHistoryStore
+    internal let historyStore: any UserHistoryStore
     internal let languageModel: any LanguageModel
 
     /// Sliding-window threshold for the full N-best parse. When the
@@ -168,6 +168,17 @@ public final class BurmeseEngine: @unchecked Sendable {
     }
     private var windowSplitCache: [WindowSplitCache] = []
     private static let maxWindowSplitCache = 8
+
+    /// TASK-078: memoised results of `evidenceAlignedPunctPrefix`,
+    /// keyed on `prefixSlice + US + context.last`. The frozen prefix at
+    /// an embedded composing-punct split is stable across the
+    /// keystrokes that extend the active suffix, so the recursive
+    /// `updateInternal` evidence pass runs once per new split point
+    /// instead of once per keystroke. Lexicon and LM are immutable for
+    /// the life of the engine; history mutates only via
+    /// `recordSelection`, which flushes this cache.
+    internal var punctPrefixRenderCache: [String: String] = [:]
+    internal static let maxPunctPrefixRenderCache = 64
 
 
     /// History of anchors (checkpoints) ordered by `normalized.count`.
@@ -487,6 +498,7 @@ public final class BurmeseEngine: @unchecked Sendable {
             stackInferenceParseCache.removeAll()
             grammarParseCache.removeAll()
             windowSplitCache.removeAll()
+            punctPrefixRenderCache.removeAll()
             lastHistoryKey = ""
             cacheLock.unlock()
             return CompositionState(committedContext: context)
@@ -632,9 +644,16 @@ public final class BurmeseEngine: @unchecked Sendable {
             }()
             let effectivePrefix: String
             if activeBufferIsBurmeseComposable {
-                effectivePrefix = renderFrozenPunctSegments(
+                // TASK-078: the prefix the user already saw rendered
+                // (e.g. ya-pin `ကျောင်း` for `kyaung:`) must not flip
+                // to the parser-canonical sibling (`ကြောင်း`) when the
+                // split fires. Re-derive the prefix surface from the
+                // same lexicon/LM/history evidence the pre-split
+                // pipeline used, falling back to the parser-only
+                // absorb render when no evidence candidate exists.
+                effectivePrefix = evidenceAlignedPunctPrefix(
                     prefixSlice,
-                    absorbTrailingToneIfBurmeseFollows: true
+                    context: context
                 )
             } else {
                 effectivePrefix = split.renderedPrefix
@@ -656,6 +675,18 @@ public final class BurmeseEngine: @unchecked Sendable {
                     )
                 }
             }
+            // TASK-078: the early return below used to skip the
+            // whole-buffer exact alias lookup and the full-buffer
+            // history read entirely, making curated multi-word rows
+            // (`myar:ar:` → `များအား`, `sany*:sar:` → `စဉ်းစား`,
+            // `ng*:ka` → `၎င်းက`) unreachable and never promoting a
+            // previously committed selection. Inject both evidence
+            // sources ahead of the composed prefix+suffix candidates.
+            state.candidates = injectWholeBufferPunctSplitEvidence(
+                into: state.candidates,
+                displayBuffer: displayBuffer,
+                context: context
+            )
             // The inner update set lastHistoryKey to the active suffix's
             // alias (e.g. `la` for `ka.la`) — overwriting it here with
             // the full-buffer alias keeps `recordSelection` from
@@ -4264,6 +4295,12 @@ public final class BurmeseEngine: @unchecked Sendable {
         }
         guard !key.isEmpty else { return }
         historyStore.record(reading: key, surface: candidate.surface)
+        // TASK-078: the memoised punct-split prefix renders fold in
+        // history evidence; a fresh commit can change which surface
+        // history prefers for a prefix reading, so drop them.
+        cacheLock.lock()
+        punctPrefixRenderCache.removeAll()
+        cacheLock.unlock()
     }
 
     /// Cancel composition: return the raw buffer unchanged.

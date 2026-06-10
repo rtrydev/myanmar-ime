@@ -172,5 +172,6 @@ public enum BurmeseTestSuites {
         NgaOnsetKinziInferenceSuite.suite,
         AbsorbedExactAliasReachabilitySuite.suite,
         SuffixingParticleReachabilitySuite.suite,
+        EmbeddedToneSplitLexiconFidelitySuite.suite,
     ]
 }

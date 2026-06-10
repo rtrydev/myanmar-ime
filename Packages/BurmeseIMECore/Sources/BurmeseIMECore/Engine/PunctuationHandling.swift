@@ -314,6 +314,195 @@ extension BurmeseEngine {
         return nil
     }
 
+    /// TASK-078: lexicon/LM/history-aligned rendering of the frozen
+    /// prefix at an embedded composing-punct split.
+    ///
+    /// The parser-only `renderFrozenPunctSegments` render always picks
+    /// the DP's aliasCost-first sibling, which flips a prefix the user
+    /// already saw rendered correctly (`kyaung:` → `ကျောင်း` flipped
+    /// to `ကြောင်း` on the very next keystroke, `myar:` → `များ`
+    /// flipped to `မြား`) and wedges raw ASCII `*`/`:` between Myanmar
+    /// scalars for ဉ်/ည်-coda readings (`sany*:` → `စန်ယ*:`).
+    ///
+    /// Instead, re-run the full pipeline on the prefix slice — exactly
+    /// what rendered it before the split fired — and adopt the first
+    /// candidate that
+    ///   - is not a pure-lexicon completion (lexicon hits for a prefix
+    ///     reading include longer words such as `to.` → `တို့၌`; the
+    ///     prefix must cover exactly the typed slice), and
+    ///   - covers exactly the slice's alias reading, and
+    ///   - is a pure Myanmar surface (no leaked ASCII).
+    /// Grammar candidates carry absorbed lexicon scores, ya-pin
+    /// promotion, and LM ranking; history candidates carry the user's
+    /// own committed choice. When no candidate qualifies (bare-engine
+    /// shapes, unparseable slices) the parser-only absorb render is
+    /// kept, so engines without evidence sources behave exactly as
+    /// before.
+    ///
+    /// Memoised in `punctPrefixRenderCache`: the slice is stable while
+    /// the user extends the active suffix, so the recursive
+    /// `updateInternal` runs once per new split point, not per
+    /// keystroke.
+    internal func evidenceAlignedPunctPrefix(
+        _ slice: String,
+        context: [String]
+    ) -> String {
+        let cacheKey = slice + "\u{1F}" + (context.last ?? "")
+        cacheLock.lock()
+        if let cached = punctPrefixRenderCache[cacheKey] {
+            cacheLock.unlock()
+            return cached
+        }
+        cacheLock.unlock()
+        var resolved = renderFrozenPunctSegments(
+            slice,
+            absorbTrailingToneIfBurmeseFollows: true
+        )
+        let sliceAlias = Romanization.aliasReading(slice)
+        // The evidence candidate must agree with the baseline on how
+        // the slice ENDS. A standalone parse of the slice is free to
+        // re-interpret the trailing punctuation (`ka.` standalone maps
+        // the dot to `။` under punctuation mapping; `ka*.` standalone
+        // absorbs `*` as asat then `.` as creaky), but in split
+        // position the baseline's absorb/flush decision is the
+        // product-pinned one — only the SIBLING choice earlier in the
+        // surface (ya-pin vs ya-yit, ဉ် vs န်ယ) may differ. Comparing
+        // the final scalar enforces exactly that: tone-flip prefixes
+        // share their tail scalar (`ကြောင်း`/`ကျောင်း` both end
+        // U+1038), while a re-interpreted trailing punct never does
+        // (`က*.` ends ASCII `.`, `က။` ends U+104B). An empty baseline
+        // rejects all evidence and keeps pre-TASK-078 behaviour.
+        let baselineTail = resolved.unicodeScalars.last
+        // Evidence may only flip between pure-Myanmar sibling renders.
+        // When the baseline deliberately preserved literal ASCII punct
+        // (`ka'.` → `က'။`, `ka*.` → `က*.`, `sany*:` → `စန်ယ*:`), the
+        // literal-preservation behaviour is product-pinned — a
+        // standalone re-parse that consumed the punct (`က။`, `က့်`)
+        // must not silently erase what the user typed. Whole-buffer
+        // exact-alias injection still covers the curated readings
+        // behind those shapes (`sany*:sar:` → `စဉ်းစား`).
+        if !resolved.isEmpty, !Self.hasAsciiScalars(resolved) {
+            let inner = updateInternal(buffer: slice, context: context)
+            for cand in inner.candidates {
+                guard cand.source != .lexicon,
+                      !cand.surface.isEmpty,
+                      !Self.hasAsciiScalars(cand.surface),
+                      cand.surface.unicodeScalars.last == baselineTail,
+                      Romanization.aliasReading(cand.reading) == sliceAlias else {
+                    continue
+                }
+                resolved = cand.surface
+                break
+            }
+        }
+        cacheLock.lock()
+        if punctPrefixRenderCache.count >= Self.maxPunctPrefixRenderCache {
+            punctPrefixRenderCache.removeAll(keepingCapacity: true)
+        }
+        punctPrefixRenderCache[cacheKey] = resolved
+        cacheLock.unlock()
+        return resolved
+    }
+
+    /// TASK-078: whole-buffer evidence for embedded composing-punct
+    /// split buffers. The split branch recurses only on the active
+    /// suffix, so without this pass the exact alias/compose rows for
+    /// the COMPLETE reading (curated multi-word entries such as
+    /// `myar:ar:` → `များအား`, digit-stripped ဉ-coda words such as
+    /// `sany*:sar:` → `စဉ်းစား`, and `ng*:ka` → `၎င်းက`) never reach
+    /// the panel, and a selection previously committed under the
+    /// full-buffer alias is never promoted.
+    ///
+    /// Exact lexicon hits are inserted ahead of the composed
+    /// prefix+suffix candidates (penalty-0 exact hits are the
+    /// strongest signal this branch can have); history hits are then
+    /// promoted to the very front, mirroring the regular pipeline's
+    /// merge order. Buffers carrying a literal ASCII digit skip the
+    /// lexicon injection — digits are literal (durable rule), and the
+    /// alias-normalised lookup would otherwise resurface
+    /// digit-stripped rows without the user's typed digit.
+    internal func injectWholeBufferPunctSplitEvidence(
+        into candidates: [Candidate],
+        displayBuffer: String,
+        context: [String]
+    ) -> [Candidate] {
+        var merged = candidates
+        let hasAsciiDigit = displayBuffer.unicodeScalars.contains {
+            (0x30...0x39).contains($0.value)
+        }
+        if !hasAsciiDigit {
+            let fullAlias = Romanization.aliasReading(displayBuffer)
+            let exactHits = candidateStore.lookupExact(
+                reading: displayBuffer,
+                previousSurface: context.last
+            )
+            var front: [Candidate] = []
+            var seen: Set<String> = []
+            for hit in exactHits {
+                guard front.count < Self.maxWholeBufferExactInjection else { break }
+                // Alias-exact only. `lookupExact` also folds in
+                // compose-key variants, which strip the `'`/`+`
+                // separators — for a buffer like `'thar` that would
+                // resurface `သာ` and silently drop the user's typed
+                // apostrophe from rank 0. A row only qualifies when
+                // its canonical reading covers the typed buffer
+                // alias verbatim.
+                guard Romanization.aliasReading(hit.reading) == fullAlias,
+                      !hit.surface.isEmpty,
+                      !Self.hasAsciiScalars(hit.surface),
+                      seen.insert(hit.surface).inserted else {
+                    continue
+                }
+                // Move-or-insert: when the composed prefix+suffix list
+                // already produced the same surface, promote THAT
+                // candidate (keeping its grammar/history source) so a
+                // later `evidenceAlignedPunctPrefix` scan over this
+                // panel — which skips pure-lexicon completions — still
+                // sees the surface as exact-reading evidence when this
+                // buffer becomes the frozen prefix of a longer one.
+                if let existing = merged.firstIndex(where: { $0.surface == hit.surface }) {
+                    front.append(merged.remove(at: existing))
+                } else {
+                    front.append(Candidate(
+                        surface: hit.surface,
+                        reading: displayBuffer,
+                        source: hit.source,
+                        score: hit.score
+                    ))
+                }
+            }
+            if !front.isEmpty {
+                merged = front + merged
+            }
+        }
+        // History promotion mirrors the regular path: walk lowest
+        // score first so the strongest entry lands at index 0 after
+        // successive front-inserts; surfaces already present are
+        // moved, unseen surfaces injected.
+        if settings?.learningEnabled ?? true {
+            let historyCandidates = historyStore.lookup(
+                prefix: Romanization.aliasReading(displayBuffer),
+                previousSurface: context.last
+            )
+            for historyCandidate in historyCandidates.sorted(by: { $0.score < $1.score }) {
+                if let existing = merged.firstIndex(where: { $0.surface == historyCandidate.surface }) {
+                    let keeper = merged.remove(at: existing)
+                    merged.insert(keeper, at: 0)
+                } else {
+                    merged.insert(historyCandidate, at: 0)
+                }
+            }
+        }
+        return merged
+    }
+
+    /// Cap on whole-buffer exact-hit injection at an embedded
+    /// composing-punct split. Mirrors the regular pipeline's
+    /// prioritized-lexicon cap (2) plus one slot for surface variants
+    /// that share the exact reading (`ng*:to.` carries both `၎င်းတို့`
+    /// and `င်းတို့`).
+    internal static let maxWholeBufferExactInjection = 3
+
     private func shouldSplitEmbeddedComposingPunct(
         in buffer: String,
         at idx: String.Index
@@ -509,6 +698,15 @@ extension BurmeseEngine {
         s.unicodeScalars.contains { scalar in
             (0x41...0x5A).contains(scalar.value) || (0x61...0x7A).contains(scalar.value)
         }
+    }
+
+    /// Any ASCII scalar at all — letters, digits, or punctuation.
+    /// Used by the TASK-078 evidence paths, which only ever adopt
+    /// pure-Myanmar surfaces (a sibling like `သ:`/`စဉ်:` would wedge
+    /// raw punctuation between Myanmar scalars once composed with the
+    /// active suffix).
+    internal static func hasAsciiScalars(_ s: String) -> Bool {
+        s.unicodeScalars.contains { $0.value < 0x80 }
     }
 
     private static func hasAdjacentComposingPunctuation(
