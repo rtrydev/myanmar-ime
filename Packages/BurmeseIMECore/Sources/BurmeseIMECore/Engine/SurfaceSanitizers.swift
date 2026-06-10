@@ -176,6 +176,73 @@ extension BurmeseEngine {
         }
     }
 
+    /// TASK-081 follow-up: narrow encoding-validity scan for
+    /// lexicon-/history-attested surfaces. The attested-surface
+    /// exemption (`preservedSurfaces` above) exists for *lexicalized
+    /// irregular* spellings — shapes a syllable grammar never
+    /// generates but that are standard dictionary orthography
+    /// (`ယောက်ျား`, `ကျွန်ုပ်`, `ရှ်`-coda loanwords). The shipped
+    /// corpus also carries a residue of *encoding-broken* rows
+    /// (segmentation/typo artifacts), and exempting those resurfaces
+    /// them on exact-reading input (`tang+` → `တင္`, `.ka` → `့က`,
+    /// `myi.u:` → `မျိူး`, `aykya:` → `ေကြး`). Four shapes are
+    /// flagged, each a hard Unicode-storage-order violation rather
+    /// than a grammar irregularity:
+    ///   1. surface-initial dependent/combining mark (no base to
+    ///      attach to);
+    ///   2. dangling U+1039 virama (surface-final, or not followed
+    ///      by a stackable base consonant);
+    ///   3. U+1031 e-vowel not preceded by a base consonant,
+    ///      independent vowel, or medial (storage order places 1031
+    ///      after the consonant cluster it renders before);
+    ///   4. the `102D 1030` dependent-vowel collision (ိ + ူ), a
+    ///      typo cluster for the only legal cross-category chain
+    ///      `102D 102F` (ို).
+    /// Surfaces passing these checks may still fail the structural
+    /// legality scan — that is exactly the lexicalized-irregular
+    /// class the exemption protects. Keep this scan narrow: it must
+    /// never grow into a second grammar. The durable fix is
+    /// corpus_builder-side filtering plus regeneration; this engine
+    /// gate keeps the malformed residue out of the panel until then.
+    @_spi(Testing) public static func isEncodingInvalidSurface(_ surface: String) -> Bool {
+        let scalars = surface.unicodeScalars.map(\.value)
+        guard let first = scalars.first else { return false }
+        if isMyanmarDependentMarkScalar(first) { return true }
+        for (i, value) in scalars.enumerated() {
+            switch value {
+            case 0x1039:
+                // Virama must be followed by a stackable base.
+                guard i + 1 < scalars.count,
+                      (0x1000...0x1021).contains(scalars[i + 1])
+                        || scalars[i + 1] == 0x103F
+                else { return true }
+            case 0x1031:
+                // e-vowel storage order: must follow a base consonant,
+                // independent vowel, great-sa, or medial.
+                guard i >= 1,
+                      (0x1000...0x102A).contains(scalars[i - 1])
+                        || scalars[i - 1] == 0x103F
+                        || (0x103B...0x103E).contains(scalars[i - 1])
+                else { return true }
+            case 0x1030:
+                if i >= 1, scalars[i - 1] == 0x102D { return true }
+            default:
+                break
+            }
+        }
+        return false
+    }
+
+    /// Myanmar dependent marks that cannot open a surface: dependent
+    /// vowel signs (102B–1032), anusvara/dot-below/visarga (1036–1038),
+    /// asat (103A), virama (1039), and the medials (103B–103E).
+    @inline(__always)
+    private static func isMyanmarDependentMarkScalar(_ value: UInt32) -> Bool {
+        (0x102B...0x1032).contains(value)
+            || (0x1036...0x103A).contains(value)
+            || (0x103B...0x103E).contains(value)
+    }
+
     /// TASK-012: drop any candidate whose surface contains an
     /// independent-vowel scalar (U+1021..U+102A) immediately
     /// followed by virama (U+1039). That adjacency is structurally

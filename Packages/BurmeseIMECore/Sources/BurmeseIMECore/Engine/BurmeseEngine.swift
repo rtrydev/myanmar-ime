@@ -1862,11 +1862,21 @@ public final class BurmeseEngine: @unchecked Sendable {
         // ranking: injected candidates land past the page cap.
         let exactAliasPrefixes = Set(Romanization.lookupAliasReadings(for: normalized).map(\.aliasReading))
         let exactComposePrefixes = Set(Romanization.lookupComposeReadings(for: normalized).map(\.composeReading))
+        // TASK-081 follow-up: encoding-broken store rows (dangling
+        // virama, orphan leading mark, `1031`-before-base, `102D 1030`
+        // typo cluster — corpus segmentation artifacts, not
+        // lexicalized irregulars) are excluded here, so they are
+        // neither preserved through the sanitizers nor re-injected
+        // for reachability. Without this filter the attested-surface
+        // exemption resurfaced them at rank 0 on exact-reading input
+        // (`tang+` → `တင္`, `.ka` → `့က`, `vu.d+` → `ဗုဒ္`,
+        // `myi.u:` → `မျိူး`).
         let exactReadingLexiconSurfaces: Set<String> = {
             var surfaces = Set<String>()
             for hit in lexiconCandidates {
                 if exactAliasPrefixes.contains(Romanization.aliasReading(hit.reading))
-                    || exactComposePrefixes.contains(Romanization.composeLookupKey(hit.reading)) {
+                    || exactComposePrefixes.contains(Romanization.composeLookupKey(hit.reading)),
+                   !Self.isEncodingInvalidSurface(hit.surface) {
                     surfaces.insert(hit.surface)
                 }
             }
@@ -2051,8 +2061,12 @@ public final class BurmeseEngine: @unchecked Sendable {
         // orthography and must stay exempt.
         let attestedExactReadingSurfaces: Set<String> = {
             var surfaces = exactReadingLexiconSurfaces
+            // The encoding-invalid filter applies to history too: a
+            // surface committed while a malformed row was reachable
+            // must not keep resurrecting it (TASK-081 follow-up).
             for historyCandidate in historyCandidates
-            where Romanization.aliasReading(historyCandidate.reading) == aliasPrefix {
+            where Romanization.aliasReading(historyCandidate.reading) == aliasPrefix
+                && !Self.isEncodingInvalidSurface(historyCandidate.surface) {
                 surfaces.insert(historyCandidate.surface)
             }
             return surfaces
@@ -3003,6 +3017,9 @@ public final class BurmeseEngine: @unchecked Sendable {
                 let promoteToFront = droppedTailHasAsciiLetters
                 var frontHits: [Candidate] = []
                 for hit in wholeBufferHits {
+                    // TASK-081 follow-up: never inject encoding-broken
+                    // corpus rows (this path runs after the sanitizers).
+                    guard !Self.isEncodingInvalidSurface(hit.candidate.surface) else { continue }
                     guard existing.insert(hit.candidate.surface).inserted else { continue }
                     let candidate = Candidate(
                         surface: hit.candidate.surface,

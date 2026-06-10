@@ -450,6 +450,10 @@ extension BurmeseEngine {
                 guard Romanization.aliasReading(hit.reading) == fullAlias,
                       !hit.surface.isEmpty,
                       !Self.hasAsciiScalars(hit.surface),
+                      // TASK-081 follow-up: encoding-broken corpus rows
+                      // (dangling virama, orphan leading mark, …) must
+                      // not be injected ahead of composed candidates.
+                      !Self.isEncodingInvalidSurface(hit.surface),
                       seen.insert(hit.surface).inserted else {
                     continue
                 }
