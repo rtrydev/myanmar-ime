@@ -16,6 +16,7 @@ from .segmenter import (
     _has_non_myanmar_leading_scalar,
     _has_non_myanmar_scalar,
     _is_combining_mark_only,
+    _is_encoding_invalid_surface,
 )
 from .vocab import CuratedEntry, SPECIALS, Vocab
 
@@ -110,11 +111,13 @@ def write_tsv(
                 _is_combining_mark_only(surface)
                 or _has_non_myanmar_leading_scalar(surface)
                 or _has_non_myanmar_scalar(surface)
+                or _is_encoding_invalid_surface(surface)
             ):
                 raise ValueError(
                     f"lexicon.write_tsv: refusing to write polluted "
                     f"surface {surface!r} (non-Myanmar scalar, "
-                    f"BOM-bearing, digit+mark orphan, or combining-mark-only)"
+                    f"BOM-bearing, digit+mark orphan, combining-mark-only, "
+                    f"or encoding-invalid storage order)"
                 )
             count = corpus_counts.get(surface, 0)
             override = overrides.get(surface)

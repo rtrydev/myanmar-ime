@@ -48,8 +48,8 @@ swift build
 swift run TestRunner
 ```
 
-Current local status: 1636/1636 cases and 8959/8959 assertions pass on
-macOS/Linux; Windows reports 1647/1647 and 8998/8998 (extra cases from
+Current local status: 1714/1714 cases and 9335/9335 assertions pass on
+macOS/Linux; Windows reports 1725/1725 and 9374/9374 (extra cases from
 the `os(Windows)` recognition branches added during the Phase 1 port).
 `swift test` is secondary; plain SPM toolchains may not provide XCTest.
 

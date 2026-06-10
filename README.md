@@ -15,8 +15,8 @@ libadwaita Preferences app packaged as `ibus-myangler.deb`; see
 TSF text service DLL plus a WPF Preferences app, packaged as an
 unsigned MSI built via WiX; see
 [`native/windows/README.md`](native/windows/README.md). On this checkout, `swift run TestRunner`
-passes the full shared suite on every supported platform (1636 cases
-on macOS/Linux; 1647 on Windows — Windows recognises one extra
+passes the full shared suite on every supported platform (1714 cases
+on macOS/Linux; 1725 on Windows — Windows recognises one extra
 platform branch in the bench-baseline parity checks).
 
 ---
@@ -415,15 +415,15 @@ with a summary like:
 
 ```text
 === Summary ===
-  Cases: 1636/1636 passed
-  Assertions: 8959/8959 passed
-ALL 8959 TESTS PASSED
+  Cases: 1714/1714 passed
+  Assertions: 9335/9335 passed
+ALL 9335 TESTS PASSED
 ```
 
 The exact totals are platform-dependent: Windows recognises an extra
 `os(Windows)` branch in the platform-key suite and an extra entry in the
 bench-baseline scenario-parity check, so a clean Windows run reports
-1647/1647 cases and 8998/8998 assertions. The shape is the same — every
+1725/1725 cases and 9374/9374 assertions. The shape is the same — every
 case in `BurmeseTestSuites.all` must pass on every supported platform.
 
 Use the right engine layer for a test:

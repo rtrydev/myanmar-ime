@@ -610,7 +610,31 @@ extension SyllableParser {
                             if case .seed = previous.matchRef { return true }
                             return false
                         }()
-                        if !previousIsSeed || vowelEnd < n { continue }
+                        // Off-seed (already-emitted Burmese context) the
+                        // standalone scalar would land between consonant
+                        // bases — always mid-surface pollution; skip.
+                        if !previousIsSeed {
+                            continue
+                        }
+                        // At the seed the scalar is surface-initial, so it
+                        // cannot sit between consonant bases. A surface-
+                        // initial INDEPENDENT VOWEL (U+1023..U+102A)
+                        // followed by a new syllable is legal word-initial
+                        // Burmese — `ii` + `py` -> ဤပြ, `oo` + `gar` ->
+                        // ဩဂါ — and nothing precedes it, so it is never the
+                        // `<consonant><independent-vowel>` shape this gate
+                        // exists to suppress (TASK-007). Allow it. Free-
+                        // standing particles (U+104C..U+104F) still have
+                        // nothing to attach to at the seed, so keep
+                        // skipping them when more buffer follows. Typed-
+                        // alone usage (vowelEnd == n) is allowed for both.
+                        if vowelEnd < n {
+                            let firstOut =
+                                vowelEntry.myanmar.unicodeScalars.first?.value ?? 0
+                            let isIndependentVowel =
+                                (0x1023...0x102A).contains(firstOut)
+                            if !isIndependentVowel { continue }
+                        }
                     }
                     // TASK-009: a standalone vowel whose Myanmar output
                     // begins with an independent-vowel scalar

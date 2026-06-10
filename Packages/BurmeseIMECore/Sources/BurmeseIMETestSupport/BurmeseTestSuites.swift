@@ -12,6 +12,7 @@ public enum BurmeseTestSuites {
         ReverseRomanizerCreakyToneSuite.suite,
         ClusterAliasSuite.suite,
         KinziInferenceSuite.suite,
+        SeedIndependentVowelOnsetSuite.suite,
         MidBufferStackInferenceSuite.suite,
         ExplicitViramaSuite.suite,
         RepeatedDepVowelSuite.suite,

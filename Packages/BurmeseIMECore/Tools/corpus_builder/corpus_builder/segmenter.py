@@ -108,6 +108,76 @@ def _has_non_myanmar_leading_scalar(token: str) -> bool:
     return False
 
 
+def _is_myanmar_dependent_mark_scalar(value: int) -> bool:
+    """Myanmar dependent marks that cannot open a surface.
+
+    Dependent vowel signs (U+102B–U+1032), anusvara / dot-below /
+    visarga / asat (U+1036–U+103A), virama (U+1039, within that range),
+    and the medials (U+103B–U+103E). Mirrors
+    `SurfaceSanitizers.isMyanmarDependentMarkScalar` in the Swift engine.
+    """
+    return (
+        (0x102B <= value <= 0x1032)
+        or (0x1036 <= value <= 0x103A)
+        or (0x103B <= value <= 0x103E)
+    )
+
+
+def _is_encoding_invalid_surface(token: str) -> bool:
+    """True if `token` violates Unicode storage order in a way no Burmese
+    orthography — regular or irregular — can produce.
+
+    These are corpus segmentation / typo artefacts (`tang+` → ``တင္`` with a
+    dangling virama, `.ka` → ``့က`` with a surface-initial dot-below,
+    `myi.u:` → ``မျိူး`` with a 102D+1030 typo cluster for the legal
+    102D+102F). The engine already filters them at load time
+    (`SurfaceSanitizers.isEncodingInvalidSurface`, TASK-081); this mirrors
+    that predicate exactly so the artefacts never enter the TSV / SQLite /
+    LM in the first place, making the runtime guard belt-and-suspenders
+    rather than load-bearing.
+
+    Crucially this is NARROWER than a legality scan: it flags only
+    storage-order violations, so lexicalised irregular spellings that fail
+    the grammar's legality check but are valid Unicode (``ယောက်ျား``,
+    ``ကျွန်ုပ်``, ``ရှ်``) are deliberately NOT flagged and keep their
+    attested-surface exemption. Four classes:
+
+      1. Surface-initial dependent mark — nothing can precede a combining
+         mark.
+      2. Dangling virama U+1039 not followed by a stackable base
+         (U+1000–U+1021 or U+103F great-sa).
+      3. e-vowel U+1031 not immediately after a base consonant,
+         independent vowel, great-sa, or medial.
+      4. U+1030 (uu-vowel) immediately after U+102D (i-vowel).
+    """
+    if not token:
+        return False
+    scalars = [ord(ch) for ch in token]
+    if _is_myanmar_dependent_mark_scalar(scalars[0]):
+        return True
+    for i, value in enumerate(scalars):
+        if value == 0x1039:
+            if not (
+                i + 1 < len(scalars)
+                and (0x1000 <= scalars[i + 1] <= 0x1021 or scalars[i + 1] == 0x103F)
+            ):
+                return True
+        elif value == 0x1031:
+            if not (
+                i >= 1
+                and (
+                    0x1000 <= scalars[i - 1] <= 0x102A
+                    or scalars[i - 1] == 0x103F
+                    or 0x103B <= scalars[i - 1] <= 0x103E
+                )
+            ):
+                return True
+        elif value == 0x1030:
+            if i >= 1 and scalars[i - 1] == 0x102D:
+                return True
+    return False
+
+
 def _locate_mydict() -> Path | None:
     """Find myWord's dict directory.
 
@@ -327,6 +397,7 @@ class Segmenter:
             if not _is_combining_mark_only(p)
             and not _has_non_myanmar_leading_scalar(p)
             and not _has_non_myanmar_scalar(p)
+            and not _is_encoding_invalid_surface(p)
         ]
 
     @staticmethod

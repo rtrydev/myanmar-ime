@@ -12,6 +12,7 @@ from .segmenter import (
     _has_non_myanmar_leading_scalar,
     _has_non_myanmar_scalar,
     _is_combining_mark_only,
+    _is_encoding_invalid_surface,
 )
 
 
@@ -64,15 +65,17 @@ def _is_polluted_surface(surface: str) -> bool:
     """Reject surfaces that must not enter the vocabulary.
 
     Polluted rows baked into a prior TSV round-trip (ellipsis-prefixed,
-    digit+mark orphans, BOM-bearing, ASCII-punct-suffixed) would
-    otherwise be carried forward indefinitely because `build_vocab`
-    unions curated surfaces into the vocab regardless of corpus counts
-    (task 05).
+    digit+mark orphans, BOM-bearing, ASCII-punct-suffixed, or
+    storage-order-invalid corpus artefacts such as dangling-virama and
+    surface-initial-dependent-mark fragments — TASK-081) would otherwise
+    be carried forward indefinitely because `build_vocab` unions curated
+    surfaces into the vocab regardless of corpus counts (task 05).
     """
     return (
         _is_combining_mark_only(surface)
         or _has_non_myanmar_leading_scalar(surface)
         or _has_non_myanmar_scalar(surface)
+        or _is_encoding_invalid_surface(surface)
     )
 
 
