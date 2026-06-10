@@ -3033,14 +3033,36 @@ public final class BurmeseEngine: @unchecked Sendable {
         // ranking promotion, so the letter-chain parses keep rank 0
         // and the bare-engine mid-buffer cleanliness pins
         // (StandaloneParticleMidBufferSuite) are unaffected.
+        // Hot-path gates (TASK-080 perf follow-up): this branch costs a
+        // second full DP parse of the pre-particle prefix on the same
+        // keystroke, so it must only fire when that prefix is plausibly
+        // Burmese. Two cheap pre-conditions:
+        //  1. The right-shrink probe must have accepted the buffer at
+        //     least up to the particle (`droppedTail` no longer than the
+        //     particle key). A garbage buffer that merely *ends* in
+        //     `ei`/`ywe` fails right-shrink long before the tail, so its
+        //     `droppedTail` spans most of the buffer — without this gate
+        //     the keyboard-bashing bench (`garbage_incremental`) paid a
+        //     ~2x p99 spike on the one keystroke whose buffer happened
+        //     to end in `ei`, with every prefix parse then discarded by
+        //     the `isAcceptableParse` filter below anyway.
+        //  2. The prefix must fit inside the composition window. Past
+        //     `compositionWindowSize` the main pipeline freezes a prefix
+        //     and parses only the active tail; a full re-parse of a
+        //     longer prefix here is exactly the cost class the window
+        //     exists to avoid. Lexicon-backed `…၏`/`…၍` entries on long
+        //     buffers stay served by the whole-buffer exact-hit rescue
+        //     above, which is store-LRU-backed.
         if leadingLiteral.isEmpty,
            digitPrefix.isEmpty,
            literalTail.isEmpty,
-           let particle = Self.trailingSuffixingParticle(of: preTrimmedNormalized) {
+           let particle = Self.trailingSuffixingParticle(of: preTrimmedNormalized),
+           droppedTail.count <= particle.roman.count {
             let prefixReading = String(
                 preTrimmedNormalized.dropLast(particle.roman.count)
             )
-            if !prefixReading.isEmpty {
+            if !prefixReading.isEmpty,
+               prefixReading.count <= compositionWindowSize {
                 let prefixParses = cachedGrammarParses(
                     prefixReading,
                     maxResults: 2,
