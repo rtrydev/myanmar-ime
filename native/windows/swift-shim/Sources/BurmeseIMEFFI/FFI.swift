@@ -364,7 +364,7 @@ public func burmese_engine_string_free(_ ptr: UnsafeMutablePointer<CChar>?) {
 
 // MARK: - Helpers
 
-private let BurmeseIMEFFIVersion = "0.1.0"
+private let BurmeseIMEFFIVersion = "0.1.30"
 
 private func jsonString(_ s: String) -> String {
     do {

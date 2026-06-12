@@ -37,7 +37,7 @@
   <Package
     Name="Myangler Burmese IME"
     Manufacturer="Myangler"
-    Version="0.1.29"
+    Version="0.1.30"
     UpgradeCode="B8754B45-25C4-4C47-904B-5C80897E9446"
     Scope="perMachine"
     Compressed="yes">
@@ -68,18 +68,18 @@
     <Upgrade Id="B8754B45-25C4-4C47-904B-5C80897E9446">
       <UpgradeVersion
         Property="NEWERVERSIONFOUND"
-        Minimum="0.1.29"
+        Minimum="0.1.30"
         IncludeMinimum="no"
         OnlyDetect="yes" />
       <UpgradeVersion
         Property="OLDERVERSIONFOUND"
-        Maximum="0.1.29"
+        Maximum="0.1.30"
         IncludeMaximum="no"
         OnlyDetect="no" />
       <UpgradeVersion
         Property="SAMEVERSIONFOUND"
-        Minimum="0.1.29"
-        Maximum="0.1.29"
+        Minimum="0.1.30"
+        Maximum="0.1.30"
         IncludeMinimum="yes"
         IncludeMaximum="yes"
         OnlyDetect="yes" />
@@ -96,7 +96,7 @@
       Message="A newer version of Myangler Burmese IME is already installed. Uninstall it first if you want to install this older build." />
     <Launch
       Condition="NOT SAMEVERSIONFOUND OR Installed"
-      Message="Myangler Burmese IME 0.1.29 is already installed. Use 'Repair' or 'Modify' from Settings -- Apps to reinstall, or uninstall the existing copy first." />
+      Message="Myangler Burmese IME 0.1.30 is already installed. Use 'Repair' or 'Modify' from Settings -- Apps to reinstall, or uninstall the existing copy first." />
 
     <!--
       Media: a single embedded CAB. Compressed=yes on the Package
