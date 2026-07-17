@@ -1,7 +1,10 @@
 **/.build
 **/build
 **/.swiftpm
-.claude
+# Claude Code config. settings.local.json holds per-developer permission
+# state; only the dev-loop pipeline agent definitions are shared.
+.claude/*
+!.claude/agents/
 .codex-home
 **/.DS_Store
 **/.cache
